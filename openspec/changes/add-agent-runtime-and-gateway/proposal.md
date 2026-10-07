@@ -1,0 +1,50 @@
+# Proposal
+
+## Why
+
+The system needs one agent entry point (the hosted explanation agent) and one tool entry point (MCP) that Claude Code, Codex and the hosted agent share under the same backend policy. Without it, each client wires its own path to FinanceLambdasTool and gets its own permissions. FinanceAgent is last in the integration order fixed by FinancialPlanning change `establish-cross-repo-contracts` (platform, then model service, then tool wrappers, then agent/Gateway). Its phase 1 Runtime and Gateway are what make the fixture-backed end-to-end check (contracts test ENV-15) possible.
+
+## What Changes
+
+- Host a **code-based LangGraph agent** in Amazon Bedrock AgentCore Runtime. LangGraph is not replaced by another framework, and the managed "AgentCore harness" is not used.
+- Deploy one **AgentCore Gateway per environment** (MCP protocol) that exposes the FinanceLambdasTool tools. Targets are registered from that environment's released references: `/finplan/<env>/financelambdastool/lambda/<tool>-arn`, the tool catalog and the release manifest. Literal ARNs are never used.
+- Apply **one backend policy** to the hosted agent and to direct MCP clients (Claude Code, Codex). Both reach tools only through the same Gateway, inbound authorizer and tool policy. The Runtime has no direct Lambda invoke path that bypasses the Gateway.
+- **Persist sessions and checkpoints** (LangGraph checkpoints keyed by session and caller). Checkpoints are conversation state only. They never act as authoritative plan state.
+- Make **Amazon Bedrock the default explanation provider** (RESOLVED 2026-10-07, contracts OQ-3). It authenticates with the Runtime IAM role, so **no API-key secret** is needed or created. The provider kind is read from `/finplan/<env>/financeagent/config/explanation-provider` and the Bedrock model or inference-profile ID from `/finplan/<env>/financeagent/config/explanation-model-id`. The provider stays a **pluggable interface**: an OpenAI adapter is an optional future addition and needs no secret now. The explanation model is **Claude Opus 5** through the US cross-region inference profile `us.anthropic.claude-opus-5` (foundation model `anthropic.claude-opus-5`; RESOLVED 2026-10-07, contracts OQ-13 / FA-OQ-4). It was verified ACTIVE in us-east-2 by a read-only `list-inference-profiles` call. The `us.` profile is used, not `global.`, so inference stays in US regions. The ID lives only in the SSM model-id parameter and is never hard-coded; beta and gamma may set a cheaper model ID through the same key. Until model access for Opus 5 is enabled at bootstrap and verified, the agent runs on the deterministic fixture provider. Self-hosted Qwen3.6-27B is a FinanceModel strategy benchmark provider and is **not** an allowed explanation provider.
+- Keep **Bedrock spend inside the `bedrock_explanations` allocation** (default USD 5 of the USD 50 total, `/finplan/shared/financialplanning/config/budget-allocation`). Opus is a high-cost tier, so the controls are: a configurable **per-invocation max-token cap** sent with every Bedrock request; per-turn and per-session token caps; a **per-session budget check before every invocation** that refuses or degrades (tool-only or evidence-only answer) with a clear `BUDGET_EXCEEDED` error when the remaining allocation cannot cover the invocation's worst case; **prompt caching** where the model supports it; the **fixture/mock provider in CI** (no Bedrock calls in the build or beta stages); and the AWS Budgets deny action, which names the FinanceAgent Runtime role. Cost estimates use configured rates or AWS pricing looked up at run time; no prices are recorded in this change.
+- Grant the Runtime role `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` only on the configured inference profile (`arn:aws:bedrock:<region>:<account>:inference-profile/us.anthropic.claude-opus-5`) and the regional foundation-model ARNs it routes to (`arn:aws:bedrock:<us-region>::foundation-model/anthropic.claude-opus-5`), derived from configuration at synth time.
+- **Enable Bedrock model access for Claude Opus 5** as a one-time bootstrap step (console or API call), covered by the user's in-principle approval of the pipeline bootstrap (contracts decision 2026-10-07 item 11). It runs only after the bootstrap IaC is implemented; at run time the exact stacks and a cost estimate are shown first. Nothing is deployed or enabled during spec work.
+- Stream responses over HTTP first. **Bidirectional WebSocket** is enabled only when a documented requirement needs it. None exists in phase 1.
+- Add **agent skills**: versioned, reviewed instruction bundles with a declared tool allow-list. The same bundles can be exported for Claude Code/Codex users.
+- Add optional **website/CLI integration** through published Runtime and Gateway references. The website owner is still contracts OQ-10.
+- Add a **repo pipeline** following the contracts pipeline standard (D6). The gamma Gateway is wired only to gamma Lambdas. Beta, gamma and prod all run **deployed MCP invocation tests**.
+- **Phase 1 only:** everything is fixture-backed. Bedrock narration is switched on later in gamma and prod by a config-only release once Opus 5 model access has been enabled at bootstrap and verified. There is no FinanceModel compute, no paid job approval by the agent and no live trading. The explanation workflows themselves are a separate phase 2 change (`add-explanation-workflows`).
+- **Out of scope:** live trading, Coinbase, AgentCore payments, wallet spending, automated rewriting of risk preferences, and AgentCore long-term memory strategies.
+
+## Capabilities
+
+### New Capabilities
+
+- `agent-runtime-hosting`: the LangGraph agent hosted in AgentCore Runtime. Covers the invocation contract, HTTP streaming first, WebSocket gating, session lifecycle limits and the human confirmation step for state-changing tools.
+- `agent-session-persistence`: session identity, checkpoint persistence and resume, retention, caller isolation, and the rule that checkpoints are non-authoritative.
+- `tool-gateway`: the per-environment AgentCore Gateway, tool registration from released references, compatibility gating, environment isolation and the published Gateway references.
+- `mcp-access-policy`: the single backend policy shared by the hosted agent and direct MCP clients. Covers inbound authentication, caller identity propagation to tools, the tool allow-list, and the absence of any bypass path.
+- `explanation-provider`: the configurable explanation LLM provider (Amazon Bedrock by default, or fixture) behind a pluggable interface. Covers IAM-only Bedrock access with no secret, the Claude Opus 5 US inference profile as the configured model (ID from SSM, never hard-coded, cheaper per-environment override allowed), least-privilege invoke grants on the profile and its regional foundation models, rejection of Qwen as an explanation provider, per-invocation token caps, the per-session budget check against the `bedrock_explanations` allocation, prompt caching, no Bedrock calls in CI, and model-access enablement at bootstrap.
+- `agent-skills`: versioned skill bundles. Covers tool allow-lists bounded by policy, review, and export for direct MCP clients.
+- `agent-client-integration`: optional website/CLI invocation of the hosted agent and direct MCP use through published references.
+- `agent-release-pipeline`: the FinanceAgent pipeline stages, immutable artifact promotion, manifest and SSM outputs, deployed MCP smoke tests and rollback.
+
+### Modified Capabilities
+
+None. This repository has no existing specs.
+
+## Impact
+
+- **This repo:** a LangGraph agent package, a container image built once per commit, CDK stacks per environment (Runtime, Gateway, Gateway targets, Gateway interceptor, policy, Memory resource, explanation-provider configuration parameters, SSM outputs) and the pipeline.
+- **FinanceLambdasTool:** read-only consumer of its per-environment Lambda references, tool catalog and release manifest. FinanceAgent publishes the Gateway principal reference that FinanceLambdasTool needs for its invoke grant.
+- **FinancialPlanning:** pins `finplan-contracts` 1.x by exact version and digest and runs its conformance suite in consumer mode. It reads platform references only through FinanceLambdasTool tools.
+- **FinanceModel:** no direct dependency in phase 1. Model-backed tools return `DEPENDENCY_UNAVAILABLE` until FinanceModel releases in that environment.
+- **AWS (us-east-2, single account):** beta, gamma and prod live in one account, isolated by naming, tags, permission boundaries and environment-tag denies (contracts D11, OQ-1 resolved). AgentCore Runtime, Gateway, Memory, Identity and Policy are listed as available in us-east-2 in the official AgentCore region table (checked 2026-10-07). Bedrock models and US cross-region inference profiles were listed read-only in us-east-2 on 2026-10-07; `us.anthropic.claude-opus-5` is ACTIVE there (design D4). Bedrock model access for Opus 5 is an account-level bootstrap step (console or API call). No resources are created by this planning change.
+- **Cost:** no always-on endpoints. Runtime, Gateway and Memory are consumption-billed inside `platform_infra`. Bedrock invocations are billed to AWS inside the `bedrock_explanations` allocation (default USD 5). No prices are recorded here.
+- **Bootstrap:** the one-time bootstrap runs with the user's existing authenticated AWS CLI session (contracts OQ-11 resolved) and reuses an existing AVAILABLE GitHub CodeConnection referenced through SSM (OQ-2 non-blocking). The user approved the pipeline bootstrap in principle (2026-10-07); it runs only after the bootstrap IaC exists, shows the exact stacks and a cost estimate at run time, and includes enabling Opus 5 model access.
+- **Public-repo hygiene:** no account IDs, ARNs, gateway IDs, role names, connection ARNs or secret values in any file. Everything resolves from configuration.
