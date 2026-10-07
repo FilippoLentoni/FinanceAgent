@@ -77,7 +77,14 @@ From official AgentCore documentation (docs.aws.amazon.com/bedrock-agentcore), r
 ### D2. Gateway: one per environment, JWT inbound, policy engine plus interceptor
 
 - **Inbound authorization: `CUSTOM_JWT` against an OIDC identity provider.** JWT gives one identity for the hosted agent's users and for Claude Code/Codex users. IAM (SigV4) inbound would give direct clients AWS principals and the agent its role principal. That would make identical per-user policy harder, and every human MCP user would need AWS credentials. `NONE` and `AUTHENTICATE_ONLY` are rejected for these gateways.
-- **Identity provider ownership is not in the contracts ownership matrix** (CONTRACT GAP-1). The proposal is that FinanceAgent owns a per-environment Cognito user pool with roles as groups (`viewer`, `researcher`, `plan_editor`, `plan_publisher`, `ci_test`). This decision is open (FA-OQ-1). The website, if separate, would need to share this identity provider.
+- **Identity provider: FinanceAgent owns one Amazon Cognito user pool per environment** (RESOLVED 2026-10-07: FA-OQ-1, CONTRACT GAP-1; user decision item 15a). It is the only inbound identity provider for the Gateway and the Runtime.
+  - One pool each for beta, gamma and prod, created by the FinanceAgent per-environment identity stack through the pipeline (never by hand), tagged with the environment and owning repository. A token issued by one environment's pool is never accepted by another environment's Gateway or Runtime.
+  - Roles are Cognito groups: `viewer`, `researcher`, `plan_editor`, `plan_publisher`, `ci_test`. The Gateway policy maps groups to tools (D2 Policy).
+  - Self sign-up is disabled. Users are created by an administrator only; in phase 1 the only human user is the project owner. Users and their attributes are never written to repository files.
+  - App clients: one public authorization-code client (PKCE) for the hosted agent, CLI and direct MCP clients (Claude Code, Codex), and one `ci_test` client-credentials client per environment whose secret lives in Secrets Manager and is referenced through `/finplan/<env>/financeagent/secret-ref/ci-test-client` (name only).
+  - References are SSM only, under the FinanceAgent `agent/` namespace: `/finplan/<env>/financeagent/agent/user-pool-ref` (pool identifier reference) and `/finplan/<env>/financeagent/agent/authorizer-metadata-ref` (OIDC discovery URL, issuer and allowed audiences/clients). The Gateway `CUSTOM_JWT` authorizer and the Runtime JWT inbound configuration are synthesized from these parameters for the same environment. Pool IDs, client IDs, issuer URLs containing them, and ARNs never appear in repository files.
+  - The website, if separate, must reuse this pool (contracts OQ-10); it does not create its own.
+  - The contracts ownership matrix row (contracts D1) still says "provisional"; it must be updated to final in the FinancialPlanning contracts change.
 - **Hosted agent to Gateway:** the Runtime uses JWT inbound with the same identity provider. The agent calls the Gateway with a token for the same user, through AgentCore Identity on-behalf-of exchange if the Gateway supports it (A-2/A-4 verification). The fallback is to forward the user token restricted to the Gateway audience. The agent never uses a service token for tool calls. This satisfies "Agent acts as the user".
 - **Policy:** a policy engine attached to each Gateway, with the policy source in `policy/` and its digest recorded in the manifest. The engine evaluates (role, tool, selected argument values). The same engine and policy version serve all channels, so parity holds by construction. The policy-parity test still verifies it.
 - **Interceptor Lambda (owned by FinanceAgent):**
@@ -147,7 +154,7 @@ Every MCP test uses a per-environment `ci_test` client-credentials app whose sec
 
 ### D8. Cost posture (USD 50 project cap)
 
-- No always-on endpoints. Runtime, Gateway and Memory are consumption-billed. ECR stores only a few images (lifecycle policy keeps N releases). Logs have short retention.
+- No always-on endpoints. Runtime, Gateway, Memory and the per-environment Cognito user pools are consumption-billed (Cognito by monthly active users; phase 1 has one human user plus the `ci_test` client per environment). ECR stores only a few images (lifecycle policy keeps N releases). Logs have short retention.
 - No prices are recorded here. They must come from current AWS pricing at decision time.
 - USD 50 is the total AWS budget for everything (contracts OQ-7 resolved). Runtime, Gateway, Memory, ECR and logs fall under `platform_infra` (USD 8 default). Bedrock invocations fall under `bedrock_explanations` (USD 5 default) and are guarded as in D4.
 - Build and beta tests (CI) use the fixture/mock provider, so CI makes no Bedrock calls. Gamma makes one minimal Bedrock smoke invocation per release once `bedrock` is configured, under a small per-invocation token cap and the per-session budget check; gamma may use a cheaper model ID than prod's Claude Opus 5. Prod smoke stays read-only and makes no Bedrock call unless the user enables one capped invocation.
@@ -156,6 +163,7 @@ Every MCP test uses a per-environment `ci_test` client-credentials app whose sec
 ## Risks / Trade-offs
 
 - [The interceptor or policy engine cannot inject or verify identity as assumed] → fallback: tools validate a short-lived signed caller assertion minted by the interceptor (needs CONTRACT GAP-2 resolved). Gamma parity tests catch regressions.
+- [Three Cognito user pools (one per environment) mean the project owner holds a separate login per environment] → accepted for isolation; the CLI and direct-MCP docs name the environment's pool reference. A cross-environment token is rejected by design (FA-POL-07).
 - [Direct-client OAuth support differs between Claude Code and Codex] → documented helper per client. The policy is unchanged because the same identity provider and Gateway are used.
 - [Memory per-session write rate limits step checkpoints] → batch step writes per turn, with DynamoDB checkpointer fallback (D3).
 - [CloudFormation support for AgentCore resources is incomplete] → custom resource calling the control plane, still deployed only by the pipeline.
@@ -167,7 +175,7 @@ Every MCP test uses a per-environment `ci_test` client-credentials app whose sec
 
 ## Migration Plan
 
-1. Prerequisites: contracts 1.0.0 published and the FA-OQ-1 identity provider decision. The bootstrap uses the existing authenticated CLI session (OQ-11 resolved). It reuses the existing AVAILABLE CodeConnection through `/finplan/shared/financeagent/config/codeconnection-ref` and proves access with a source-stage dry run. Only if that fails does the user extend the GitHub App installation (OQ-2 non-blocking).
+1. Prerequisites: contracts 1.0.0 published. The identity provider is decided (FA-OQ-1 RESOLVED 2026-10-07: FinanceAgent-owned Cognito user pool per environment); each environment's identity stack deploys before that environment's Gateway and Runtime in the same pipeline stage, and the project owner user is created by an administrator after the first beta deployment. The bootstrap uses the existing authenticated CLI session (OQ-11 resolved). It reuses the existing AVAILABLE CodeConnection through `/finplan/shared/financeagent/config/codeconnection-ref` and proves access with a source-stage dry run. Only if that fails does the user extend the GitHub App installation (OQ-2 non-blocking).
 2. Bootstrap the FinanceAgent pipeline, the per-environment Gateway service roles and their `gateway-principal-ref` parameters (GAP-3), the default explanation-provider parameters (`kind: fixture`), and `budget-enforced-role-names`.
 3. Wait for the FinanceLambdasTool beta release. Then promote FinanceAgent through beta → gamma → prod with the fixture provider.
 4. Model access for Claude Opus 5 is enabled during bootstrap (console or API call, under the user's in-principle bootstrap approval) and verified ACTIVE. `us.anthropic.claude-opus-5` is written to the prod model-id parameter (gamma: the same ID or a cheaper one), with rates from configuration or the AWS Price List API and `retrieved_at`. A config-only release switches gamma to `bedrock`, then prod after approval.
@@ -175,7 +183,7 @@ Every MCP test uses a per-environment `ci_test` client-credentials app whose sec
 
 ## Contract gap status (cross-repo review, 2026-10-07)
 
-- GAP-1 (identity provider owner): FinanceAgent recorded as the **provisional** owner in contracts D1. It stays a BLOCKER until the user confirms it (FA-OQ-1). The website must reuse this provider (contracts OQ-10).
+- GAP-1 (identity provider owner): RESOLVED 2026-10-07: FinanceAgent owns a Cognito user pool per environment, referenced through `/finplan/<env>/financeagent/agent/user-pool-ref` and `authorizer-metadata-ref` (FA-OQ-1, D2). Contracts D1 still marks the row "provisional"; the FinancialPlanning contracts change should drop that qualifier. The website must reuse this provider (contracts OQ-10).
 - GAP-2 (caller block): resolved in contracts D10 as `core/v1/caller.json`, carried outside the hashed body. The interceptor-versus-policy-engine mechanism is still verified by the spike (FA-OQ-2).
 - GAP-3 (ordering): resolved in contracts (cross-repo-ownership, scenario "Gateway principal published before tool grants"). FinanceAgent bootstrap publishes `gateway-principal-ref` first.
 - GAP-4 (matrix rows): resolved in contracts D1 (ECR repository, interceptor Lambda, Memory resource, policy engine, Gateway service role). The ECR repository is an allowed account-level shared resource (contracts ENV-16).
@@ -185,7 +193,7 @@ Every MCP test uses a per-environment `ci_test` client-credentials app whose sec
 
 | ID | Question | Blocks | Resolved by | Interim |
 |---|---|---|---|---|
-| FA-OQ-1 | Which repo owns the OIDC identity provider (users, roles, CI clients)? FinanceAgent proposed. Shared with the website? (CONTRACT GAP-1) | BLOCKER for Gateway and Runtime deployment | User decision plus a contracts matrix update | Design proceeds assuming FinanceAgent owns a per-environment Cognito pool |
+| FA-OQ-1 | Which repo owns the OIDC identity provider (users, roles, CI clients)? Shared with the website? (CONTRACT GAP-1) | None | **RESOLVED 2026-10-07:** FinanceAgent owns one Amazon Cognito user pool per environment as the Gateway and Runtime identity provider (groups as roles, self sign-up disabled, project owner as the only phase 1 human user), referenced only through `/finplan/<env>/financeagent/agent/user-pool-ref` and `authorizer-metadata-ref`; the website reuses it (contracts OQ-10); the contracts D1 row is to be marked final (D2) | n/a |
 | FA-OQ-2 | Exact mechanism and field for passing verified caller identity from the Gateway to Lambda targets (interceptor versus policy engine; envelope field) (CONTRACT GAP-2) | BLOCKER for state-changing tools through the Gateway | Implementation spike against the docs plus a contract minor adding the caller block | Read-only tools only through the Gateway |
 | FA-OQ-3 | Explanation provider and its credentials (= contracts OQ-3) | None | **RESOLVED 2026-10-07:** Amazon Bedrock with IAM auth; no API key or secret; provider stays a pluggable interface; OpenAI is only an optional future adapter (D4) | n/a |
 | FA-OQ-4 | Which Bedrock model or inference profile in us-east-2, and is model access enabled? (= contracts OQ-13) | None (model access is a bootstrap task, 3.8) | **RESOLVED 2026-10-07:** Claude Opus 5 via US inference profile `us.anthropic.claude-opus-5` (verified ACTIVE in us-east-2), stored in `config/explanation-model-id`; access enabled at bootstrap; spend within `bedrock_explanations` (USD 5) with the D4 cost controls | `fixture` provider until access is enabled and verified |

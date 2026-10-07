@@ -49,6 +49,10 @@ Each registered tool's input and output schema SHALL be generated from the pinne
 ### Requirement: Published Gateway references
 Each deployment SHALL publish the Gateway MCP endpoint reference, the Gateway invocation principal reference and the inbound authorizer metadata reference as SSM parameters under `/finplan/<env>/financeagent/agent/`, and record them in the release manifest `outputs`.
 
+#### Scenario: Client reads authorizer metadata
+- **WHEN** a direct MCP client or the CLI is configured for gamma
+- **THEN** it obtains the issuer and client settings from `/finplan/gamma/financeagent/agent/authorizer-metadata-ref`, which points to the gamma Cognito user pool owned by FinanceAgent
+
 #### Scenario: Tool repo reads Gateway principal
 - **WHEN** FinanceLambdasTool deploys its gamma invoke grants
 - **THEN** it reads the gamma Gateway principal from `/finplan/gamma/financeagent/agent/gateway-principal-ref`

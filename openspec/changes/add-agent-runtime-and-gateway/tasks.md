@@ -1,6 +1,6 @@
 # Tasks
 
-Scope: phase 1 (fixture-backed) only. No GPU or FinanceModel compute and no live trading. The explanation model is Claude Opus 5 via `us.anthropic.claude-opus-5` (FA-OQ-4 = contracts OQ-13 resolved 2026-10-07); the live Bedrock provider is enabled only by tasks 3.8–3.9, after model access is enabled at bootstrap and verified. CI never calls Bedrock. Tasks marked BLOCKED name the open question from design.md that must close first. Bootstrap uses the user's existing authenticated AWS CLI session (contracts OQ-11 resolved 2026-10-07) and reuses the existing GitHub CodeConnection (FA-OQ-5 non-blocking). All environments share one account in us-east-2 (contracts OQ-1 resolved). Test IDs are defined in the mapping table at the end.
+Scope: phase 1 (fixture-backed) only. No GPU or FinanceModel compute and no live trading. The explanation model is Claude Opus 5 via `us.anthropic.claude-opus-5` (FA-OQ-4 = contracts OQ-13 resolved 2026-10-07); the live Bedrock provider is enabled only by tasks 3.8–3.9, after model access is enabled at bootstrap and verified. CI never calls Bedrock. Tasks marked BLOCKED name the open question from design.md that must close first. Bootstrap uses the user's existing authenticated AWS CLI session (contracts OQ-11 resolved 2026-10-07) and reuses the existing GitHub CodeConnection (FA-OQ-5 non-blocking). All environments share one account in us-east-2 (contracts OQ-1 resolved). The identity provider is a FinanceAgent-owned Cognito user pool per environment, referenced through SSM (FA-OQ-1 RESOLVED 2026-10-07). Test IDs are defined in the mapping table at the end.
 
 ## 1. Verification spike and scaffolding
 
@@ -43,12 +43,13 @@ Scope: phase 1 (fixture-backed) only. No GPU or FinanceModel compute and no live
 
 ## 5. Gateway, registration and policy
 
-- [ ] 5.1 Implement per-environment IaC for the Gateway (MCP, `CUSTOM_JWT`), Gateway service role scoped to same-environment tool references, and published `gateway-principal-ref`, Gateway endpoint and authorizer metadata references; verify FA-GW-01 and FA-GW-05 synth tests (BLOCKED by FA-OQ-1 for the identity provider)
+- [ ] 5.0 Implement the per-environment identity stack: one Cognito user pool per environment (self sign-up disabled, groups `viewer`, `researcher`, `plan_editor`, `plan_publisher`, `ci_test`, environment and owner tags), a public authorization-code (PKCE) app client for the agent, CLI and direct MCP clients, and a `ci_test` client-credentials client whose secret is stored in Secrets Manager and referenced by name through `/finplan/<env>/financeagent/secret-ref/ci-test-client`; publish `/finplan/<env>/financeagent/agent/user-pool-ref` and `/finplan/<env>/financeagent/agent/authorizer-metadata-ref` and record them in the manifest `outputs`; order the stack before the Gateway and Runtime stacks in each stage; verify FA-POL-07 synth tests (one pool per environment, sign-up disabled, groups present, no literal pool or client IDs in repo files via the leak scan) (FA-OQ-1 RESOLVED 2026-10-07)
+- [ ] 5.1 Implement per-environment IaC for the Gateway (MCP, `CUSTOM_JWT` resolved from the same environment's `authorizer-metadata-ref`), Gateway service role scoped to same-environment tool references, and published `gateway-principal-ref`, Gateway endpoint and authorizer metadata references; configure the Runtime JWT inbound authorizer from the same parameter; verify FA-GW-01, FA-GW-05 and FA-POL-07 (authorizer bound to the same environment's pool) synth tests
 - [ ] 5.2 Implement the registration step that reads `/finplan/<env>/financelambdastool/release/manifest`, the `tool-catalog` output and `lambda/<tool>-arn`, with the contract-major compatibility gate; verify FA-GW-02 and FA-GW-03 with fixture manifests (catalog key and schema from contracts D4/D10)
 - [ ] 5.3 Implement the projection from contract schemas to the Gateway tool schema subset, with relaxations documented in descriptions; verify FA-GW-04 unit tests (pattern moved to description; output still validated by the tool)
 - [ ] 5.4 Write the Gateway policy (roles × tools × denied argument values such as `mode=live`) and its fixture test matrix; verify FA-POL-03, FA-POL-05 and FA-POL-06 unit tests and that the policy digest is emitted to the manifest
 - [ ] 5.5 Implement the interceptor Lambda that injects verified caller claims and channel and strips body identity fields; verify FA-POL-04 unit tests (the envelope field is the contracts `core/v1/caller.json` block; the injection mechanism is BLOCKED by FA-OQ-2)
-- [ ] 5.6 Configure the hosted agent to call the Gateway as the user (OBO or audience-restricted user token) and build the Runtime role without tool or platform permissions; verify FA-POL-01 (role policy check) and FA-POL-02 in beta
+- [ ] 5.6 Configure the hosted agent to call the Gateway as the user (OBO or audience-restricted user token) and build the Runtime role without tool or platform permissions; verify FA-POL-01 (role policy check) and FA-POL-02 in beta with a project-owner token from the beta pool
 - [ ] 5.7 Enforce asynchronous patterns and response size limits through the tool client and document the limits in `docs/gateway.md`; verify FA-GW-06 with an oversized fixture result
 
 ## 6. Skills and clients
@@ -64,8 +65,9 @@ Scope: phase 1 (fixture-backed) only. No GPU or FinanceModel compute and no live
 
 - [ ] 7.1 Write the pipeline stack (stages per contracts D6, artifact-only promotion, `release_id`, manifest and `current-release-id` writes, approval recording); verify FA-PL-01 with the contracts pipeline-structure check on the synthesized template and FA-PL-02 build-stage checks
 - [ ] 7.2 Run the one-time bootstrap with the user's existing authenticated AWS CLI session (pipeline, ECR repository, per-environment Gateway service roles and `gateway-principal-ref`, `codeconnection-ref` pointing to the existing AVAILABLE connection, default explanation-provider parameters with `kind: fixture`, `budget-enforced-role-names`); include the Opus 5 model-access enablement step (task 3.8) in the same approved run, showing the exact stacks and a cost estimate first; verify the STS account and region pre-check (us-east-2) and a pipeline source-stage dry run against `FilippoLentoni/FinanceAgent` `main` (if the dry run fails, the user extends the GitHub App installation and reruns it). Recommendation only: move the operator to a scoped/MFA role later (GAP-3/GAP-4 resolved in contracts)
+- [ ] 7.2a After each environment's first identity-stack deployment, create the project owner as the only human user in that environment's pool (administrator action, in the user's session; no user data in repo files) and add the needed groups; verify sign-in through the CLI with the environment's `authorizer-metadata-ref`
 - [ ] 7.3 Implement beta integration tests: MCP `tools/list`, `describe_capabilities`, synthetic plan-version read, hosted-agent answer, checksum equality with a direct platform read, cross-caller session denial, and checkpoint scan; verify FA-PL-04 and ENV-15 pass in beta
-- [ ] 7.4 Implement gamma tests: policy parity across channels, target isolation (gamma only), cross-environment invoke denied, policy drift check, and rollback drill; verify FA-POL-03, FA-PL-05, FA-POL-06 and FA-PL-06 in gamma
+- [ ] 7.4 Implement gamma tests: policy parity across channels, target isolation (gamma only), cross-environment invoke denied, beta-pool token rejected by the gamma Gateway and Runtime (FA-POL-07), policy drift check, and rollback drill; verify FA-POL-03, FA-PL-05, FA-POL-06 and FA-PL-06 in gamma
 - [ ] 7.5 Implement read-only prod smoke on the synthetic portfolio; verify FA-PL-04 (prod) and FA-PL-03 digest equality across environments
 
 ## 8. Integration checks
@@ -97,6 +99,9 @@ Test types: unit, contract, integration-beta, gamma, smoke. "graph" tests are un
 | tool-gateway | Published Gateway references | FA-GW-05 | unit (synth) + integration-beta |
 | tool-gateway | Gateway invocation limits | FA-GW-06 | unit + integration-beta |
 | mcp-access-policy | Single tool access path | FA-POL-01 | unit (role policy check) |
+| mcp-access-policy | FinanceAgent-owned identity provider per environment | FA-POL-07 | unit (synth: one pool per environment, authorizer bound to same-environment `authorizer-metadata-ref`) + gamma (beta-pool token rejected) |
+| mcp-access-policy | Administrator-managed users with group roles | FA-POL-07 | unit (synth: sign-up disabled, groups present) |
+| mcp-access-policy | Identity provider referenced only through SSM | FA-POL-07 | unit (leak scan: no pool or client IDs or ARNs) |
 | mcp-access-policy | Same inbound authentication for agent and direct clients | FA-POL-02 | integration-beta + gamma |
 | mcp-access-policy | Identical tool policy across channels | FA-POL-03 | unit (policy matrix) + gamma (parity replay) |
 | mcp-access-policy | Caller identity propagated to tools | FA-POL-04 | unit (interceptor) + integration-beta |

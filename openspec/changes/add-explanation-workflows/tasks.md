@@ -1,6 +1,6 @@
 # Tasks
 
-Scope: phase 2. This change requires `add-agent-runtime-and-gateway` to be deployed. Deployed evidence additionally needs contract and producer changes (design.md EX-OQ-1, EX-OQ-2, EX-OQ-9). Bedrock narration uses Claude Opus 5 via `us.anthropic.claude-opus-5` from SSM (EX-OQ-10 resolved 2026-10-07) and is live only after model access is enabled and verified at bootstrap (`add-agent-runtime-and-gateway` tasks 3.8–3.9); until then, and always in CI, narration uses the fixture provider. Until the producer changes exist, work proceeds on local fixtures and tool fakes. No GPU jobs, live data or live trading. All environments share one AWS account (contracts OQ-1 resolved); costs stay inside the USD 50 total (`cpu_research` for evidence jobs, `bedrock_explanations` for narration). Numerical correctness is asserted only by deterministic tests.
+Scope: phase 2. This change requires `add-agent-runtime-and-gateway` to be deployed, including its per-environment Cognito identity stack (FA-OQ-1 RESOLVED 2026-10-07). Deployed evidence additionally needs contract and producer changes (design.md EX-OQ-1, EX-OQ-2, EX-OQ-9). Bedrock narration uses Claude Opus 5 via `us.anthropic.claude-opus-5` from SSM (EX-OQ-10 resolved 2026-10-07) and is live only after model access is enabled and verified at bootstrap (`add-agent-runtime-and-gateway` tasks 3.8–3.9); until then, and always in CI, narration uses the fixture provider. Until the producer changes exist, work proceeds on local fixtures and tool fakes. No GPU jobs, live data or live trading. All environments share one AWS account (contracts OQ-1 resolved); costs stay inside the USD 50 total (`cpu_research` for evidence jobs, `bedrock_explanations` for narration). Numerical correctness is asserted only by deterministic tests.
 
 ## 1. Shared evidence pipeline
 
@@ -14,6 +14,7 @@ Scope: phase 2. This change requires `add-agent-runtime-and-gateway` to be deplo
 - [ ] 1.8 Document the evidence/narrative contract and the modeled-effect disclaimer in `docs/explanations.md`; verify that the documentation examples validate with the assembler
 - [ ] 1.9 Route narration through the phase 1 provider interface (Bedrock by default, fixture in tests) and map a Bedrock pre-flight refusal to narrative status `budget_exceeded` and an unavailable provider to `unavailable`, with evidence returned in both cases; verify FA-EV-02 graph tests with the fixture provider and a stubbed refusal (no network)
 - [ ] 1.10 Configure narration cost controls for the explanation skills: a conservative per-invocation `max_tokens_invocation` in skill configuration (no model ID or price in code or skill bundles), the per-session budget check before the narration call with a clear `budget_exceeded` message naming the remaining amount and estimate, a cache-friendly prompt layout (stable prefix first, compact evidence summary last), and a CI guard that explanation tests run with the fixture provider only; verify FA-EV-09 graph tests with a stubbed Bedrock client (cap sent, session budget insufficient → evidence returned with `budget_exceeded`, zero Bedrock calls in CI)
+- [ ] 1.11 Run every explanation subflow's tool calls and evidence job submissions through the Gateway as the authenticated caller (no service identity); map a policy denial of `submit_experiment` to an evidence-unavailable result; verify FA-EV-10 graph tests with fake tools (allowed and denied groups) and the beta audit check using a project-owner token from the beta pool
 
 ## 2. Workflow 1: actual versus exact published plan
 
@@ -61,6 +62,7 @@ Test types: unit, contract, integration-beta, gamma, smoke. "graph" = unit-level
 | explanation-evidence | Modeled intervention effects are labeled | FA-EV-05 | unit (wording check) |
 | explanation-evidence | No-effect outcomes are valid | FA-EV-06 | unit (fixture) + smoke |
 | explanation-evidence | Evidence jobs are budget-gated | FA-EV-07 | unit (graph; `cpu_research` remaining allocation) + integration-beta (dry-run) |
+| explanation-evidence | Explanations run as the authenticated caller | FA-EV-10 | unit (graph; allowed and denied groups) + integration-beta (audit shows the caller, token from the beta pool) |
 | explanation-evidence | No automated rewriting of risk preferences | FA-EV-08 | unit (graph) + gamma (policy) |
 | explanation-evidence | Narration within Bedrock cost controls | FA-EV-09 | unit (graph, stubbed Bedrock client) + gamma (usage metric against `bedrock_explanations`) |
 | plan-performance-explanation | Anchored on the exact published plan | FA-WF1-01 | unit (graph) + integration-beta |

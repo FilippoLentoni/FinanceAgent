@@ -82,6 +82,17 @@ Evidence computations that submit jobs SHALL first obtain a dry-run cost estimat
 - **WHEN** the dry-run estimate's `budget_category` is `cpu_research` and its `estimated_usd_upper_bound` exceeds `remaining_allocation_usd`
 - **THEN** the agent submits no job and returns `BUDGET_EXCEEDED` with the estimate and the remaining allocation
 
+### Requirement: Explanations run as the authenticated caller
+Every explanation request SHALL be authenticated against the same environment's FinanceAgent-owned Cognito user pool, and every evidence job submission and tool read it makes MUST go through that environment's Gateway on behalf of the same caller. An explanation MUST NOT use a service identity or any permission the caller's groups do not grant.
+
+#### Scenario: Caller not allowed to submit evidence jobs
+- **WHEN** a caller whose groups the Gateway policy does not allow to call `submit_experiment` requests a workflow that needs a new evidence job
+- **THEN** the Gateway denies the submission with `FORBIDDEN`, no job is created, and the result explains that the evidence is unavailable for this caller
+
+#### Scenario: Evidence job audit
+- **WHEN** an authenticated researcher requests a sensitivity explanation in gamma
+- **THEN** the evidence job's audit record shows that caller and channel `hosted_agent`, and the token was issued by the gamma pool
+
 ### Requirement: No automated rewriting of risk preferences
 Explanation workflows SHALL NOT create, modify or publish configurations, constraints, risk preferences or plan versions on their own. Any alternative MUST be presented to the user as an option, and adoption MUST go through the normal confirmed plan tools.
 
