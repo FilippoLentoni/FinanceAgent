@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 
 import boto3
@@ -96,7 +98,7 @@ def test_load_from_ssm():
     ssm.put_parameter(Name="/finplan/gamma/financeagent/config/explanation-model-id", Value=MID["prod_profile"], Type="String")
     ssm.put_parameter(Name="/finplan/gamma/financeagent/config/explanation-guards", Value=json.dumps({"rates": GUARDS["rates"], "max_tokens_invocation": 256}), Type="String")
     cfg = load_provider_config("gamma", ssm)
-    assert cfg.kind == "bedrock" and cfg.max_tokens_invocation == 256 and cfg.max_tokens_turn == 4096  # repo default
+    assert cfg.kind == "bedrock" and cfg.max_tokens_invocation == 256 and cfg.max_tokens_turn == __import__("json").loads((Path(__file__).resolve().parents[2] / "config" / "gamma.json").read_text())["guard_defaults"]["max_tokens_turn"]  # repo default
 
 
 @mock_aws

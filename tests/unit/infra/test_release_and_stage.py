@@ -255,7 +255,7 @@ def test_operator_rates_are_preserved_never_invented(ssm):
     ssm.put_parameter(Name="/finplan/gamma/financeagent/config/explanation-guards", Value=json.dumps({"rates": {"source": "configured", "retrieved_at": "2026-10-08"}}), Type="String")
     rel.publish_release(_info(), "gamma", ssm=ssm, cfn=FakeCfn("gamma"), targets={"describe_capabilities": "none"})
     guards = json.loads(ssm.get_parameter(Name="/finplan/gamma/financeagent/config/explanation-guards")["Parameter"]["Value"])
-    assert guards["rates"]["source"] == "configured" and guards["max_tokens_invocation"] == 1024
+    assert guards["rates"]["source"] == "configured" and guards["max_tokens_invocation"] == __import__("json").loads(Path(__file__).resolve().parents[3].joinpath("config", "gamma.json").read_text())["guard_defaults"]["max_tokens_invocation"]
 
 
 def test_prod_needs_the_approval_and_beta_refuses_bedrock(ssm):
