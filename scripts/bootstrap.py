@@ -104,6 +104,10 @@ def bootstrap_assembly(assembly: str | os.PathLike[str], out: str | os.PathLike[
         for key in ("templateFile", "file"):
             if props.get(key):
                 files.add(props[key])
+        # The CLI opens every artifact's metadata file; leaving it out made the first deploy fail
+        # with ENOENT before any stack was created.
+        if art.get("additionalMetadataFile"):
+            files.add(art["additionalMetadataFile"])
         if art.get("type") == "cdk:asset-manifest":
             doc = json.loads((src / props["file"]).read_text(encoding="utf-8"))
             for asset in (doc.get("files") or {}).values():

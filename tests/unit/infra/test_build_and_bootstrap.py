@@ -91,6 +91,13 @@ def test_bootstrap_assembly_has_only_tooling_stacks_and_no_cdk_bootstrap(assembl
     stacks = sorted(a["properties"]["stackName"] for a in manifest["artifacts"].values() if a["type"] == "aws:cloudformation:stack")
     assert stacks == sorted(bs.BOOTSTRAP_STACKS)
     assert bs.cdk_bootstrap_references(dst) == []
+    # Regression (first FinanceAgent bootstrap): every file the manifest names must be copied,
+    # including each artifact's additionalMetadataFile, or the CDK CLI fails with ENOENT.
+    for art in manifest["artifacts"].values():
+        props = art.get("properties") or {}
+        for rel in (props.get("templateFile"), props.get("file"), art.get("additionalMetadataFile")):
+            if rel:
+                assert (dst / rel).exists(), rel
 
 
 def test_bootstrap_refuses_a_missing_assembly(tmp_path):
