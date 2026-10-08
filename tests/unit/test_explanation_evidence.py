@@ -273,3 +273,14 @@ def test_fixture_evidence_matches_the_draft_schemas(kind):
     }
     jsonschema.validate(docs[kind], schema)
     assert schema["x-finplan-status"] == "draft-not-published"
+
+
+def test_guarded_tools_report_an_unreleased_tool_as_a_missing_dependency():
+    # Regression (first beta deploy): compare_plan_versions is not in the released catalog yet;
+    # the guard must call nothing and say DEPENDENCY_UNAVAILABLE, not ask for confirmation.
+    b = ExplanationBackend()
+    g = GuardedTools(b, catalog())
+    with pytest.raises(AgentError) as exc:
+        g.call("tool_that_was_never_released", {"idempotency_key": "k9"})
+    assert exc.value.code == "DEPENDENCY_UNAVAILABLE" and exc.value.details["kind"] == "tool_not_released"
+    assert b.calls == []

@@ -84,6 +84,11 @@ class GuardedTools:
         refusal = tool_call_refusal(name, arguments, denied=self._catalog.is_denied(name))
         if refusal is not None:
             raise AgentError(refusal["code"], refusal["message"], {"kind": refusal["kind"], "tool": name})
+        if name not in self._catalog.entries:
+            # Not in the released tool catalog (e.g. a tool still to be shipped by FinanceLambdasTool):
+            # nothing is called, and the caller learns the dependency is missing rather than being
+            # told to confirm a call that cannot happen.
+            raise AgentError.dependency(f"{name} is not in the released tool catalog", kind="tool_not_released", tool=name)
         if self.requires_confirmation(name, arguments) and arguments.get("idempotency_key") not in self._approved:
             raise AgentError.not_permitted(f"{name} changes state and was not confirmed; explanations never change state on their own", kind="unconfirmed_state_change", tool=name)
         if self.count >= self._max:
