@@ -75,6 +75,9 @@ class Deps:
     skills: tuple[dict[str, Any], ...] = ()
     #: Explanation settings; default: the repository ``explanations`` block of the environment.
     explanation_settings: ExplanationSettings | None = None
+    #: Re-reads the provider configuration (SSM) so a model change applies without a restart.
+    provider_loader: Callable[[], tuple[ProviderConfig, ExplanationProvider]] | None = None
+    provider_refresh_seconds: float = 60.0
 
 
 class AgentService:
@@ -86,6 +89,7 @@ class AgentService:
             deps.explanation_settings = load_explanation_settings(deps.settings.repo_config)
         self._catalog: tuple[float, ToolCatalog] | None = None
         self._lock = threading.Lock()
+        self._provider_loaded_at = time.monotonic()
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -136,10 +140,33 @@ class AgentService:
             budget_reader=SsmBudgetReader(ssm),
             usage_sink=sink,
             explanation_settings=load_explanation_settings(settings.repo_config, ssm, settings.ssm.explanation_limits),
+            provider_loader=lambda: _load_provider(settings.environment, ssm),
         )
         return cls(deps)
 
     # ------------------------------------------------------------------ helpers
+    def refresh_provider(self) -> None:
+        """Re-read the provider configuration at most every ``provider_refresh_seconds``.
+
+        The first gamma deploy kept serving the previous model: runtimes started before the release
+        published the new ``explanation-model-id``. An invalid new configuration keeps the current
+        provider (logged) instead of failing turns that already work."""
+        loader = self.deps.provider_loader
+        if loader is None:
+            return
+        with self._lock:
+            if time.monotonic() - self._provider_loaded_at < self.deps.provider_refresh_seconds:
+                return
+            self._provider_loaded_at = time.monotonic()
+            try:
+                config, provider = loader()
+            except Exception:  # noqa: BLE001 - keep serving the last valid configuration
+                log.warning("provider configuration refresh failed; keeping the current provider")
+                return
+            if config != self.deps.provider_config:
+                self.deps.provider_config, self.deps.provider = config, provider
+                self.guard = BudgetGuard(config, spend=self.deps.spend, budget_reader=self.deps.budget_reader)
+
     def catalog(self) -> ToolCatalog:
         with self._lock:
             if self._catalog is None or time.monotonic() - self._catalog[0] > 300:
@@ -161,6 +188,7 @@ class AgentService:
         }
 
     def _context(self, caller: Caller, session_id: str) -> AgentContext:
+        self.refresh_provider()
         spend = self.deps.spend
 
         def on_usage(usage: dict[str, Any]) -> None:
@@ -326,3 +354,8 @@ class AgentService:
             yield self._failed(AgentError.internal(), session_id, cid)
             return
         yield self._final(config, session_id, cid)
+
+
+def _load_provider(environment: str, ssm: Any) -> tuple[ProviderConfig, ExplanationProvider]:
+    config = load_provider_config(environment, ssm)
+    return config, make_provider(config)
