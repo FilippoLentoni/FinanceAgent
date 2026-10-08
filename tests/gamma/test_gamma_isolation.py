@@ -11,6 +11,17 @@ from tests.deployed import deployed, requires_deployed
 pytestmark = requires_deployed
 
 
+def _all_items(call, key: str, **kwargs):
+    """Every page of an AgentCore control-plane list call (pages hold at most 10 items)."""
+    items, token = [], None
+    while True:
+        page = call(**kwargs, **({"nextToken": token} if token else {}))
+        items += page.get(key, [])
+        token = page.get("nextToken")
+        if not token:
+            return items
+
+
 def _gateway_id(env) -> str:
     url = env.param(env.names.gateway_endpoint_ref)
     return url.split("//", 1)[1].split(".", 1)[0]
@@ -20,7 +31,7 @@ def test_every_target_resolves_to_this_environments_lambdas_only():
     env = deployed()
     ctl = env.control()
     gid = _gateway_id(env)
-    targets = ctl.list_gateway_targets(gatewayIdentifier=gid).get("items", [])
+    targets = _all_items(ctl.list_gateway_targets, "items", gatewayIdentifier=gid)
     assert targets, "the gateway has no targets"
     registered = env.registered_targets()
     seen = set()
@@ -46,7 +57,7 @@ def test_deployed_policy_matches_the_release_manifest_digest():
     outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs") or []}
     assert outputs["PolicyDigest"] == digest
     engine_id = outputs["PolicyEngineArn"].rsplit("/", 1)[-1]
-    policies = env.control().list_policies(policyEngineId=engine_id).get("policies", [])
+    policies = _all_items(env.control().list_policies, "policies", policyEngineId=engine_id)
     names = {p["name"] for p in policies}
     from infra.stacks.agent import _policy_resource_name
     from infra.stacks.tool_policy import allowed_roles
