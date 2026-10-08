@@ -1,0 +1,22 @@
+# Agent skill bundle; add-explanation-workflows task 3.7. No model identifier, price or endpoint here.
+name: explain-recommendation-change
+version: 0.1.0
+purpose: Explain why a new recommendation differs from the previous one for the same effective horizon (workflow 2).
+explanation_type: recommendation_change
+tools:
+  - compare_plan_versions    # EX-OQ-9: FinanceLambdasTool follow-up read tool
+  - get_plan_version
+  - submit_experiment        # dry_run first; real submission only after the confirmation interrupt
+  - get_job_status
+  - get_experiment_result
+evidence_kinds: [difference_inventory, controlled_resolve_set, grouped_shapley]
+factor_groups: [data, configuration, constraints, model]
+narration:
+  max_tokens_invocation: 600
+  budget_category: bedrock_explanations
+output_contract:
+  envelope: core/v1/explanation-result.json
+  extensions: [explanation_type, request_ids, evidence_items, checks, labels, narrative_status, citations, claim_check, findings, disclaimer]
+  narrative_statuses: [generated, unavailable, budget_exceeded]
+  citations: "[evN] after every sentence that states a figure"
+  required_statements: [disclaimer_when_modeled_effect, uncertainty_note_when_stochastic]

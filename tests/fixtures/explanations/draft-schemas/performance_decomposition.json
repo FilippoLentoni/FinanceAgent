@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DRAFT performance_decomposition evidence payload",
+  "description": "DRAFT ONLY (add-explanation-workflows EX-OQ-2 / CONTRACT GAP-E2): the agent-side expectation of this evidence kind until the finance/v1 contract minor defines it. Never published; test fixtures only.",
+  "x-finplan-status": "draft-not-published",
+  "type": "object",
+  "properties": {
+    "evidence_kind": {
+      "const": "performance_decomposition"
+    },
+    "subject": {
+      "type": "object"
+    },
+    "evaluator_version": {
+      "type": "string"
+    },
+    "identifiers": {
+      "type": "object",
+      "properties": {
+        "publication_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "plan_version_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "plan_version_checksum": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "execution_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+          }
+        },
+        "input_snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "realized_snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        }
+      },
+      "required": [
+        "publication_id",
+        "plan_version_id",
+        "plan_version_checksum",
+        "execution_ids",
+        "realized_snapshot_id"
+      ]
+    },
+    "window": {
+      "type": "object",
+      "properties": {
+        "start": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "end": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ]
+    },
+    "actual_source": {
+      "enum": [
+        "paper",
+        "simulated"
+      ]
+    },
+    "excluded_days": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "reason"
+        ]
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "properties": {
+        "tolerance": {
+          "type": "number"
+        },
+        "plan_path": {
+          "type": "object",
+          "properties": {
+            "start_value": {
+              "type": "number"
+            },
+            "cash_flows": {
+              "type": "number"
+            },
+            "realized_pnl": {
+              "type": "number"
+            },
+            "unrealized_pnl": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number"
+            },
+            "end_value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "start_value",
+            "cash_flows",
+            "realized_pnl",
+            "unrealized_pnl",
+            "fees",
+            "end_value"
+          ]
+        },
+        "executed_path": {
+          "type": "object",
+          "properties": {
+            "start_value": {
+              "type": "number"
+            },
+            "cash_flows": {
+              "type": "number"
+            },
+            "realized_pnl": {
+              "type": "number"
+            },
+            "unrealized_pnl": {
+              "type": "number"
+            },
+            "fees": {
+              "type": "number"
+            },
+            "end_value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "start_value",
+            "cash_flows",
+            "realized_pnl",
+            "unrealized_pnl",
+            "fees",
+            "end_value"
+          ]
+        }
+      },
+      "required": [
+        "tolerance",
+        "plan_path",
+        "executed_path"
+      ]
+    },
+    "gap": {
+      "type": "object",
+      "properties": {
+        "tolerance": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        },
+        "components": {
+          "type": "object",
+          "properties": {
+            "execution": {
+              "type": "number"
+            },
+            "cost": {
+              "type": "number"
+            },
+            "market_vs_forecast": {
+              "type": "number"
+            },
+            "residual": {
+              "type": "number"
+            }
+          }
+        },
+        "not_available": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "execution",
+              "cost",
+              "market_vs_forecast",
+              "residual"
+            ]
+          }
+        }
+      },
+      "required": [
+        "tolerance",
+        "total",
+        "components"
+      ]
+    },
+    "forecast": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "not_available"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "level": {
+              "type": "number"
+            },
+            "lower": {
+              "type": "number"
+            },
+            "upper": {
+              "type": "number"
+            },
+            "mean": {
+              "type": "number"
+            },
+            "realized_return": {
+              "type": "number"
+            },
+            "percentile": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "inside_interval": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "status",
+            "level",
+            "lower",
+            "upper",
+            "realized_return",
+            "percentile"
+          ]
+        }
+      ]
+    },
+    "data_quality": {
+      "type": "object",
+      "properties": {
+        "flags": {
+          "type": "array"
+        },
+        "revisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "instrument": {
+                "type": "string"
+              },
+              "date": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "previous_snapshot_id": {
+                "type": "string",
+                "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "new_snapshot_id": {
+                "type": "string",
+                "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+              },
+              "previous_value": {
+                "type": "number"
+              },
+              "new_value": {
+                "type": "number"
+              },
+              "modeled_effect": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "instrument",
+              "date",
+              "previous_snapshot_id",
+              "new_snapshot_id"
+            ]
+          }
+        }
+      }
+    },
+    "seeds": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "evidence_kind",
+    "identifiers",
+    "window",
+    "actual_source",
+    "reconciliation",
+    "gap",
+    "forecast",
+    "data_quality"
+  ]
+}

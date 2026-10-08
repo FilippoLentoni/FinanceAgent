@@ -1,0 +1,74 @@
+[project]
+name = "finplan-agent"
+version = "0.1.0"
+description = "FinanceAgent: the code-based LangGraph explanation agent hosted in Amazon Bedrock AgentCore Runtime, reaching FinanceLambdasTool tools only through the per-environment AgentCore Gateway (OpenSpec changes add-agent-runtime-and-gateway, add-explanation-workflows)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Contract package, pinned by exact version AND by the SHA-256 digest of the exact wheel
+    # (contracts-pin.json, verified by scripts/check_contracts_pin.py and by uv.lock).
+    # The wheel is the FinancialPlanning-built artifact, vendored byte for byte until the
+    # CodeArtifact registry (/finplan/shared/financialplanning/contract/registry-ref) serves it.
+    # Re-pin with: uv run python scripts/check_contracts_pin.py --repin
+    "finplan-contracts==1.0.0",
+    # The agent framework (design D1). LangGraph only: no other agent framework, no managed harness.
+    "langgraph>=1.0,<2",
+    "langchain-core>=1.0,<2",
+    # AgentCore Memory checkpointer (AgentCoreMemorySaver, design D3).
+    "langgraph-checkpoint-aws>=1.0,<2",
+    # AgentCore Runtime HTTP service contract (/invocations, /ping on 0.0.0.0:8080).
+    "bedrock-agentcore>=1.0,<2",
+    "boto3>=1.40",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "moto[ssm,sts,cloudwatch]>=5.1",
+    "httpx>=0.27",
+    "aws-cdk-lib>=2.220.0,<3",
+    "constructs>=10.4,<11",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+# Supply-chain hygiene: resolve only distributions published at least two weeks before the lock.
+exclude-newer = "2026-09-24T00:00:00Z"
+
+[tool.uv.sources]
+finplan-contracts = { path = "vendor/finplan-contracts/finplan_contracts-1.0.0-py3-none-any.whl" }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Only the deployable agent package (design task 1.2 layout: agent/). Tests, fixtures, skills
+# exports and infrastructure are never part of the wheel or the Runtime image.
+packages = ["agent/finplan_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "agent"]
+addopts = "-q -p no:cacheprovider"
+markers = [
+    "synth: tests that synthesize CDK stacks (offline)",
+    "deployed: deployed-environment suites run by scripts/stage_runner.py with the stage role (never offline)",
+]
+filterwarnings = [
+    # third-party deprecations inside bedrock-agentcore (not actionable here)
+    "ignore::DeprecationWarning:bedrock_agentcore.*",
+    "ignore:Support for class-based `config` is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 240
+target-version = "py312"
+extend-exclude = ["vendor", "openspec"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["finplan_agent", "tests", "scripts"]

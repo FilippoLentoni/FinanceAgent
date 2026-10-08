@@ -1,0 +1,29 @@
+{
+  "$comment": "CONFIGURATION FIXTURES (the only test location allowed to hold Bedrock model or inference-profile identifiers; scripts/agent_gates.py exempts tests/fixtures/config/). Rates are SYNTHETIC test values, not prices.",
+  "model_ids": {
+    "prod_profile": "us.anthropic.claude-opus-5",
+    "cheaper_profile": "us.anthropic.claude-haiku-5-5",
+    "global_profile": "global.anthropic.claude-opus-5",
+    "bedrock_qwen": "qwen.qwen3-32b-v1:0",
+    "qwen_mixed_case": "us.Qwen3.6-27B",
+    "financemodel_ref": "financemodel-qwen-endpoint"
+  },
+  "guards": {
+    "bedrock_valid": {
+      "max_tokens_invocation": 512,
+      "max_tokens_turn": 4096,
+      "max_tokens_session": 20000,
+      "max_tool_calls_turn": 4,
+      "max_cost_session_usd": 0.25,
+      "prompt_caching": "enabled",
+      "rates": {
+        "input_per_1k_usd": 0.01,
+        "output_per_1k_usd": 0.05,
+        "cache_write_per_1k_usd": 0.0125,
+        "cache_read_per_1k_usd": 0.001,
+        "source": "configured",
+        "retrieved_at": "2026-10-08"
+      }
+    }
+  }
+}

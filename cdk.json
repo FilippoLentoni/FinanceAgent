@@ -1,0 +1,15 @@
+{
+  "app": "uv run python infra/app.py",
+  "notices": false,
+  "watch": {
+    "include": ["infra/**", "agent/**", "config/**", "policy/**"],
+    "exclude": ["**/__pycache__", "cdk.out", "tests"]
+  },
+  "context": {
+    "cli-telemetry": false,
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-s3:createDefaultLoggingPolicy": true,
+    "@aws-cdk/core:target-partitions": ["aws"]
+  }
+}

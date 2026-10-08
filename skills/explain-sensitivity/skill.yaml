@@ -1,0 +1,22 @@
+# Agent skill bundle; add-explanation-workflows task 4.7. No model identifier, price or endpoint here.
+name: explain-sensitivity
+version: 0.1.0
+purpose: Show how the recommendation responds to risk, turnover and constraint settings, classifying each point as permitted or as needing original-policy concessions (workflow 3).
+explanation_type: sensitivity
+tools:
+  - get_plan_version
+  - get_plan
+  - submit_experiment        # dry_run first; real submission only after the confirmation interrupt
+  - get_job_status
+  - get_experiment_result
+  - create_override_version  # adopt-alternative only, after the confirmation interrupt showing concessions
+evidence_kinds: [sensitivity_sweep]
+narration:
+  max_tokens_invocation: 600
+  budget_category: bedrock_explanations
+output_contract:
+  envelope: core/v1/explanation-result.json
+  extensions: [explanation_type, request_ids, evidence_items, checks, labels, narrative_status, citations, claim_check, findings, disclaimer]
+  narrative_statuses: [generated, unavailable, budget_exceeded]
+  citations: "[evN] after every sentence that states a figure"
+  required_statements: [disclaimer_when_modeled_effect]

@@ -1,0 +1,16 @@
+{
+  "$comment": "Account-level FinanceAgent settings (environment 'shared'). Names and settings only: no account IDs, ARNs, pool/client/gateway/memory IDs, prices or secrets. Everything environment-specific resolves at deploy or run time from SSM (contracts D4).",
+  "region": "us-east-2",
+  "repo": "financeagent",
+  "source": {
+    "repository": "FilippoLentoni/FinanceAgent",
+    "branch": "main"
+  },
+  "budget_category": "bedrock_explanations",
+  "usage_metrics": {
+    "namespace": "FinPlan/FinanceAgent",
+    "cost_metric": "EstimatedCostUSD",
+    "category_dimension": "BudgetCategory"
+  },
+  "image_repository": "runtime-images"
+}

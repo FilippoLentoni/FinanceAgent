@@ -1,0 +1,66 @@
+{
+  "$comment": "FinanceAgent configuration for gamma. Settings, defaults and SSM parameter NAMES only. The provider kind and model ID below are PUBLISHED to SSM by the pipeline (PublishRelease); the agent reads them only from SSM. Guard caps live in SSM (/finplan/gamma/financeagent/config/explanation-provider, explanation-model-id, explanation-guards); the defaults below apply only to guard fields absent from the SSM guards document. No prices: rates come only from the SSM guards document (configured or AWS Price List, with retrieved_at).",
+  "environment": "gamma",
+  "region": "us-east-2",
+  "phase": 1,
+  "served_contract_majors": [
+    1
+  ],
+  "provider_kind_allowed": [
+    "fixture",
+    "bedrock"
+  ],
+  "guard_defaults": {
+    "max_tokens_invocation": 1024,
+    "max_tokens_turn": 4096,
+    "max_tokens_session": 32768,
+    "max_tool_calls_turn": 6,
+    "max_cost_session_usd": 0.5,
+    "prompt_caching": "disabled"
+  },
+  "session": {
+    "idle_runtime_session_timeout_seconds": 900,
+    "max_lifetime_seconds": 28800,
+    "memory_event_expiry_days": 30,
+    "long_term_memory_strategies": []
+  },
+  "streaming": {
+    "http": true,
+    "websocket": {
+      "enabled": false,
+      "requirement_ref": null
+    }
+  },
+  "gateway": {
+    "max_response_bytes": 262144,
+    "request_timeout_seconds": 60,
+    "mcp_protocol_version": "2025-11-25",
+    "policy_mode": "ENFORCE"
+  },
+  "log_retention_days": 30,
+  "explanation": {
+    "provider": "bedrock",
+    "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  },
+  "identity": {
+    "callback_urls": [
+      "http://localhost:8765/callback"
+    ],
+    "logout_urls": [
+      "http://localhost:8765/logout"
+    ],
+    "access_token_minutes": 60,
+    "deletion_protection": false
+  },
+  "explanations": {
+    "$comment": "add-explanation-workflows design E7 / Migration Plan step 2: per-environment flag and conservative request limits; overridable field by field by /finplan/<env>/financeagent/config/explanation-limits (JSON). No model IDs or prices here. prod stays disabled until approval.",
+    "enabled": true,
+    "max_resolves_per_request": 12,
+    "max_shapley_groups": 4,
+    "max_sweep_points": 11,
+    "max_estimated_usd_per_request": 0.5,
+    "narration_max_tokens_invocation": 600,
+    "status_polls": 1,
+    "default_tolerance": 1e-06
+  }
+}

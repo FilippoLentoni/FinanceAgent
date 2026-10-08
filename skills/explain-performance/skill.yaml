@@ -1,0 +1,24 @@
+# Agent skill bundle (add-agent-runtime-and-gateway design: skills/<name>/SKILL.md + skill.yaml).
+# add-explanation-workflows task 2.4. No model identifier, price, endpoint or account value here.
+name: explain-performance
+version: 0.1.0
+purpose: Explain realized paper or simulated performance against the exact published plan (workflow 1).
+explanation_type: plan_performance
+tools:
+  - get_publication          # EX-OQ-9: FinanceLambdasTool follow-up read tool
+  - list_publications        # EX-OQ-9
+  - list_executions          # EX-OQ-9 (read of paper/simulated execution records)
+  - get_plan_version
+  - submit_experiment        # dry_run first; real submission only after the confirmation interrupt
+  - get_job_status
+  - get_experiment_result
+evidence_kinds: [performance_decomposition]
+narration:
+  max_tokens_invocation: 600
+  budget_category: bedrock_explanations
+output_contract:
+  envelope: core/v1/explanation-result.json
+  extensions: [explanation_type, request_ids, evidence_items, checks, labels, narrative_status, citations, claim_check, findings, disclaimer]
+  narrative_statuses: [generated, unavailable, budget_exceeded]
+  citations: "[evN] after every sentence that states a figure"
+  required_statements: [disclaimer_when_modeled_effect, intraday_partial_note]

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DRAFT difference_inventory evidence payload",
+  "description": "DRAFT ONLY (add-explanation-workflows EX-OQ-2 / CONTRACT GAP-E2): the agent-side expectation of this evidence kind until the finance/v1 contract minor defines it. Never published; test fixtures only.",
+  "x-finplan-status": "draft-not-published",
+  "type": "object",
+  "properties": {
+    "evidence_kind": {
+      "const": "difference_inventory"
+    },
+    "subject": {
+      "type": "object"
+    },
+    "evaluator_version": {
+      "type": "string"
+    },
+    "previous": {
+      "type": "object",
+      "properties": {
+        "plan_version_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "configuration_id": {
+          "type": "string",
+          "pattern": "^cfg_[0-9a-f]{64}$"
+        },
+        "input_snapshot_id": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "model_version": {
+          "type": "string",
+          "pattern": "^[a-z]{2,4}_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+        },
+        "origin": {
+          "enum": [
+            "model_run",
+            "manual_override",
+            "excel_import"
+          ]
+        },
+        "horizon": {
+          "type": "object"
+        },
+        "model_family": {
+          "type": "string"
+        },
+        "model_spec_hash": {
+          "type": "string"
+        },
+        "lineage": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "plan_version_id",
+        "checksum",
+        "configuration_id",
+        "input_snapshot_id",
+        "origin",
+        "horizon"
+      ]
+    },
+    "new": {
+      "$ref": "#/properties/previous"
+    },
+    "differences": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "group": {
+            "enum": [
+              "data",
+              "configuration",
+              "constraints",
+              "model"
+            ]
+          },
+          "pointer": {
+            "type": "string"
+          },
+          "previous": {},
+          "new": {}
+        },
+        "required": [
+          "group",
+          "previous",
+          "new"
+        ]
+      }
+    },
+    "common_horizon": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "observation_changes": {
+      "type": "array"
+    }
+  },
+  "required": [
+    "evidence_kind",
+    "previous",
+    "new",
+    "differences"
+  ]
+}
