@@ -40,7 +40,7 @@
   "log_retention_days": 30,
   "explanation": {
     "provider": "bedrock",
-    "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    "model_id": "us.amazon.nova-lite-v1:0"
   },
   "identity": {
     "callback_urls": [
