@@ -157,11 +157,12 @@ Property tests check the identities over random fixtures. LLM output is never a 
 - [Users read modeled effects as causal] → mandatory labels, the wording check, and a fixed disclaimer in each skill's output contract.
 - [Paper execution records lack fee or slippage detail] → the cost gap reports `not_available` for missing components rather than inventing them (EX-OQ-4).
 - [Phase 2 dependencies (classical optimizers, real data OQ-5) slip] → all workflows are developed and tested on fixtures. Deployment is gated on producer releases (`DEPENDENCY_UNAVAILABLE` otherwise).
+- Data parity (user decision 26, 2026-10-07): the platform serves real phase 2 data (yfinance research universe and SPY, no `synthetic` flag) in beta and, from this release, in gamma; prod follows in a later release and may serve synthetic snapshots meanwhile. Each environment ingests independently. Nothing in this repo requires platform data to be synthetic in any environment; the result's `synthetic` flag only discloses evidence that is synthetic. Plan records created by tests stay synthetic; synthetic market-data fixtures are for offline tests only.
 
 ## Migration Plan
 
 1. Land the contract minor with the evidence schemas, explanation envelope fields and lineage solver fields (GAP-E2, GAP-E3), then the FinanceModel experiment types (GAP-E1) and the FinanceLambdasTool read tools.
-2. Release FinanceAgent skills behind the per-environment flag `explanations.enabled`. In beta they run on fixture-backed evidence jobs (FinanceModel CPU stub) with the fixture narrative provider.
+2. Release FinanceAgent skills behind the per-environment flag `explanations.enabled`. In beta they run on FinanceModel CPU-stub evidence jobs with the fixture narrative provider; platform reads may return real phase 2 data (decision 26).
 3. Promote to gamma with gamma FinanceModel releases and the Bedrock provider (after Opus 5 model access is enabled at bootstrap and verified, tasks 3.8–3.9 in `add-agent-runtime-and-gateway`). Enable in prod after approval. Rollback means disabling the flag or redeploying the previous `release_id`. Evidence artifacts are immutable and unaffected.
 
 ## Contract gap status (cross-repo review, 2026-10-07)

@@ -218,6 +218,30 @@ def test_assembler_output_conforms_to_the_contract_envelope_and_never_has_an_emp
         assemble(explanation_type="sensitivity", subject={"plan_version_id": uid("pv", 1)}, request_ids={}, items=[], checks=[], labels=[], narrative="x", narrative_status="generated")
 
 
+def test_real_phase_2_evidence_is_accepted_and_the_synthetic_disclosure_stays_accurate():
+    """Decision 26 (data parity): beta, gamma and prod may serve REAL phase 2 data (no ``synthetic``
+    flag, lineage provider ``yfinance``); prod may still serve synthetic data during the transition.
+    No environment requires synthetic evidence; the result flags ``synthetic`` only when an item is."""
+    doc = {**sweep_evidence([1.0]), "lineage": {"provider": "yfinance", "dataset": "finance/etf-daily/SPY"}}
+    doc.pop("synthetic", None)
+    real_ref = {k: v for k, v in evidence_ref(doc, 2).items() if k != "synthetic"}
+    real_job = {"run_id": uid("run", 2), "completion_status": "succeeded", "solution_status": "optimal", "artifacts": [real_ref], "artifacts_complete": True, "payload": {"evidence": doc}}
+    real = evidence_from_job_result("ev2", real_job, expected_kind="sensitivity_sweep")
+    flagged_false = evidence_from_job_result("ev3", {**real_job, "artifacts": [{**real_ref, "synthetic": False}]}, expected_kind="sensitivity_sweep")
+    fixture = item(sweep_evidence([1.0]), key="ev4")
+
+    def result(items):
+        return assemble(explanation_type="sensitivity", subject={"plan_version_id": uid("pv", 1)}, request_ids={}, items=items, checks=[], labels=[], narrative="", narrative_status="unavailable")
+
+    for items in ([real], [flagged_false], [real, flagged_false]):
+        out = result(items)
+        validate_result(out)
+        assert "synthetic" not in out
+    mixed = result([real, fixture])
+    validate_result(mixed)
+    assert mixed["synthetic"] is True
+
+
 def test_contract_rejects_a_result_without_evidence_checksum():
     from finplan_contracts.validate import validate
 

@@ -56,7 +56,7 @@ From official AgentCore documentation (docs.aws.amazon.com/bedrock-agentcore), r
 
 **Goals:**
 - One tool path (Gateway) and one policy for every client. The hosted agent gains no privilege that a direct MCP client lacks.
-- A phase 1 deployment that is fully fixture-backed. It can be promoted beta → gamma → prod with near-zero standing cost and runs deployed MCP invocation tests in each environment.
+- A phase 1 deployment that is fully fixture-backed (fixture provider, synthetic test portfolio; platform market data may be real phase 2 data in any environment, decision 26, 2026-10-07). It can be promoted beta → gamma → prod with near-zero standing cost and runs deployed MCP invocation tests in each environment.
 - A pluggable provider interface that changes from the fixture provider to Amazon Bedrock by configuration only, once model access for the chosen model (Claude Opus 5, D4) is enabled at bootstrap and verified.
 
 **Non-Goals:**
@@ -148,7 +148,7 @@ Skills live in `skills/<name>/` as `SKILL.md` instructions plus `skill.yaml` (ve
 - Beta: deploy, register beta targets, integration-beta (MCP list and call, agent invocation, ENV-15 checksum comparison, checkpoint scan).
 - Gamma: deploy, register gamma targets, gamma tests (policy parity, isolation, drift, rollback drill).
 - Approval.
-- Prod: deploy, read-only smoke on the synthetic portfolio.
+- Prod: deploy, read-only smoke on the synthetic portfolio (prod platform data may be real or still synthetic during the decision 26 transition; the smoke accepts both).
 
 Every MCP test uses a per-environment `ci_test` client-credentials app whose secret is referenced through `/finplan/<env>/financeagent/secret-ref/ci-test-client`.
 

@@ -49,9 +49,9 @@ Scope: phase 2. This change requires `add-agent-runtime-and-gateway` to be deplo
 
 ## 5. Integration checks
 
-- [ ] 5.1 Run all three workflows end-to-end in beta against the FinanceModel CPU stub evidence jobs and fixture-backed platform reads; verify evidence checksums reproduce and claim checks pass (BLOCKED by EX-OQ-1, EX-OQ-2, EX-OQ-9)
-- [ ] 5.2 Run them in gamma against gamma producers only, with Bedrock narration under the configured per-turn cap; verify the gamma isolation tests from the phase 1 change still pass, narration usage is recorded against `bedrock_explanations`, and explanations are disabled in prod until approval (Bedrock narration requires Opus 5 model access verified by `add-agent-runtime-and-gateway` task 3.9; gamma may use a cheaper configured model ID; fixture narration otherwise)
-- [ ] 5.3 Prod smoke: one read-only workflow 2 `no_effect` explanation on the synthetic portfolio with the identical-config fixture; verify no job or plan state is created beyond the read-only evidence lookup
+- [ ] 5.1 Run all three workflows end-to-end in beta against the FinanceModel CPU stub evidence jobs and platform reads (real phase 2 data in beta, decision 26); verify evidence checksums reproduce and claim checks pass (BLOCKED by EX-OQ-1, EX-OQ-2, EX-OQ-9)
+- [ ] 5.2 Run them in gamma against gamma producers only (gamma platform data is real phase 2 data from this release, decision 26), with Bedrock narration under the configured per-turn cap; verify the gamma isolation tests from the phase 1 change still pass, narration usage is recorded against `bedrock_explanations`, and explanations are disabled in prod until approval (Bedrock narration requires Opus 5 model access verified by `add-agent-runtime-and-gateway` task 3.9; gamma may use a cheaper configured model ID; fixture narration otherwise)
+- [ ] 5.3 Prod smoke: one read-only workflow 2 `no_effect` explanation on the synthetic portfolio with the identical-config fixture (the portfolio stays synthetic; prod market data may be real or still synthetic during the transition, decision 26, and both are accepted); verify no job or plan state is created beyond the read-only evidence lookup
 
 ## Verification status (2026-10-08)
 

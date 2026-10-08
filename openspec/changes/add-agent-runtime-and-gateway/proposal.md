@@ -19,7 +19,7 @@ The system needs one agent entry point (the hosted explanation agent) and one to
 - Add **agent skills**: versioned, reviewed instruction bundles with a declared tool allow-list. The same bundles can be exported for Claude Code/Codex users.
 - Add optional **website/CLI integration** through published Runtime and Gateway references. The website owner is still contracts OQ-10.
 - Add a **repo pipeline** following the contracts pipeline standard (D6). The gamma Gateway is wired only to gamma Lambdas. Beta, gamma and prod all run **deployed MCP invocation tests**.
-- **Phase 1 only:** everything is fixture-backed. Bedrock narration is switched on later in gamma and prod by a config-only release once Opus 5 model access has been enabled at bootstrap and verified. There is no FinanceModel compute, no paid job approval by the agent and no live trading. The explanation workflows themselves are a separate phase 2 change (`add-explanation-workflows`).
+- **Phase 1 only:** everything is fixture-backed (the agent's provider and test plan records; platform market data may be real phase 2 data per environment, user decision 26, 2026-10-07). Bedrock narration is switched on later in gamma and prod by a config-only release once Opus 5 model access has been enabled at bootstrap and verified. There is no FinanceModel compute, no paid job approval by the agent and no live trading. The explanation workflows themselves are a separate phase 2 change (`add-explanation-workflows`).
 - **Out of scope:** live trading, Coinbase, AgentCore payments, wallet spending, automated rewriting of risk preferences, and AgentCore long-term memory strategies.
 
 ## Capabilities
