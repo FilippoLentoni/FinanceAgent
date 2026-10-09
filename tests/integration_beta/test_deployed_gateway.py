@@ -11,7 +11,7 @@ from tests.deployed import deployed, requires_deployed
 
 pytestmark = requires_deployed
 
-READ_ONLY = ("describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result")
+READ_ONLY = ("recommend_portfolio", "get_performance_evidence", "get_publication", "list_publications", "list_executions", "describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result")
 
 
 def test_release_manifest_and_published_references():

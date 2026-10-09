@@ -94,6 +94,21 @@ def test_registration_from_the_environments_released_references(ssm):
     assert cat_rel.startswith("rel_")
 
 
+def test_read_only_execution_history_is_registered(ssm):
+    _seed(ssm, "beta", ["list_executions", "recommend_portfolio"])
+    targets, _, notes = rel.resolve_targets(ssm, "beta", account=ACCOUNT, tools=contract_tools(), pinned_major=1)
+    assert targets["list_executions"] == _arn("beta", "list_executions")
+    assert targets["recommend_portfolio"] == _arn("beta", "recommend_portfolio")
+    assert not notes
+
+
+def test_stale_pipeline_target_handoff_cannot_publish_a_successful_release():
+    expected = {"describe_capabilities": _arn("beta", "describe_capabilities"), "recommend_portfolio": _arn("beta", "recommend_portfolio")}
+    with pytest.raises(rel.DependencyMissing, match="shared pipeline wiring"):
+        stage_runner.verify_target_handoff(expected, expected | {"recommend_portfolio": "none"})
+    stage_runner.verify_target_handoff(expected, expected)
+
+
 class _FakeS3:
     def __init__(self, objects):
         self.objects = objects

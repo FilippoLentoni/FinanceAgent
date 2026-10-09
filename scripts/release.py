@@ -302,7 +302,7 @@ def resolve_targets(ssm: Any, env: str, *, account: str, tools: list[str], pinne
     targets = {t: NONE for t in tools}
     for entry in catalog["tools"]:
         tool = entry["name"]
-        if any(w in tool for w in words):
+        if tool != "list_executions" and any(w in tool for w in words):
             notes.append(f"{tool}: names a denied capability; never registered")
             continue
         if tool not in targets:

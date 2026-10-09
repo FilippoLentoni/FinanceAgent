@@ -12,6 +12,7 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 | `action` | all | `invoke` (default), `confirm`, `describe`, `delete_session` |
 | `prompt` | invoke | the user message (at most 20,000 characters) |
 | `tool_request` | invoke | optional structured request `{"name": "<tool>", "arguments": {...}}` |
+| `recommendation` | invoke | selected-strategy request with an approved snapshot, completed session and current portfolio state; returns `answer.recommendation` |
 | `explanation` | invoke | optional structured explanation request (workflows of `add-explanation-workflows`; see `docs/explanations.md`); the answer carries `answer.explanation` (a contract explanation result) and `prompt` becomes optional |
 | `approve` | confirm | `true` runs the pending state-changing call(s) once; `false` declines |
 | `stream` | all | `true` (default): SSE events; `false`: one JSON document (the `final` payload) |
@@ -20,10 +21,10 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 ## `describe`
 
 ```json
-{"type": "describe", "framework": "langgraph", "graph_version": 1, "environment": "gamma",
- "release_id": "rel_...", "contract_version": "1.0.0",
+{"type": "describe", "framework": "langgraph", "graph_version": 1, "environment": "beta",
+ "release_id": "rel_...", "contract_version": "1.2.0",
  "provider": {"kind": "bedrock", "model_id": "<from SSM>", "max_tokens_invocation": 1024,
-              "prompt_caching": "enabled", "rates_source": "configured", "rates_retrieved_at": "..."},
+              "prompt_caching": "disabled", "rates_source": "aws_price_list", "rates_retrieved_at": "..."},
  "skills": [...], "streaming": {"http": true, "websocket": false}}
 ```
 

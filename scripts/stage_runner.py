@@ -39,7 +39,7 @@ for _p in (ROOT, ROOT / "agent"):
 
 from scripts.release import NONE, DependencyMissing, ManifestError, ReleaseInfo, approval_record, publish_release, recorded_targets, resolve, write_variables  # noqa: E402
 
-__all__ = ["SUITES", "deployed_targets", "main", "precheck_problems", "suite_counts", "tests_action"]
+__all__ = ["SUITES", "deployed_targets", "main", "precheck_problems", "suite_counts", "tests_action", "verify_target_handoff"]
 
 SUITES: dict[str, tuple[str, list[str]]] = {
     "beta": ("integration-beta", ["tests/integration_beta"]),
@@ -66,6 +66,13 @@ def deployed_targets(cfn: Any, env: str) -> dict[str, str]:
     stack = cfn.describe_stacks(StackName=n.agent_stack_name(env))["Stacks"][0]
     params = {p["ParameterKey"]: p.get("ParameterValue", NONE) for p in stack.get("Parameters") or []}
     return {t: params.get(target_param(t), NONE) for t in contract_tools()}
+
+
+def verify_target_handoff(expected: Mapping[str, str], actual: Mapping[str, str]) -> None:
+    """Refuse publishing when the shared pipeline dropped resolved target parameters."""
+    mismatches = sorted(t for t, arn in expected.items() if actual.get(t, NONE) != arn)
+    if mismatches:
+        raise DependencyMissing("deployed targets differ from resolved targets; refresh the shared pipeline wiring before releasing: " + ", ".join(mismatches))
 
 
 def suite_counts(junit_xml: Path) -> dict[str, int]:
@@ -133,7 +140,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CodeBuild 
         from infra.stacks import naming as n
 
         approval = approval_record(client("codepipeline", region), n.PIPELINE_NAME, str(args.pipeline_execution_id)) if args.env == "prod" else None
-        manifest = publish_release(info, args.env, ssm=ssm, cfn=cfn, targets=deployed_targets(cfn, args.env), s3=s3, store_bucket=args.store, approval=approval)
+        recorded = recorded_targets(s3, args.store, info.release_id, args.env) if (info.rollback and args.store) else None
+        expected = resolve(args.env, ssm=ssm, bedrock=client("bedrock", region), account=account, region=region, recorded_targets=recorded, s3=s3).targets
+        actual = deployed_targets(cfn, args.env)
+        verify_target_handoff(expected, actual)
+        manifest = publish_release(info, args.env, ssm=ssm, cfn=cfn, targets=actual, s3=s3, store_bucket=args.store, approval=approval)
         print(f"published {args.env} manifest for {manifest['release_id']} (previous {manifest['previous_release_id']}; outputs {sorted(manifest['outputs'])})")
         print(json.dumps({"registered": [t for t, v in deployed_targets(cfn, args.env).items() if v != NONE]}))
         return 0
