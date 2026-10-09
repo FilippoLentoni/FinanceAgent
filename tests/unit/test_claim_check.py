@@ -27,3 +27,11 @@ def test_identifiers_and_hashes_are_not_figures():
 
 def test_numbers_only_from_current_turn_results():
     assert not claim_check("The weight is 0.6.", []).passed
+
+
+def test_numbered_list_markers_are_formatting_but_financial_figures_are_checked():
+    text = '1. Weight 60%.\n2) NAV 104,250.5.\n10. Expected return 7.5%.'
+    res = claim_check(text, RESULTS)
+    assert res.unsupported == ['7.5%']
+    assert res.text.startswith('1. Weight 60%.\n2) NAV 104,250.5.\n10.')
+    assert res.checked == 3

@@ -27,6 +27,7 @@ __all__ = ["ClaimCheckResult", "claim_check", "collect_values", "REMOVED"]
 REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
 _NUM = re.compile(r"(?<![\w.$/-])-?\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?(?![\w])|(?<![\w.$/-])-?\$?\d+(?:\.\d+)?%?(?![\w])")
+_LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)](?=\s)")
 
 
 @dataclass
@@ -96,10 +97,11 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
     out: list[str] = []
     pos = 0
     spans: list[tuple[int, int, str]] = []
+    markers = [(m.start(), m.end()) for m in _LIST_MARKER.finditer(text)]
     for m in _DATE.finditer(text):
         spans.append((m.start(), m.end(), "date"))
     for m in _NUM.finditer(text):
-        if any(s <= m.start() < e for s, e, _ in spans):
+        if any(s <= m.start() < e for s, e, _ in spans) or any(s <= m.start() < e for s, e in markers):
             continue
         spans.append((m.start(), m.end(), "num"))
     spans.sort()

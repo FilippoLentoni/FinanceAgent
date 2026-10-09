@@ -188,7 +188,8 @@ def project(schema_key: str, store: SchemaStore | None = None) -> dict[str, Any]
 def tool_definition(tool: str, description: str | None = None, store: SchemaStore | None = None) -> ToolDefinition:
     store = store or load_store()
     stem = tool.replace("_", "-")
-    req = store.get(f"tools/{stem}{_REQ_SUFFIX}")
+    request_name = "tools/recommend-portfolio-invocation-request" if tool == "recommend_portfolio" else f"tools/{stem}{_REQ_SUFFIX}"
+    req = store.get(request_name)
     resp = store.get(f"tools/{stem}{_RESP_SUFFIX}")
     desc = description or str(req.schema.get("description") or tool)
     return ToolDefinition(name=tool, description=_clip(desc), input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)

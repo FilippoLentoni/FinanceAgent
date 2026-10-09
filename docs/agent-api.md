@@ -12,7 +12,7 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 | `action` | all | `invoke` (default), `confirm`, `describe`, `delete_session` |
 | `prompt` | invoke | the user message (at most 20,000 characters) |
 | `tool_request` | invoke | optional structured request `{"name": "<tool>", "arguments": {...}}` |
-| `recommendation` | invoke | selected-strategy request with an approved snapshot, completed session and current portfolio state; returns `answer.recommendation` |
+| `recommendation` | invoke | `{}` for the saved paper portfolio and latest approved market session, or an explicit snapshot/session/holdings request; returns `answer.recommendation` |
 | `explanation` | invoke | optional structured explanation request (workflows of `add-explanation-workflows`; see `docs/explanations.md`); the answer carries `answer.explanation` (a contract explanation result) and `prompt` becomes optional |
 | `approve` | confirm | `true` runs the pending state-changing call(s) once; `false` declines |
 | `stream` | all | `true` (default): SSE events; `false`: one JSON document (the `final` payload) |
@@ -22,7 +22,7 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 
 ```json
 {"type": "describe", "framework": "langgraph", "graph_version": 1, "environment": "beta",
- "release_id": "rel_...", "contract_version": "1.2.0",
+ "release_id": "rel_...", "contract_version": "1.3.0",
  "provider": {"kind": "bedrock", "model_id": "<from SSM>", "max_tokens_invocation": 1024,
               "prompt_caching": "disabled", "rates_source": "aws_price_list", "rates_retrieved_at": "..."},
  "skills": [...], "streaming": {"http": true, "websocket": false}}
@@ -70,13 +70,24 @@ tool release or Bedrock model access), `RATE_LIMITED`, `INTERNAL` (never with a 
 
 ## Selected strategy recommendation
 
-Send `recommendation` with `input_snapshot_id`, completed-session `as_of` and `holdings`
-(`weights` of `{instrument_id, weight}`, `cash_weight`, `portfolio_value`, `high_watermark`).
-An optional `prompt` asks for an explanation in natural language. The graph uses the read-only
-`recommend_portfolio` tool and returns its complete result in `answer.recommendation` even when
-the narrative is unavailable. Missing or unauthorized inputs produce tool errors without invented
-weights or a training job. Plain-language requests can ask the hosted provider to collect these
-inputs; the model must not assume cash holdings or a high watermark.
+Ask naturally, for example `{"prompt":"How should I invest today?","stream":false}`, or
+send `{"recommendation":{},"stream":false}`. The graph invokes the existing read-only
+`recommend_portfolio` MCP tool with `{}`. FinanceModel resolves the persisted beta paper book and
+latest approved completed market session. No repeated holdings input or new training job is needed.
+The tool does not initialize the book or apply the recommended trades.
+
+The deterministic answer includes every supported instrument and cash, current/target quantities,
+signed proposed fractional share and value changes, reference close/date, saved portfolio revision,
+strategy identity and exact policy/data provenance. The complete validated producer result is also
+returned in `answer.recommendation`. The explanation identifies movement from current holdings to
+constrained model targets; it does not invent news or feature-level causal reasons.
+
+Existing explicit-state requests remain supported: send `recommendation` with `input_snapshot_id`,
+completed-session `as_of` and `holdings` (`weights` of `{instrument_id, weight}`, `cash_weight`,
+`portfolio_value`, `high_watermark`). For natural questions explicitly supplying actual holdings,
+the provider collects any missing state rather than substituting the saved paper book. A bare
+recommendation does not claim the paper positions are actual brokerage holdings. Missing state,
+prices or selected policy produce a tool error without fabricated allocations.
 
 Hosted beta uses guarded Bedrock; offline CI retains fixtures/stubs with no network model calls.
 The beta Gateway client waits up to 330 seconds. User authorization is enforced by the Gateway;

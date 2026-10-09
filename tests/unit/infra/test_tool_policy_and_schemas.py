@@ -104,7 +104,8 @@ def test_every_contract_tool_projects_to_the_gateway_subset():
             for node in _walk(schema):
                 assert set(node) <= {"type", "description", "properties", "required", "items"}
                 assert node["type"] in GATEWAY_TYPES
-        assert d.input_schema_id.endswith(f"tools/{t.replace('_', '-')}-request.json")
+        stem = "recommend-portfolio-invocation" if t == "recommend_portfolio" else t.replace('_', '-')
+        assert d.input_schema_id.endswith(f"tools/{stem}-request.json")
 
 
 def test_pattern_constraint_moves_to_the_description():

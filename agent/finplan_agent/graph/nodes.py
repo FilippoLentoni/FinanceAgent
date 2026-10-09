@@ -25,10 +25,11 @@ from langgraph.types import interrupt
 from .. import GRAPH_VERSION
 from ..core.errors import AgentError
 from ..core.ids import idempotency_key
-from ..providers.base import GenerateRequest, ToolSpec, text_of
+from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec, Usage, text_of
 from ..providers.fixture import FixtureProvider
 from .claim_check import claim_check
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
+from .recommendations import recommendation_arguments, render_recommendation, supplied_state_recommendation, target_cash_value
 from .state import TURN_RESET, AgentContext, AgentState
 
 __all__ = ["start_turn", "route", "plan", "confirm", "tool_call", "narrate", "check_claims", "respond", "compact", "NON_TERMINAL_JOB_STATES"]
@@ -148,6 +149,10 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     updates: dict[str, Any] = {"plan_rounds": rounds, "pending_calls": []}
     if rounds > MAX_PLAN_ROUNDS:
         return updates
+    # A recommendation is a single fresh, read-only inference call. Do not let subsequent
+    # provider drafts replace a complete allocation or silently retry failed inference.
+    if any(r.get("tool") == "recommend_portfolio" for r in state.get("tool_results") or []):
+        return updates
     try:
         offered = ctx.offered_tools()
     except AgentError as exc:
@@ -162,16 +167,23 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         tools=tuple(offered),
         temperature=ctx.provider_config.temperature,
     )
-    try:
-        result, usage_updates = _invoke_provider(state, ctx, request, stream_tokens=False)
-        updates.update(usage_updates)
-    except AgentError as exc:
-        if exc.code != "BUDGET_EXCEEDED" and exc.code != "DEPENDENCY_UNAVAILABLE" and exc.code != "RATE_LIMITED":
-            raise
-        # Degrade to the deterministic planner: tool-only answer, no model call.
-        updates.update(error=_err(exc, state), degraded="tool_only")
-        result = FixtureProvider().generate(request)
+    arguments = recommendation_arguments(request.messages)
+    if arguments is not None and any(t.name == "recommend_portfolio" for t in offered):
+        result = GenerateResult(text="", tool_calls=(ToolCall(id=f"recommend-{state.get('turn', 1)}", name="recommend_portfolio", arguments=arguments),), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+    else:
+        try:
+            result, usage_updates = _invoke_provider(state, ctx, request, stream_tokens=False)
+            updates.update(usage_updates)
+        except AgentError as exc:
+            if exc.code != "BUDGET_EXCEEDED" and exc.code != "DEPENDENCY_UNAVAILABLE" and exc.code != "RATE_LIMITED":
+                raise
+            # Degrade to the deterministic planner: tool-only answer, no model call.
+            updates.update(error=_err(exc, state), degraded="tool_only")
+            result = FixtureProvider().generate(request)
     calls = list(result.tool_calls)
+    if supplied_state_recommendation(request.messages) and any(c.name == "recommend_portfolio" and not isinstance(c.arguments.get("holdings"), dict) for c in calls):
+        updates["draft_text"] = "For your explicitly supplied portfolio, please provide complete current holdings weights, cash weight, total portfolio value and historical high watermark, with an approved snapshot and completed session. I will not substitute the saved paper portfolio for your actual holdings."
+        return updates
     if not calls:
         if result.text:
             updates["draft_text"] = result.text
@@ -287,6 +299,13 @@ def _evidence(state: AgentState) -> tuple[dict[str, Any], ...]:
 def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
     _progress("narrate")
+    for item in reversed(state.get("tool_results") or []):
+        if item.get("tool") != "recommend_portfolio":
+            continue
+        rec = (item.get("result") or {}).get("recommendation") if item.get("ok") else None
+        text = render_recommendation(rec) if rec else f"The portfolio policy could not produce a recommendation: {(item.get('error') or {}).get('code', 'DEPENDENCY_UNAVAILABLE')}. No portfolio changes were made."
+        _emit({"type": "token", "text": text})
+        return {"narrative": text, "narrative_status": "generated"}
     if state.get("draft_text"):
         _emit({"type": "token", "text": state["draft_text"]})
         return {"narrative": state["draft_text"], "narrative_status": "generated"}
@@ -312,6 +331,13 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
     if not state.get("narrative") or state.get("narrative_status") != "generated":
         return {"claim_check": {"passed": True, "checked_figures": 0, "removed_figures": []}}
     values = [r.get("result", r.get("summary")) for r in state.get("tool_results") or [] if r.get("ok")]
+    # The cash dollar target is the one derived figure in the deterministic recommendation
+    # renderer: verify the same exact multiplication of fresh producer value and target weight.
+    for item in state.get("tool_results") or []:
+        if item.get("ok") and item.get("tool") == "recommend_portfolio":
+            rec = (item.get("result") or {}).get("recommendation")
+            if rec:
+                values.append({"computed_target_cash": target_cash_value(rec)})
     res = claim_check(state["narrative"], values)
     return {"narrative": res.text, "claim_check": res.record()}
 
@@ -324,6 +350,9 @@ def respond(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     usage = dict(state.get("turn_usage") or {})
     usage.setdefault("provider_kind", ctx.provider.kind)
     usage.setdefault("model_id", ctx.provider.model_id)
+    for key in ("invocations", "input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"):
+        usage.setdefault(key, 0)
+    usage.setdefault("estimated_cost_usd", 0.0)
     usage["tool_calls"] = int(state.get("turn_tool_calls", 0))
     if ctx.on_usage is not None:
         ctx.on_usage(usage)

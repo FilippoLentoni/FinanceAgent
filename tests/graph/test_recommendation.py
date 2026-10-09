@@ -27,7 +27,7 @@ def service(*, error=None, provider=None, provider_config=None):
     svc, tools = make_service(tools=tools, provider=provider, provider_config=provider_config,budget_reader=Reader())
     doc = catalog_document()
     doc['tools'].append({'name':'recommend_portfolio','description':'Selected strategy recommendation',
-                         'input_schema_id':schema_id('finance','tools/recommend-portfolio-request'),
+                         'input_schema_id':schema_id('finance','tools/recommend-portfolio-invocation-request'),
                          'output_schema_id':schema_id('finance','tools/recommend-portfolio-response'),
                          'state_changing':False,'role_class':'reader',
                          'lambda_ref_parameter':'/finplan/beta/financelambdastool/lambda/recommend-portfolio-arn'})
