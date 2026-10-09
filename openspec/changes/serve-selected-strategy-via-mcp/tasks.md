@@ -10,7 +10,7 @@
 
 ## 2. Deployed beta verification
 
-- [ ] 2.1 Deploy beta through the existing pipeline and verify one hosted, authenticated recommendation uses the selected policy and records caller tool access without creating a job or changing production selection.
+- [x] 2.1 Deploy beta through the existing pipeline and verify one hosted, authenticated recommendation uses the selected policy and records caller tool access without creating a job or changing production selection.
 
 ## Workflow follow-up
 

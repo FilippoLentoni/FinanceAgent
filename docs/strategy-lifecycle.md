@@ -1,9 +1,10 @@
 # Portfolio strategy lifecycle in beta
 
 Beta is the only deployment stage in scope for the current work. A hosted, usable agent in beta
-is the immediate deliverable; this does not require deploying gamma or prod. This document describes
-the intended handoff being implemented in `serve-selected-strategy-via-mcp`, not a claim that its
-deployed acceptance tests have passed. The later recurring research controller is a future phase.
+is the immediate deliverable; this does not require deploying gamma or prod. The selected-strategy
+handoff passed authenticated MCP and hosted-agent checks on 2026-10-09; see
+[the verification record](beta-strategy-serving-verification.md) for exact scope and evidence.
+Human login/client onboarding and the later recurring research controller remain separate work.
 
 ## Four pipelines, one runtime system
 
@@ -28,6 +29,10 @@ Initial release order is FinancialPlanning → FinanceModel → FinanceLambdasTo
 After that, compatible services release independently. Producer manifests expose the deployed
 contract version; consumers use a pinned contracts package and verify producer compatibility.
 The agent release registers the tool catalog's Lambda targets in its own Gateway.
+Adding catalog tools also requires refreshing the shared agent pipeline's exported target variables
+and CloudFormation parameter overrides; it does not update itself. Compatible adapter releases
+behind an existing Lambda alias can then ship independently. Release publication checks the actual
+deployed target set against resolution. See [the Tooling update runbook](bootstrap.md).
 
 ```mermaid
 flowchart LR
