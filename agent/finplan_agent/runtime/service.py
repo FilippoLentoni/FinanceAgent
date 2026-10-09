@@ -89,7 +89,9 @@ class AgentService:
             deps.explanation_settings = load_explanation_settings(deps.settings.repo_config)
         self._catalog: tuple[float, ToolCatalog] | None = None
         self._lock = threading.Lock()
-        self._provider_loaded_at = time.monotonic()
+        # Health checks can start the process before release publishing updates SSM.
+        # Refresh on the first user request, including describe, then use the TTL.
+        self._provider_loaded_at = float("-inf")
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -178,6 +180,7 @@ class AgentService:
             return self._catalog[1]
 
     def describe(self) -> dict[str, Any]:
+        self.refresh_provider()
         s = self.deps.settings
         return {
             "type": "describe",
