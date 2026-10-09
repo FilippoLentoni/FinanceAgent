@@ -405,8 +405,8 @@ def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], 
     """``{manifest output key: (SSM name, value)}`` of every reference this deploy publishes."""
     expl = dict(cfg.get("explanation") or {})
     kind = str(expl.get("provider", "fixture"))
-    if env == "beta" and kind != "fixture":
-        raise ManifestError("beta allows only the fixture provider (no Bedrock calls in CI, FA-PRV-14)")
+    if kind not in (cfg.get("provider_kind_allowed") or []):
+        raise ManifestError(f"provider {kind!r} is not allowed in {env}")
     meta = {
         "discovery_url": outputs["DiscoveryUrl"],
         "issuer": outputs["Issuer"],

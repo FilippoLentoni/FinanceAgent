@@ -157,9 +157,9 @@ def test_cross_account_lambda_ref_is_refused(ssm):
 
 def test_resolution_variables_are_exported_safely(tmp_path, ssm):
     _seed(ssm, "beta", ["describe_capabilities"])
-    res = rel.resolve("beta", ssm=ssm, bedrock=None, account=ACCOUNT, region=REGION)
+    res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION)
     v = res.variables()
-    assert v["BEDROCK_INVOKE_ARNS"] == "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
+    assert v["BEDROCK_INVOKE_ARNS"] != "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
     assert res.registered == ["describe_capabilities"]
     out = tmp_path / "resolved.env"
     rel.write_variables(out, v)
@@ -170,7 +170,7 @@ def test_resolution_variables_are_exported_safely(tmp_path, ssm):
 
 def test_rollback_reuses_the_recorded_target_set(ssm):
     recorded = {"describe_capabilities": _arn("beta", "describe_capabilities")}
-    res = rel.resolve("beta", ssm=ssm, bedrock=None, account=ACCOUNT, region=REGION, recorded_targets=recorded)
+    res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION, recorded_targets=recorded)
     assert res.registered == ["describe_capabilities"]  # no catalog read needed
 
 
@@ -237,7 +237,7 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     m = rel.publish_release(info, "beta", ssm=ssm, cfn=FakeCfn("beta"), targets=targets, s3=s3, store_bucket="store")
     get = lambda name: ssm.get_parameter(Name=name)["Parameter"]["Value"]  # noqa: E731
     assert get("/finplan/beta/financeagent/release/current-release-id") == info.release_id
-    assert get("/finplan/beta/financeagent/config/explanation-provider") == "fixture"
+    assert get("/finplan/beta/financeagent/config/explanation-provider") == "bedrock"
     assert get("/finplan/beta/financeagent/agent/gateway-principal-ref") == "finplan-beta-financeagent-gateway-service-role"
     assert get("/finplan/beta/financeagent/secret-ref/ci-test-client") == "finplan/beta/financeagent/ci-test-client"
     meta = json.loads(get("/finplan/beta/financeagent/agent/authorizer-metadata-ref"))
@@ -258,11 +258,11 @@ def test_operator_rates_are_preserved_never_invented(ssm):
     assert guards["rates"]["source"] == "configured" and guards["max_tokens_invocation"] == __import__("json").loads(Path(__file__).resolve().parents[3].joinpath("config", "gamma.json").read_text())["guard_defaults"]["max_tokens_invocation"]
 
 
-def test_prod_needs_the_approval_and_beta_refuses_bedrock(ssm):
+def test_prod_needs_approval_and_unknown_beta_provider_is_rejected(ssm):
     with pytest.raises(rel.ManifestError, match="approval"):
         rel.publish_release(_info(), "prod", ssm=ssm, cfn=FakeCfn("prod"), targets={})
-    cfg = rel.load_env_config("beta") | {"explanation": {"provider": "bedrock", "model_id": "x"}}
-    with pytest.raises(rel.ManifestError, match="fixture"):
+    cfg = rel.load_env_config("beta") | {"explanation": {"provider": "unknown", "model_id": "x"}}
+    with pytest.raises(rel.ManifestError, match="not allowed"):
         rel.planned_parameters(
             "beta",
             _info(),
@@ -321,3 +321,8 @@ def test_suite_counts(tmp_path):
     p = tmp_path / "j.xml"
     _junit(p, 5, 2)
     assert stage_runner.suite_counts(p)["executed"] == 3
+
+
+class FakeBedrock:
+    def get_inference_profile(self, **kwargs):
+        return {"status":"ACTIVE", "inferenceProfileArn":f"arn:aws:bedrock:{REGION}:{ACCOUNT}:inference-profile/test", "models":[{"modelArn":f"arn:aws:bedrock:{REGION}::foundation-model/test"}]}

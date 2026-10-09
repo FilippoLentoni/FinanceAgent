@@ -48,10 +48,10 @@ def test_authorizer_metadata_points_to_this_environments_pool():
     assert len(meta["allowed_clients"]) == 2 and meta["token_endpoint"].endswith("/oauth2/token")
 
 
-def test_beta_runs_the_fixture_provider_only():
+def test_beta_runs_the_configured_hosted_provider():
     env = deployed()
     if env.env == "beta":
-        assert env.param(env.own("config", "explanation-provider")) == "fixture"
+        assert env.param(env.own("config", "explanation-provider")) == "bedrock"
 
 
 def test_unauthenticated_gateway_call_is_rejected():

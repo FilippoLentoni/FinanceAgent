@@ -239,6 +239,7 @@ def _prepare_performance(req: dict[str, Any], tools: GuardedTools) -> Prepared:
         pub_id = max(pubs, key=lambda p: str(p.get("published_at", "")))["publication_id"]
         resolved_from = "plan_version_id" if pv_target else "plan_id"
     pub = tools.read("get_publication", {"publication_id": pub_id}) or {}
+    pub = pub.get("publication", pub)
     pv_id, checksum = pub.get("plan_version_id"), pub.get("plan_version_checksum")
     if pub.get("publication_id") != pub_id or not pv_id or not checksum:
         raise AgentError.dependency("get_publication returned no plan_version_id and checksum", publication_id=pub_id)
@@ -355,6 +356,13 @@ def _analyze_performance(prep: Prepared, items: Mapping[str, EvidenceItem], sett
             msg = f"The observation of {d.get('date')} is intraday_partial and is excluded from the evaluation [{key}]."
             a.mandatory.append(msg)
             a.label("partial_period")
+    for why in p.get("whys") or []:
+        st.append(f"Diagnostic level {fmt(why['level'])}: {why['question']} {why['answer']} [{key}].")
+    for action in p.get("feedback") or []:
+        st.append(f"Feedback recommendation: {action['action']}: {action['reason']} [{key}].")
+    a.findings["whys"] = p.get("whys", [])
+    a.findings["feedback"] = p.get("feedback", [])
+    a.findings["limitations"] = p.get("limitations", [])
     a.findings["forecast_uncertainty"] = "not_available" if "forecast_not_available" in a.labels else "available"
     return a
 

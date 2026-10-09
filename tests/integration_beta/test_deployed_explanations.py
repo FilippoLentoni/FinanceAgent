@@ -46,4 +46,4 @@ def test_recommendation_change_explanation_reaches_the_gateway_as_the_caller():
     else:
         assert final["error"]["code"] in ("DEPENDENCY_UNAVAILABLE", "NOT_FOUND", "FORBIDDEN"), final["error"]
     if env.env == "beta":
-        assert final["usage"].get("provider_kind") in (None, "fixture")
+        assert final["usage"].get("provider_kind") in (None, "bedrock")

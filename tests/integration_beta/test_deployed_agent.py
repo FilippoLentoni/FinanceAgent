@@ -15,7 +15,7 @@ def test_describe_reports_langgraph_release_and_provider():
     assert status == 200 and doc["framework"] == "langgraph" and doc["environment"] == env.env
     assert doc["release_id"].startswith("rel_") and doc["contract_version"].startswith("1.")
     if env.env == "beta":
-        assert doc["provider"]["kind"] == "fixture"
+        assert doc["provider"]["kind"] == "bedrock"
     assert doc["streaming"]["websocket"] is False
 
 

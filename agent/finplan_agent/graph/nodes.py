@@ -248,7 +248,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             outcome = ctx.tools.call_tool(name, args)
             count += 1
             if outcome.ok:
-                kept, summary = compact(outcome.result, ctx.max_result_chars)
+                kept, summary = compact(outcome.result, 65536 if name == "recommend_portfolio" else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
@@ -274,6 +274,8 @@ def _evidence(state: AgentState) -> tuple[dict[str, Any], ...]:
     out = []
     for r in state.get("tool_results") or []:
         item: dict[str, Any] = {"tool": r["tool"], "summary": r.get("summary") or {}}
+        if r.get("tool") == "recommend_portfolio" and r.get("ok"):
+            item["recommendation"] = (r.get("result") or {}).get("recommendation")
         if r.get("error"):
             item["error"] = {"code": r["error"].get("code")}
         if r.get("declined"):

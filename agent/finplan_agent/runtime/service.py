@@ -128,7 +128,11 @@ class AgentService:
                 ),
             )
 
+        from ..skills import load_skills
+        skills, skill_instructions = load_skills()
         deps = Deps(
+            skills=skills,
+            stable_instructions=skill_instructions,
             settings=settings,
             provider_config=provider_config,
             provider=provider,
@@ -234,6 +238,7 @@ class AgentService:
                 "evidence": evidence,
                 "claim_check": st.get("claim_check") or {},
                 "explanation": st.get("explanation_result"),
+                "recommendation": next((r.get("result",{}).get("recommendation") for r in reversed(st.get("tool_results") or []) if r.get("ok") and r.get("tool")=="recommend_portfolio"),None),
             },
             "confirmation": confirmation,
             "in_progress": st.get("in_progress"),
@@ -312,6 +317,11 @@ class AgentService:
             raise AgentError("PRECONDITION_FAILED", "a confirmation is pending in this session; answer it with action confirm first")
         prompt = payload.get("prompt")
         tool_request = payload.get("tool_request")
+        recommendation = payload.get("recommendation")
+        if recommendation is not None:
+            if not isinstance(recommendation, dict) or tool_request is not None or payload.get("explanation") is not None:
+                raise AgentError.validation("recommendation must be an object and cannot be combined with another workflow", pointer="/recommendation")
+            tool_request = {"name":"recommend_portfolio", "arguments":recommendation}
         explanation = payload.get("explanation")
         if explanation is not None and not isinstance(explanation, dict):
             raise AgentError.validation("explanation must be an object", pointer="/explanation")

@@ -1,0 +1,7 @@
+# recommend-portfolio
+
+When asked for buy/sell or rebalance recommendations, use recommend_portfolio. Do not invent a policy action or replace the policy with language-model stock picking. Obtain an approved snapshot and its latest completed session via query_market_data. Require the user's current actual/paper holdings, cash weight, portfolio value and tracked high watermark. Previously recommended target weights do not prove executed positions. Ask for missing state; never assume all cash or reset drawdown.
+
+The tool resolves the selected frozen strategy, which can be a trained policy or a classical optimizer. Use the tool's reported strategy identifier; never assume PPO. A policy retains its trained instrument order and environment features; an optimizer retains its selected parameters and constraints. Quote target weights, buy/sell weight deltas, indicative notionals, decision timestamp, provenance and limitations. A decision made after a completed close is for the next session. Disclose advisory/paper status. Neither a shaped PPO critic nor historical returns is a return forecast.
+
+Recommendations never place trades, publish plans, promote policies, retrain networks or change risk preferences. Explain observed performance against the exact published plan using explain-performance, recorded account outcomes, deterministic evidence, successive diagnostic questions and proposed feedback. Unknown causes remain unknown.

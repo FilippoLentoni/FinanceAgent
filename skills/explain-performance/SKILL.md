@@ -27,3 +27,7 @@ The user asks how a publication (`pub_...`), or the current publication of a pla
 - An outcome inside the published forecast interval is "within forecast uncertainty", not a model error. With no published forecast, say `not_available`.
 - State every `intraday_partial` day that was excluded.
 - Data revisions are modeled effects only when a tool quantified them.
+
+## Hosted deterministic evidence and diagnostic feedback
+
+Use get_performance_evidence when offered. It reads the exact publication and recorded account ledger, verifies approved snapshots, and returns checksum-bound evidence without a paid research job. Report its whys, unresolved questions and feedback actions. A published-allocation hold baseline is distinct from a daily policy replay. An execution intent alone is insufficient; request an account statement. Without dated fills and position history, the execution/exposure component is unattributed. Never explain it as proven causation, invent forecast distributions, or retrain, publish or modify risk constraints automatically.

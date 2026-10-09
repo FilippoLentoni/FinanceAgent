@@ -20,16 +20,16 @@
 version: 1
 roles:
   viewer:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
+    tools: [recommend_portfolio, get_performance_evidence, get_publication, list_publications, list_executions, describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
   researcher:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", refresh_market_data, submit_experiment]
+    tools: [recommend_portfolio, get_performance_evidence, get_publication, list_publications, list_executions, describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", refresh_market_data, submit_experiment]
   plan_editor:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", create_override_version, validate_plan_version]
+    tools: [recommend_portfolio, get_performance_evidence, get_publication, list_publications, list_executions, describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", create_override_version, validate_plan_version]
   plan_publisher:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, validate_plan_version, publish_plan_version, production_strategy]
+    tools: [recommend_portfolio, get_performance_evidence, get_publication, list_publications, list_executions, describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, validate_plan_version, publish_plan_version, production_strategy]
   # Pipeline test principal: read-only tools only (prod smoke is read-only; FA-PL-04).
   ci_test:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
+    tools: [recommend_portfolio, get_performance_evidence, get_publication, list_publications, list_executions, describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
 machine_roles:
   # role -> custom scope (resource server finplan-agent) that identifies the machine client
   ci_test: ci_test

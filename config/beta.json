@@ -7,7 +7,8 @@
     1
   ],
   "provider_kind_allowed": [
-    "fixture"
+    "fixture",
+    "bedrock"
   ],
   "guard_defaults": {
     "max_tokens_invocation": 1024,
@@ -32,13 +33,13 @@
   },
   "gateway": {
     "max_response_bytes": 262144,
-    "request_timeout_seconds": 60,
+    "request_timeout_seconds": 330,
     "mcp_protocol_version": "2025-11-25",
     "policy_mode": "ENFORCE"
   },
   "log_retention_days": 30,
   "explanation": {
-    "provider": "fixture",
+    "provider": "bedrock",
     "model_id": "us.amazon.nova-lite-v1:0"
   },
   "identity": {

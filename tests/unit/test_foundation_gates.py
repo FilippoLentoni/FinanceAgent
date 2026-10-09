@@ -97,7 +97,7 @@ def test_websocket_requires_recorded_requirement(tmp_path):
     (root / "config" / "gamma.json").write_text(json.dumps(cfg))
     assert websocket_findings(root) == []
     beta = json.loads((root / "config" / "beta.json").read_text())
-    beta["provider_kind_allowed"] = ["fixture", "bedrock"]
+    beta["provider_kind_allowed"] = ["fixture", "unknown"]
     (root / "config" / "beta.json").write_text(json.dumps(beta))
     assert [f.path for f in provider_kind_findings(root)] == ["config/beta.json"]
 

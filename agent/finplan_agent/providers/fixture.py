@@ -90,6 +90,13 @@ def fixture_narrative(evidence: tuple[dict[str, Any], ...] | list[dict[str, Any]
             # with their citation keys, so the fixture narrative is exactly those statements.
             parts.extend(str(s) for s in item["statements"])
             continue
+        if item.get("recommendation"):
+            rec=item["recommendation"]
+            parts.append("Advisory/paper " + rec["strategy"] + " strategy from " + rec["policy_source_run_id"] + ".")
+            for decision in rec["decisions"]:
+                parts.append(f"{decision['instrument_id']}: {decision['action']}; weight change {decision['delta_weight']}; indicative notional {decision['indicative_notional']}.")
+            parts.append("No return forecast is available. Decisions use completed data for the next session and do not execute trades.")
+            continue
         summary = item.get("summary") or {}
         fields = [f"{k} {_fmt(v)}" for k, v in sorted(summary.items()) if isinstance(v, (str, int, float, bool)) and v is not None]
         parts.append(f"{tool} reported " + ("; ".join(fields) if fields else "no scalar fields") + ".")

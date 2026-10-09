@@ -66,3 +66,20 @@ while one is pending), `OPERATION_NOT_PERMITTED` (live trading, paid-job approva
 risk-preference change), `BUDGET_EXCEEDED` (token, tool-call, session or `bedrock_explanations`
 limits; details name the limit, remaining amount and estimate), `DEPENDENCY_UNAVAILABLE` (Gateway,
 tool release or Bedrock model access), `RATE_LIMITED`, `INTERNAL` (never with a stack trace).
+
+## Selected strategy recommendation
+
+Send `recommendation` with `input_snapshot_id`, completed-session `as_of` and `holdings`
+(`weights` of `{instrument_id, weight}`, `cash_weight`, `portfolio_value`, `high_watermark`).
+An optional `prompt` asks for an explanation in natural language. The graph uses the read-only
+`recommend_portfolio` tool and returns its complete result in `answer.recommendation` even when
+the narrative is unavailable. Missing or unauthorized inputs produce tool errors without invented
+weights or a training job. Plain-language requests can ask the hosted provider to collect these
+inputs; the model must not assume cash holdings or a high watermark.
+
+Hosted beta uses guarded Bedrock; offline CI retains fixtures/stubs with no network model calls.
+The beta Gateway client waits up to 330 seconds. User authorization is enforced by the Gateway;
+the Lambda target currently audits a Gateway caller identity, as documented in `docs/gateway.md`.
+
+See `docs/strategy-lifecycle.md` for the four pipelines, beta-to-beta references, artifact activation,
+explanations and the future research feedback loop. No recurring research schedule is enabled.
