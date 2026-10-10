@@ -183,12 +183,18 @@ class AgentStack(EnvStack):
                 self.classical_policy_digest = policy_digest(rendered)
             else:
                 self.policy_digest = policy_digest(rendered)
+            predecessor = NONE
             for tool in tools:
                 d = self.definitions[tool]
                 param, cond = self.target_params[tool], conditions[tool]
                 target = agentcore.CfnGatewayTarget(
                     self, f"{prefix}Target{_camel(tool)}", gateway_identifier=gateway.attr_gateway_identifier,
-                    name=n.target_name(tool), description=d.description[:200],
+                    # Gateway action-schema updates share a catalog. Serialize
+                    # targets within each Gateway, while the two Gateways remain
+                    # independent. Conditional references preserve sparse catalogs:
+                    # DependsOn an omitted target would suppress later resources.
+                    name=n.target_name(tool),
+                    description=Fn.join("", [d.description[:140], " [catalog predecessor: ", predecessor, "]"]),
                     credential_provider_configurations=[agentcore.CfnGatewayTarget.CredentialProviderConfigurationProperty(credential_provider_type="GATEWAY_IAM_ROLE")],
                     target_configuration=agentcore.CfnGatewayTarget.TargetConfigurationProperty(
                         mcp=agentcore.CfnGatewayTarget.McpTargetConfigurationProperty(
@@ -203,13 +209,29 @@ class AgentStack(EnvStack):
                 target.cfn_options.condition = cond
                 target.add_metadata("logical-role", "gateway-target")
                 targets[tool] = target
+                predecessor = cdk.Token.as_string(Fn.condition_if(cond.logical_id, target.attr_target_id, predecessor))
+
+            # Policy creation performs a schema check against the Gateway's
+            # complete action catalog. Each policy therefore waits for every
+            # enabled target, rather than just its own concurrently created target.
+            # A harmless Cedar comment carries conditional resource references;
+            # disabled optional targets do not become hard DependsOn dependencies.
+            # The final enabled target transitively depends on its predecessors.
+            # Reference that selector once per policy instead of repeating the
+            # full catalog, keeping the deployable template comfortably bounded.
+            catalog_ids = predecessor
+            for tool in tools:
+                target, cond = targets[tool], conditions[tool]
                 for pol in [x for x in rendered if x.tool == tool]:
                     cp = agentcore.CfnPolicy(
                         self, f"{prefix}Policy{_camel(tool)}{_camel(pol.name)}",
                         name=_policy_resource_name(env, ("classical_" if prefix else "") + tool, pol.name),
                         policy_engine_id=engine.attr_policy_engine_id,
                         description=f"{pol.kind} {tool} ({env}; policy/{'classical-' if prefix else ''}tool-policy.yaml)",
-                        definition=agentcore.CfnPolicy.PolicyDefinitionProperty(cedar=agentcore.CfnPolicy.CedarPolicyProperty(statement=Fn.sub(pol.statement, {"GatewayArn": gateway.attr_gateway_arn}))),
+                        definition=agentcore.CfnPolicy.PolicyDefinitionProperty(cedar=agentcore.CfnPolicy.CedarPolicyProperty(statement=Fn.sub(
+                            pol.statement + "\n// Registered catalog readiness: ${CatalogTargetIds}\n",
+                            {"GatewayArn": gateway.attr_gateway_arn, "CatalogTargetIds": catalog_ids},
+                        ))),
                         enforcement_mode="ACTIVE", validation_mode="IGNORE_ALL_FINDINGS",
                     )
                     cp.cfn_options.condition = cond

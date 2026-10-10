@@ -13,6 +13,7 @@ Usage: ``uv run python scripts/synth.py --out cdk.out [--envs beta,gamma]``.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -34,7 +35,18 @@ def synth(outdir: str | os.PathLike[str] | None = None, envs: list[str] | None =
     out = Path(outdir or os.environ.get("CDK_OUTDIR") or ROOT / "cdk.out")
     app = cdk.App(default_stack_synthesizer=deployment_synthesizer(), outdir=str(out), context={"cli-telemetry": False})
     build_app(app, envs)
-    return Path(app.synth().directory)
+    directory = Path(app.synth().directory)
+    _compact_templates(directory)
+    return directory
+
+
+def _compact_templates(directory: Path) -> None:
+    # CodePipeline deploys these exact files through S3, whose template limit
+    # is 1 MB. CDK indentation alone can exceed that with large inline schemas
+    # and conditional dependencies. Preserve every value, including Cedar text.
+    for path in directory.rglob("*.template.json"):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps(doc, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

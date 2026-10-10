@@ -29,6 +29,23 @@ def test_every_post_synth_gate_passes(assembly):
     assert "FA-GAP-RUNTIME-ROLE" in gaps and "FA-GAP-POLICY" in gaps  # reported, not hidden
 
 
+def test_template_compaction_preserves_values_and_size_gate_checks_packaged_bytes(tmp_path):
+    from scripts.synth import _compact_templates
+
+    doc = {"Resources": {"Policy": {"Statement": "// readiness comment\npermit(principal, action, resource);"}}, "Description": "é"}
+    path = tmp_path / "BetaAgent.template.json"
+    path.write_text(json.dumps(doc, indent=8), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    _compact_templates(tmp_path)
+    assert json.loads(path.read_text()) == doc
+    assert path.read_bytes() == (json.dumps(doc, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    assert manifest.read_bytes() == b"{}\n"
+    assert not run_gates(GateContext(tmp_path), ["template-size"])["template-size"]
+    path.write_text(json.dumps({"Description": "x" * (1024 * 1024)}))
+    assert run_gates(GateContext(tmp_path), ["template-size"])["template-size"]
+
+
 def test_ownership_gate_still_fails_on_an_unlisted_resource(assembly, tmp_path):
     import shutil
 
@@ -146,6 +163,70 @@ def test_policies_follow_their_target_and_the_engine_enforces(templates):
     allow_publish = next(r for lid, r in pols.items() if lid.startswith("PolicyPublishPlanVersion"))
     assert '"plan_publisher' in allow_publish["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"][0]
     assert "ci_test" not in allow_publish["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"][0]
+
+
+def _active_references(value, enabled):
+    """Resolve conditional dependency branches, like CloudFormation does for sparse catalogs."""
+    if isinstance(value, list):
+        return set().union(*(_active_references(v, enabled) for v in value))
+    if not isinstance(value, dict):
+        return set()
+    if "Fn::If" in value:
+        condition, yes, no = value["Fn::If"]
+        return _active_references(yes if condition in enabled else no, enabled)
+    if "Fn::GetAtt" in value:
+        return {value["Fn::GetAtt"][0]}
+    return set().union(*(_active_references(v, enabled) for v in value.values()))
+
+
+@pytest.mark.parametrize("env", ENVS)
+@pytest.mark.parametrize("catalog", ("all", "alternating", "single", "none"))
+def test_catalog_updates_are_serial_and_policies_wait_for_all_enabled_targets(templates, env, catalog):
+    t = templates[f"agent:{env}"]
+    targets = resources(t, "AWS::BedrockAgentCore::GatewayTarget")
+    policies = resources(t, "AWS::BedrockAgentCore::Policy")
+    conditions = sorted({r["Condition"] for r in targets.values()})
+    enabled = set(conditions if catalog == "all" else conditions[::2] if catalog == "alternating" else ["RegisterGetPortfolioHistory"] if catalog == "single" else [])
+    active_targets = {lid: r for lid, r in targets.items() if r["Condition"] in enabled}
+    active_policies = {lid: r for lid, r in policies.items() if r["Condition"] in enabled}
+    dependencies = {}
+    groups = {}
+    for gateway in ("Gateway", "ClassicalGateway"):
+        group = {lid: r for lid, r in targets.items() if r["Properties"]["GatewayIdentifier"] == {"Fn::GetAtt": [gateway, "GatewayIdentifier"]}}
+        active = {lid: r for lid, r in group.items() if r["Condition"] in enabled}
+        groups[gateway] = set(active)
+        previous = None
+        for lid, resource in sorted(active.items(), key=lambda pair: pair[1]["Properties"]["Name"]):
+            refs = _active_references(resource["Properties"]["Description"], enabled)
+            assert refs == ({previous} if previous else set())
+            # Hard dependencies on an optional target would suppress enabled
+            # later targets whenever the predecessor is configured as none.
+            assert not (set(resource.get("DependsOn", [])) & set(targets))
+            dependencies[lid] = refs
+            previous = lid
+        for lid, resource in active_policies.items():
+            if resource["Properties"]["PolicyEngineId"] != {"Fn::GetAtt": ["ClassicalToolPolicyEngine" if gateway == "ClassicalGateway" else "ToolPolicyEngine", "PolicyEngineId"]}:
+                continue
+            statement, substitutions = resource["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"]
+            assert "// Registered catalog readiness: ${CatalogTargetIds}" in statement
+            refs = _active_references(substitutions["CatalogTargetIds"], enabled)
+            assert refs == ({previous} if previous else set())
+            direct = set(resource.get("DependsOn", [])) & set(targets)
+            assert len(direct) == 1 and direct <= set(active)
+            dependencies[lid] = refs | direct
+    # Simulate a legal CloudFormation schedule. Concurrent writes to the same
+    # catalog and policy creation against a partial catalog must be impossible.
+    completed = set()
+    while len(completed) < len(dependencies):
+        ready = {lid for lid, deps in dependencies.items() if lid not in completed and deps <= completed}
+        assert ready, "the deployment dependency graph contains a cycle"
+        for gateway, group in groups.items():
+            assert len(ready & group) <= 1, (gateway, "parallel catalog updates")
+        for lid in ready & set(active_policies):
+            gateway = "ClassicalGateway" if lid.startswith("Classical") else "Gateway"
+            assert groups[gateway] <= completed, "policy started before its complete catalog was ready"
+        completed.update(ready)
+    assert completed == set(active_targets) | set(active_policies)
 
 
 # ------------------------------------------------------------------ runtime (FA-PRV-08, FA-POL-01, L3)

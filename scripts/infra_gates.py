@@ -31,6 +31,7 @@ budget-roles           FA-PRV-09 / L6: the published budget-enforced role names 
                        Runtime role of every environment
 template-leaks         ``finplan_contracts.leak_scan`` over the synthesized templates (no account
                        IDs, ARNs with accounts, pool/client IDs)
+template-size          exact packaged template bytes fit CloudFormation's 1 MB S3 limit
 =====================  =======================================================================
 
 Usage: ``uv run python scripts/infra_gates.py --assembly cdk.out [--only GATE ...]``.
@@ -391,6 +392,10 @@ def gate_template_leaks(ctx: GateContext) -> list[str]:
     return [f"{p.name}: {f}" for p in templates_of(ctx.assembly) for f in scan_text(p.read_text(encoding="utf-8"), p.name)]
 
 
+def gate_template_size(ctx: GateContext) -> list[str]:
+    return [f"{p.name}: {p.stat().st_size} bytes exceeds CloudFormation's 1 MB S3 template limit" for p in templates_of(ctx.assembly) if p.stat().st_size > 1024 * 1024]
+
+
 Gate = tuple[str, Callable[[GateContext], list[str]]]
 GATES: list[Gate] = [
     ("ownership", gate_ownership),
@@ -406,6 +411,7 @@ GATES: list[Gate] = [
     ("memory", gate_memory),
     ("budget-roles", gate_budget_roles),
     ("template-leaks", gate_template_leaks),
+    ("template-size", gate_template_size),
 ]
 
 
