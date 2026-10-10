@@ -133,7 +133,7 @@ def lifecycle_plan(state, session_id):
     portfolios = _PF.findall(text)
     portfolio = {"portfolio_id":portfolios[0]} if portfolios else {}
     if _HISTORY.search(text):
-        if re.search(r"\b(?:interaction|conversation|activity|tool calls?|audit)\b",text,re.I):
+        if re.search(r"\b(?:interactions?|conversations?|activity|tool calls?|audit)\b",text,re.I):
             calls=[_call("list_agent_activity",{**portfolio,"limit":3},turn)]
         elif re.search(r"\b(?:recommendations?|decisions?)\b",text,re.I) and not re.search(r"\b(?:holdings|portfolios|snapshots)\b",text,re.I):
             calls=[_call("list_portfolio_decisions",{**portfolio,"limit":3},turn)]
@@ -183,6 +183,13 @@ def lifecycle_plan(state, session_id):
 
 
 def render_lifecycle(doc):
+    if "events" in doc:
+        from .activity import activity_history_references
+        references=activity_history_references(doc)
+        # Version strings and transport/caller metadata remain in archived references;
+        # present the user-facing joins rather than treating version digits as figures.
+        shown={"events":[{key:row[key] for key in ("activity_event_id","recorded_at","event_kind","checksum","portfolio_id","decision_id","input_snapshot_id","session_id","summary") if key in row} for row in references["events"]],"next_token":references.get("next_token")}
+        return "Stored activity history. Full original evidence remains in immutable records identified by the event IDs and checksums below:\n```json\n" + json.dumps(shown,indent=2,sort_keys=True) + "\n```"
     if doc.get("decision"):
         row=doc["decision"]
         return "Stored decision " + row["decision_id"] + ":\n```json\n" + json.dumps(row,indent=2,sort_keys=True) + "\n```"

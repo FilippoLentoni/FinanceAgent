@@ -302,7 +302,11 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             outcome = ctx.tools.call_tool(name, args)
             count += 1
             if outcome.ok:
-                kept, summary = compact(outcome.result, 65536 if name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                result = outcome.result
+                if name == "list_agent_activity":
+                    from .activity import activity_history_references
+                    result = activity_history_references(result)
+                kept, summary = compact(result, 65536 if name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:

@@ -1,5 +1,7 @@
 """Exercise complete hosted MCP orchestration, approval interrupts and durable evidence."""
 from copy import deepcopy
+import hashlib
+import json
 
 import pytest
 
@@ -218,3 +220,42 @@ def test_performance_for_previous_date_reads_previous_issued_decision_then_dated
     assert tools.calls[1][1]=={'decision_id':OLD}
     assert tools.calls[2][1]['decision_id']==OLD
     assert result['status']=='completed' and result['usage']['invocations']==0
+
+
+def test_repeated_hosted_activity_reads_keep_bounded_narratives_and_reconstructable_references(recommendation):
+    svc,tools,_=setup(recommendation,durable=True)
+    pid=recommendation['portfolio_state']['portfolio_id']
+    events=[]
+    sizes=[]
+
+    def archive(args):
+        event=deepcopy(args)
+        event.pop('idempotency_key')
+        event.update(activity_event_id='act_'+str(len(events)+1).zfill(26),recorded_at='2026-10-10T10:00:00Z',contract_version='1.5.0')
+        event['checksum']='sha256:'+hashlib.sha256(json.dumps(event,sort_keys=True).encode()).hexdigest()
+        sizes.append(len(json.dumps(event)))
+        events.append(event)
+        return {'activity_event_id':event['activity_event_id'],'checksum':event['checksum']}
+
+    tools.results['record_agent_activity']=archive
+    tools.results['list_agent_activity']=lambda _:{'events':deepcopy(list(reversed(events[-3:]))),'next_token':None,'contract_version':'1.5.0'}
+    initial=ask(svc,'PPO portfolio recommendation today')
+    original=deepcopy(events[0])
+    assert original['payload']['narrative']==initial['answer']['narrative']
+    assert original['payload']['tool_results'][0]['result']['recommendation']==recommendation
+    for _ in range(25):
+        result=ask(svc,'Show the last three agent interactions for '+pid)
+        assert result['status']=='completed',result
+        assert result['answer']['claim_check']['passed'],result['answer']['claim_check']
+        assert 'original financial evidence' not in result['answer']['narrative']
+        saved=events[-1]['payload']
+        assert saved['narrative']==result['answer']['narrative']
+        refs=saved['tool_results'][0]['result']
+        assert refs['evidence_representation']=='immutable_activity_references'
+        assert all('payload' not in row for row in refs['events'])
+        originals={event['activity_event_id']:event for event in events[:-1]}
+        assert all(row['checksum']==originals[row['activity_event_id']]['checksum'] for row in refs['events'])
+        assert all(row['event_kind']=='agent_turn' and row['summary']['status']=='completed' for row in refs['events'])
+        assert len(saved['narrative'])<7000 and sizes[-1]<14000
+    assert events[0]==original
+    assert max(sizes[-10:])-min(sizes[-10:])<200
