@@ -18,6 +18,8 @@ Recommendation follow-ups use the prior successful MCP result and its original t
 
 The recommendation skill is published unchanged, with its version and instruction checksum, inside recommend_portfolio's remote MCP tool description. This uses the existing Gateway target and supports direct clients without adding targets, permissions or a contract release. Native MCP resource/prompt lists can remain empty. Hosted responses record which packaged skill governed deterministic routing; this is instruction provenance, not a model-generated claim of execution.
 
+Normalize the observed AWS Gateway plain-text invalid-request schema error to nonretryable VALIDATION_FAILED in the MCP client. Preserve producer error envelopes and retain dependency errors for unrecognized service failures; do not infer validation failure from arbitrary tool prose.
+
 - Paper positions may differ from actual holdings → label the state source and retain explicit supplied-state mode.
 - Recommendations could be mistaken for executions → proposals do not write holdings and the narrative states that boundary.
 - Current prices could be stale → surface the producer completed session and decision timestamp.

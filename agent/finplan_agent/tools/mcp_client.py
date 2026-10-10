@@ -253,5 +253,11 @@ class GatewayMcpClient:
         if is_error_envelope(doc):
             return ToolOutcome(tool=name, ok=False, error=doc, size_bytes=size)
         if result.get("isError"):
+            # Gateway schema validation can reject arguments before Lambda is invoked.
+            # Unlike a producer error envelope, AWS returns this as plain text in a
+            # successful JSON-RPC result. Do not tell clients to retry invalid input.
+            text = str(doc.get("text", "") if isinstance(doc, dict) else doc or "").strip()
+            if text.startswith("ValidationException - Parameter validation failed: Invalid request parameters:"):
+                return ToolOutcome(tool=name, ok=False, error={"code": "VALIDATION_FAILED", "message": "the MCP Gateway rejected the tool arguments", "retryable": False, "details": {"pointer": "/arguments", "reason": "gateway_input_validation", "validation_message": text[:2048]}}, size_bytes=size)
             return ToolOutcome(tool=name, ok=False, error={"code": "DEPENDENCY_UNAVAILABLE", "message": "the tool call failed at the Gateway", "retryable": True, "details": {}}, size_bytes=size)
         return ToolOutcome(tool=name, ok=True, result=doc, size_bytes=size)

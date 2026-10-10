@@ -90,6 +90,27 @@ def test_oversized_result_is_refused():
     assert not out.ok and out.error["details"]["reason"] == "response_too_large"
 
 
+@pytest.mark.parametrize("text,code,retryable", [
+    ("ValidationException - Parameter validation failed: Invalid request parameters:\n- Missing required field(s): '/holdings/cash_weight'", "VALIDATION_FAILED", False),
+    ("The target service is unavailable", "DEPENDENCY_UNAVAILABLE", True),
+    (json.dumps({"code":"NOT_FOUND","message":"missing snapshot","retryable":False,"details":{}}), "NOT_FOUND", False),
+])
+def test_gateway_plain_validation_errors_are_not_retryable_dependency_failures(text,code,retryable):
+    base=FakeGateway()
+    def transport(url,headers,body,timeout):
+        response=base(url,headers,body,timeout)
+        if json.loads(body)["method"]!="tools/call":
+            return response
+        doc=json.loads(response.body)
+        doc["result"]={"content":[{"type":"text","text":text}],"isError":True}
+        return HttpResponse(response.status,response.headers,json.dumps(doc).encode())
+    result=client(transport).call_tool("get_plan_version",{})
+    assert not result.ok and result.error["code"]==code and result.error["retryable"] is retryable
+    if code=="VALIDATION_FAILED":
+        assert result.error["details"]["pointer"]=="/arguments"
+        assert '/holdings/cash_weight' in result.error["details"]["validation_message"]
+
+
 def test_unknown_tool_and_missing_token():
     assert client(FakeGateway()).call_tool("place_order", {}).error["code"] == "NOT_FOUND"
     with pytest.raises(AgentError) as e:

@@ -41,6 +41,12 @@ def test_gateway_lists_tools_for_the_ci_principal():
     assert "describe_capabilities" in names
 
 
+def test_gateway_invalid_holdings_are_reported_as_nonretryable_validation():
+    result = deployed().gateway().call_tool("recommend_portfolio", {"holdings": {"weights": []}})
+    assert not result.ok and result.error["code"] == "VALIDATION_FAILED"
+    assert result.error["retryable"] is False
+
+
 def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill():
     import pytest
 
