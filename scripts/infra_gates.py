@@ -294,6 +294,8 @@ def gate_runtime_role(ctx: GateContext) -> list[str]:
 
 
 def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
+    from infra.stacks.tool_schemas import target_metadata
+
     out = []
     gws = _resources(t, "AWS::BedrockAgentCore::Gateway")
     rts = _resources(t, "AWS::BedrockAgentCore::Runtime")
@@ -335,6 +337,14 @@ def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
             pat = str(p.get("AllowedPattern", ""))
             if f"finplan-{env}-financelambdastool-" not in pat or any(f"finplan-{o}-" in pat for o in n.ENVIRONMENTS if o != env):
                 out.append(f"{name}: {pname} admits Lambda references outside {env} ({pat})")
+    for lid, target in _resources(t, "AWS::BedrockAgentCore::GatewayTarget").items():
+        props = target.get("Properties") or {}
+        tool = ((((props.get("TargetConfiguration") or {}).get("Mcp") or {}).get("Lambda") or {}).get("ToolSchema") or {}).get("InlinePayload") or []
+        tool_name = tool[0].get("Name") if len(tool) == 1 else None
+        metadata = target_metadata(env, tool_name, classical=props.get("GatewayIdentifier") == {"Fn::GetAtt": ["ClassicalGateway", "GatewayIdentifier"]})
+        expected = {"AllowedRequestHeaders": metadata["allowedRequestHeaders"]} if metadata else {}
+        if (props.get("MetadataConfiguration") or {}) != expected:
+            out.append(f"{name}: {lid} identity header propagation must be restricted to the beta classical research target")
     return out
 
 

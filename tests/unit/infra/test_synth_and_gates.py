@@ -239,6 +239,29 @@ def test_classical_bootstrap_grants_extend_beta_only(templates):
             assert trust["ArnLike"]["aws:SourceArn"]["Fn::Join"][1][-1] == f":gateway/finplan-{env}-financeagent-gateway-*"
 
 
+def test_only_beta_classical_research_target_receives_identity_token_header(templates):
+    from infra.stacks.tool_schemas import CLASSICAL_IDENTITY_HEADER
+
+    for env in ENVS:
+        for logical, target in resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget").items():
+            metadata = target["Properties"].get("MetadataConfiguration")
+            if env == "beta" and logical == "ClassicalTargetRunPortfolioResearch":
+                assert metadata == {"AllowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
+            else:
+                assert metadata is None
+
+
+def test_environment_gate_rejects_missing_or_overbroad_identity_header_propagation(templates):
+    from copy import deepcopy
+
+    t = deepcopy(templates["agent:beta"])
+    t["Resources"]["ClassicalTargetRunPortfolioResearch"]["Properties"].pop("MetadataConfiguration")
+    assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
+    t = deepcopy(templates["agent:beta"])
+    t["Resources"]["TargetRecommendPortfolio"]["Properties"]["MetadataConfiguration"] = {"AllowedRequestHeaders": ["X-Finplan-User-Token"]}
+    assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
+
+
 def test_pipeline_wiring(templates):
     t = templates["tooling"]
     p = next(iter(resources(t, "AWS::CodePipeline::Pipeline").values()))["Properties"]

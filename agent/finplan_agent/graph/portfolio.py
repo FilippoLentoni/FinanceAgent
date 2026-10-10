@@ -102,7 +102,8 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
     classical = bool(_CLASSICAL.search(text))
     both = classical and bool(_PPO.search(text))
     current = latest["analysis_id"] if latest else None
-    relevant = classical or bool(ids) or bool(family == "recommend_classical_portfolio" and not _PPO.search(text))
+    launch = bool(re.search(r"\b(?:run|launch|trigger|estimate)\b[^.!?]{0,80}\b(?:experiment|sandbox|research)\b", text, re.I))
+    relevant = classical or bool(ids) or bool(family == "recommend_classical_portfolio" and not _PPO.search(text)) or bool(research and launch)
     if not relevant and not _RESEARCH.search(text):
         return None
     if re.search(r"\b(?:feedback|record my feedback|note my feedback)\b", text, re.I):
@@ -117,7 +118,12 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
         review = ids[0] if ids else (research or {}).get("analysis_id")
         if not review:
             return {"workflow": {"mode": "research"}, "calls": [_call("research_portfolio_models", {"query": text[:2000]}, turn)]}
-        return {"workflow": {"mode": "research_run"}, "calls": [_call("run_portfolio_research", {"review_id": review, "dry_run": True}, turn)]}
+        prior = _reference(history, "research_run")
+        paid = bool(prior and prior.get("review_id") == review and prior.get("dry_run") is True and not re.search(r"\b(?:estimate|dry.run)\b", text, re.I))
+        args = {"review_id": review, "dry_run": not paid}
+        if paid:
+            args["confirmed_by_user"] = True
+        return {"workflow": {"mode": "research_run"}, "calls": [_call("run_portfolio_research", args, turn)]}
     if _RESEARCH.search(text) and not _WHY.search(text):
         return {"workflow": {"mode": "research"}, "calls": [_call("research_portfolio_models", {"query": text[:2000]}, turn)]}
     if _PERFORMANCE.search(text) and not both:

@@ -23,7 +23,21 @@ from typing import Any
 
 from finplan_contracts.schemas import SchemaStore, load_store
 
-__all__ = ["CLASSICAL_ONLY_TOOLS", "CLASSICAL_SHARED_TOOLS", "GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "classical_tools", "contract_tools", "primary_tools", "project", "tool_definition", "to_cfn"]
+__all__ = ["CLASSICAL_IDENTITY_HEADER", "CLASSICAL_ONLY_TOOLS", "CLASSICAL_SHARED_TOOLS", "GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "classical_tools", "contract_tools", "primary_tools", "project", "target_metadata", "tool_definition", "to_cfn"]
+
+CLASSICAL_IDENTITY_HEADER = "X-Finplan-User-Token"
+
+
+def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
+    """Paid beta research alone receives a JWT for independent producer verification.
+
+    Header propagation transports untrusted credentials, not trusted group claims. The
+    target verifies the signature and pinned Cognito issuer/client before authorizing.
+    The original Gateway and every other target retain their existing metadata.
+    """
+    if env == "beta" and classical and tool == "run_portfolio_research":
+        return {"allowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
+    return {}
 
 CLASSICAL_ONLY_TOOLS = frozenset({
     "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",

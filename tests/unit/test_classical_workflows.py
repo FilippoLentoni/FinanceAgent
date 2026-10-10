@@ -157,3 +157,17 @@ def test_dated_source_titles_preserve_figures_only_when_quoted_verbatim():
     source='Portfolio Optimization Review 2024'
     assert claim_check(source,[{'title':source}]).passed
     assert not claim_check('Expected portfolio return 2024',[{'title':source}]).passed
+
+
+def test_natural_research_estimate_then_explicit_run_requires_confirmation(recommendation):
+    svc,tools=service(doc(recommendation))
+    tools.results['research_portfolio_models']=lambda _:{'analysis_id':A,'analysis_kind':'research','summary':'Research proposal'}
+    tools.results['run_portfolio_research']=lambda _:{'analysis_id':B,'analysis_kind':'research_run','review_id':A,'summary':'Estimate','dry_run':True}
+    assert ask(svc,'Review traditional portfolio research')['status']=='completed'
+    assert ask(svc,'Run the sandbox experiment')['status']=='completed'
+    assert tools.calls[-1]==('run_portfolio_research',{'review_id':A,'dry_run':True})
+    count=len(tools.calls)
+    pending=ask(svc,'Run the sandbox experiment')
+    assert pending['status']=='awaiting_confirmation' and len(tools.calls)==count
+    args=pending['confirmation']['calls'][0]['arguments']
+    assert args['dry_run'] is False and args['confirmed_by_user'] is True and args['idempotency_key']

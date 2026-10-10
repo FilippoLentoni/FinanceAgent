@@ -114,14 +114,14 @@ class AgentService:
         gw = settings.gateway
 
         def tool_client(caller: Caller) -> ToolClient:
-            def gateway(url: str) -> GatewayMcpClient:
-                return GatewayMcpClient(url, lambda: caller.bearer, protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
+            def gateway(url: str, *, forward_identity: bool = False) -> GatewayMcpClient:
+                return GatewayMcpClient(url, lambda: caller.bearer, forward_identity=forward_identity, protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
                                         timeout_seconds=float(gw.get("request_timeout_seconds", 60)), max_response_bytes=int(gw.get("max_response_bytes", 262144)))
             primary = gateway(settings.gateway_url or "")
             if not settings.classical_gateway_url:
                 return primary
             from ..tools.portfolio import PortfolioMcpClient
-            return PortfolioMcpClient(primary, gateway(settings.classical_gateway_url))
+            return PortfolioMcpClient(primary, gateway(settings.classical_gateway_url, forward_identity=True))
 
         def sink(usage: dict[str, Any]) -> None:
             put_usage(

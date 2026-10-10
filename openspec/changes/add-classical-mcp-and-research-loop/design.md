@@ -33,3 +33,7 @@ Publish the single immutable 1.4.0 contract wheel, update all pins, release beta
 ### Beta deployment metadata artifact
 
 The expanded target set exceeds the CloudFormation CodePipeline 1 KB parameter override limit. Beta Resolve emits only a validated `agent-parameters.json` configuration artifact. Beta DeployAgent consumes that exact file; image and release identity overrides remain separate and templates/image originate in the original Build output. The agent infra gate verifies the exact producer, consumer and parameter keys before excluding this non-executable metadata input from the unchanged generic build-artifact gate. Gamma/prod keep their existing action wiring until explicitly opted in.
+
+### Verified identity for paid MCP research
+
+Only the classical `run_portfolio_research` target permits the custom `X-Finplan-User-Token` request header. The secondary MCP transport forwards the same in-memory bearer used for Gateway authentication. The tool verifies RS256 signature, pinned same-environment Cognito issuer/JWKS, allowed client ID, access-token use and validity window from the `bedrockAgentCorePropagatedHeaders` Lambda client context before deriving researcher groups. Cedar authorization remains required. Missing/invalid identity fails closed; direct test/CI privileges are unchanged. Tokens never enter tool arguments, logs, checkpoints or persisted evidence.

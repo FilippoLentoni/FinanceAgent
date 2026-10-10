@@ -134,6 +134,7 @@ class GatewayMcpClient:
         max_response_bytes: int = 262144,
         transport: Transport | None = None,
         initialize: bool = True,
+        forward_identity: bool = False,
     ) -> None:
         if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
             raise ValueError("the Gateway URL must be https")
@@ -144,6 +145,7 @@ class GatewayMcpClient:
         self._max_bytes = max_response_bytes
         self._transport = transport or urllib_transport
         self._do_initialize = initialize
+        self._forward_identity = forward_identity
         self._session_id: str | None = None
         self._initialized = False
         self._names: dict[str, str] = {}
@@ -162,6 +164,8 @@ class GatewayMcpClient:
         }
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
+        if self._forward_identity:
+            headers["X-Finplan-User-Token"] = token
         msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             msg["params"] = params

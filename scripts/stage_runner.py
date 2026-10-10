@@ -110,7 +110,7 @@ def verify_registered_gateways(control: Any, cfn: Any, env: str, targets: Mappin
     auth, an independent enforced policy engine, and the published Lambda aliases.
     """
     from infra.stacks import naming as n
-    from infra.stacks.tool_schemas import classical_tools, primary_tools, tool_definition
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, target_metadata, tool_definition
 
     stack = cfn.describe_stacks(StackName=n.agent_stack_name(env))["Stacks"][0]
     outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs") or []}
@@ -128,6 +128,7 @@ def verify_registered_gateways(control: Any, cfn: Any, env: str, targets: Mappin
         engines.append(policy.get("arn"))
         expected = {n.target_name(t): (t, targets[t]) for t in tools if targets.get(t, NONE) != NONE}
         actual: dict[str, str] = {}
+        registered_metadata: dict[str, Any] = {}
         token = None
         while True:
             kwargs = {"gatewayIdentifier": identifier, "maxResults": 100}
@@ -146,13 +147,18 @@ def verify_registered_gateways(control: Any, cfn: Any, env: str, targets: Mappin
                     raise DependencyMissing(f"{kind} Gateway target {tool} is not READY at the resolved Lambda alias")
                 if len(definitions) != 1 or definitions[0].get("name") != tool or definitions[0].get("description") != tool_definition(tool).description:
                     raise DependencyMissing(f"{kind} Gateway target {tool} schema/skill description differs from this release")
+                metadata = {k: v for k, v in (target.get("metadataConfiguration") or {}).items() if v}
+                if metadata != target_metadata(env, tool, classical=kind == "classical"):
+                    raise DependencyMissing(f"{kind} Gateway target {tool} identity header propagation differs from this release")
+                if metadata:
+                    registered_metadata[tool] = metadata
                 actual[tool] = arn
             token = page.get("nextToken")
             if not token:
                 break
         if set(actual) != {tool for tool, _arn in expected.values()}:
             raise DependencyMissing(f"{kind} Gateway is missing registered targets")
-        audit[kind] = {"gateway_id": identifier, "gateway_url": gateway["gatewayUrl"], "policy_engine_arn": policy["arn"], "targets": actual}
+        audit[kind] = {"gateway_id": identifier, "gateway_url": gateway["gatewayUrl"], "policy_engine_arn": policy["arn"], "targets": actual, "target_metadata": registered_metadata}
     if authorizers[0] != authorizers[1] or not engines[0] or engines[0] == engines[1] or audit["primary"]["gateway_url"] == audit["classical"]["gateway_url"]:
         raise DependencyMissing("Gateway separation or shared environment identity check failed")
     return audit

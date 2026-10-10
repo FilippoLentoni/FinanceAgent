@@ -46,7 +46,7 @@ from .common import EnvStack, cfn_tags, tag_role
 from .identity import IdentityStack
 from .policies import runtime_role_policy, runtime_trust_conditions
 from .tool_policy import CLASSICAL_POLICY_FILE, load_policy, policy_digest, render
-from .tool_schemas import classical_tools, contract_tools, primary_tools, to_cfn, tool_definition
+from .tool_schemas import classical_tools, contract_tools, primary_tools, target_metadata, to_cfn, tool_definition
 
 __all__ = ["AgentStack", "bedrock_param", "image_pattern", "target_param", "target_variable"]
 
@@ -197,6 +197,9 @@ class AgentStack(EnvStack):
                     ),
                 )
                 target.add_property_override("TargetConfiguration.Mcp.Lambda.ToolSchema.InlinePayload", [{"Name": tool, "Description": d.description, "InputSchema": to_cfn(d.input_schema), "OutputSchema": to_cfn(d.output_schema)}])
+                metadata = target_metadata(env, tool, classical=bool(prefix))
+                if metadata:
+                    target.metadata_configuration = agentcore.CfnGatewayTarget.MetadataConfigurationProperty(allowed_request_headers=metadata["allowedRequestHeaders"])
                 target.cfn_options.condition = cond
                 target.add_metadata("logical-role", "gateway-target")
                 targets[tool] = target

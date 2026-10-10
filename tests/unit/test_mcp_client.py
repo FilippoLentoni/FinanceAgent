@@ -78,6 +78,18 @@ def test_tool_error_envelope_is_a_failed_outcome():
     assert not out.ok and out.error["code"] == "FORBIDDEN"
 
 
+def test_identity_propagation_is_opt_in_and_never_enters_rpc_arguments():
+    primary = FakeGateway()
+    client(primary).call_tool("get_plan_version", {})
+    assert all("X-Finplan-User-Token" not in headers for headers, _ in primary.requests)
+    classical = FakeGateway()
+    GatewayMcpClient(URL, lambda: "identity-token", transport=classical, forward_identity=True).call_tool("get_plan_version", {})
+    for headers, message in classical.requests:
+        assert headers["X-Finplan-User-Token"] == "identity-token"
+        assert headers["Authorization"] == "Bearer identity-token"
+        assert "identity-token" not in json.dumps(message)
+
+
 @pytest.mark.parametrize("status,code", [(401, "UNAUTHORIZED"), (403, "FORBIDDEN"), (429, "RATE_LIMITED"), (503, "DEPENDENCY_UNAVAILABLE")])
 def test_http_errors_map_to_contract_codes(status, code):
     with pytest.raises(AgentError) as e:

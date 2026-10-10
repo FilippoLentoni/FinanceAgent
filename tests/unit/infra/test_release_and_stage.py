@@ -122,7 +122,7 @@ def test_enabled_classical_deploy_refuses_an_older_producer_catalog_before_deplo
 def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     from copy import deepcopy
 
-    from infra.stacks.tool_schemas import classical_tools, primary_tools, tool_definition
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, target_metadata, tool_definition
 
     targets = {t: _arn("beta", t) for t in contract_tools()}
 
@@ -135,6 +135,7 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
             self.catalogs = {"primary": primary_tools(), "classical": classical_tools()}
             self.bad_alias = False
             self.shared_engine = False
+            self.bad_metadata = False
 
         def get_gateway(self, gatewayIdentifier):  # noqa: N803
             return {
@@ -147,7 +148,10 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
             return {"items": [{"targetId": t, "name": t.replace("_", "-")} for t in self.catalogs[gatewayIdentifier]]}
 
         def get_gateway_target(self, gatewayIdentifier, targetId):  # noqa: N803
-            return {"status": "READY", "targetConfiguration": {"mcp": {"lambda": {
+            metadata = target_metadata("beta", targetId, classical=gatewayIdentifier == "classical")
+            if self.bad_metadata and targetId == "run_portfolio_research":
+                metadata = {}
+            return {"status": "READY", "metadataConfiguration": metadata, "targetConfiguration": {"mcp": {"lambda": {
                 "lambdaArn": _arn("prod" if self.bad_alias else "beta", targetId),
                 "toolSchema": {"inlinePayload": [{"name": targetId, "description": tool_definition(targetId).description}]},
             }}}}
@@ -156,6 +160,8 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     audit = stage_runner.verify_registered_gateways(control, Cfn(), "beta", targets)
     assert set(audit["primary"]["targets"]) == set(primary_tools())
     assert set(audit["classical"]["targets"]) == set(classical_tools())
+    assert set(audit["classical"]["target_metadata"]) == {"run_portfolio_research"}
+    assert audit["primary"]["target_metadata"] == {}
     bad = deepcopy(control)
     bad.bad_alias = True
     with pytest.raises(rel.DependencyMissing, match="resolved Lambda alias"):
@@ -167,6 +173,10 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     bad = deepcopy(control)
     bad.shared_engine = True
     with pytest.raises(rel.DependencyMissing, match="Gateway separation"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.bad_metadata = True
+    with pytest.raises(rel.DependencyMissing, match="identity header propagation"):
         stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
 
 
