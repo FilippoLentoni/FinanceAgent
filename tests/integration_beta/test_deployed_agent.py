@@ -54,10 +54,11 @@ def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill()
     if env.env != "beta":
         pytest.skip("Saved paper book is initialized explicitly in beta only")
     sid = new_session_id()
-    code, first = env.invoke_agent({"prompt": "What is your daily portfolio recommendation?", "stream": True}, sid)
+    code, first = env.invoke_agent({"prompt": "Give me a PPO investment recommendation", "stream": True}, sid)
     assert code == 200 and first[-1]["status"] == "completed", first[-1]
     rec = first[-1]["answer"]["recommendation"]
     assert rec and first[-1]["usage"]["tool_calls"] == 1
+    recommendation_skill = next(s for s in first[-1]["answer"]["skills_used"] if s["name"] == "recommend-portfolio")
     issued = first[-1]["answer"]["portfolio_decisions"][0]
     decision_id = issued["decision_id"]
     assert decision_id.startswith("pd_") and issued["recommendation"] == rec
@@ -79,6 +80,8 @@ def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill()
     assert final["usage"]["invocations"] == 0
     skill = next(s for s in final["answer"]["skills_used"] if s["name"] == "paper-portfolio-lifecycle")
     remote = {t.name: t for t in env.gateway().list_tools()}
+    assert recommendation_skill["instructions_checksum"] in remote["recommend_portfolio"].description
+    assert f"recommend-portfolio@{recommendation_skill['version']}" in remote["recommend_portfolio"].description
     for tool in ("get_portfolio_decision", "explain_portfolio_decision"):
         assert skill["instructions_checksum"] in remote[tool].description
         assert f"paper-portfolio-lifecycle@{skill['version']}" in remote[tool].description

@@ -54,7 +54,7 @@ def setup(rec, *, durable=False):
         CatalogEntry(n, n in {"resolve_portfolio_decision", "run_portfolio_research"}, "plan-writer" if n == "resolve_portfolio_decision" else "reader")
         for n in LIFECYCLE_TOOLS | CLASSICAL_TOOLS | {"recommend_portfolio"}
     ], environment="beta")
-    svc.deps.skills = load_skills()[0]
+    svc.deps.skills, svc.deps.stable_instructions = load_skills()
     svc.deps.durable_activity = durable
     return svc, tools, state
 
@@ -65,6 +65,47 @@ def ask(svc, prompt, session=SESSION):
 
 def confirm(svc, approve=True):
     return svc.handle({"action": "confirm", "approve": approve, "stream": False}, auth(), runtime_session_id=SESSION)
+
+
+def test_daily_ppo_after_acceptance_selects_and_archives_the_versioned_recommendation_skill(recommendation):
+    svc, tools, state = setup(recommendation, durable=True)
+    state["revision"] = 2
+    portfolio_id = recommendation["portfolio_state"]["portfolio_id"]
+    result = ask(svc, "Give me a PPO investment recommendation for " + portfolio_id)
+    assert result["status"] == "completed" and result["usage"]["invocations"] == 0
+    assert tools.calls[0] == ("recommend_portfolio", {"portfolio_id": portfolio_id})
+    assert result["answer"]["recommendation"]["portfolio_state"]["revision"] == 2
+    expected = next(skill for skill in svc.deps.skills if skill["name"] == "recommend-portfolio")
+    assert result["answer"]["skills_used"] == [expected]
+    assert expected["version"] and expected["instructions_checksum"].startswith("sha256:")
+    assert tools.calls[-1][0] == "record_agent_activity"
+    assert tools.calls[-1][1]["payload"]["skills_used"] == [expected]
+
+
+def test_provider_selected_ppo_uses_loaded_instructions_and_archives_the_same_skill(recommendation):
+    from finplan_agent.providers.base import GenerateResult, ToolCall, Usage
+
+    svc, tools, _ = setup(recommendation, durable=True)
+    portfolio_id = recommendation["portfolio_state"]["portfolio_id"]
+    expected = next(skill for skill in svc.deps.skills if skill["name"] == "recommend-portfolio")
+    instructions = next(text for text in svc.deps.stable_instructions if text.startswith("# recommend-portfolio\n"))
+    assert expected["instructions_checksum"] == "sha256:" + hashlib.sha256(instructions.encode()).hexdigest()
+
+    class ProviderPlan:
+        kind = "fixture"
+        model_id = None
+
+        def generate(self, request, **kwargs):
+            assert instructions in request.stable_instructions
+            return GenerateResult(text="", tool_calls=(ToolCall(id="provider-policy", name="recommend_portfolio", arguments={"portfolio_id": portfolio_id}),),
+                                  usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+
+    svc.deps.provider = ProviderPlan()
+    result = ask(svc, "Please review my positions")
+    assert result["status"] == "completed" and result["usage"]["invocations"] == 1
+    assert tools.calls[0] == ("recommend_portfolio", {"portfolio_id": portfolio_id})
+    assert result["answer"]["skills_used"] == [expected]
+    assert tools.calls[-1][1]["payload"]["skills_used"] == [expected]
 
 
 @pytest.mark.parametrize("action,final_revision", [("accept", 2), ("reject", 1)])

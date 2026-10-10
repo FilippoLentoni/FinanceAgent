@@ -183,11 +183,6 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         if missing:
             updates.update(error=_err(AgentError.dependency("Required MCP tools are unavailable.", tools=missing), state), status="failed", draft_text="The required portfolio MCP tools are unavailable: " + ", ".join(missing) + ".")
             return updates
-        skills = selected_portfolio_skills(calls, ctx.skills)
-        existing = state.get("skills_used") or []
-        updates["skills_used"] = existing + [s for s in skills if s not in existing]
-        for skill in skills:
-            _emit({"type": "progress", "stage": "skill_selected", "skill": skill})
         result = GenerateResult(text="", tool_calls=tuple(calls), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
     elif explanation_requested(request.messages) and reference is None and arguments is None:
         updates["draft_text"] = "I need a successful portfolio recommendation in this conversation before I can explain it. Ask for a recommendation first, or provide the complete original portfolio scenario. I will re-read its policy and market evidence rather than infer figures from conversation text."
@@ -201,10 +196,6 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
             old = reference["recommendation"]
             calls.append(ToolCall(id=f"market-{state.get('turn', 1)}", name="query_market_data", arguments={"input_snapshot_id": old["input_snapshot_id"], "start_date": old["as_of"], "end_date": old["as_of"]}))
             updates["recommendation_reference"] = reference
-        skills = [dict(s) for s in ctx.skills if s["name"] == "recommend-portfolio"]
-        updates["skills_used"] = skills
-        for skill in skills:
-            _emit({"type": "progress", "stage": "skill_selected", "skill": skill})
         result = GenerateResult(text="", tool_calls=tuple(calls), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
     else:
         try:
@@ -230,6 +221,14 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         updates.update(error=_err(exc, state))
         return updates
     by_name: dict[str, ToolSpec] = {t.name: t for t in offered}
+    # Record the packaged recipes for actual offered calls from every planner,
+    # including provider-selected tools whose instructions were supplied above.
+    skills = selected_portfolio_skills([c for c in calls if c.name in by_name], ctx.skills)
+    existing = state.get("skills_used") or []
+    selected = [skill for skill in skills if skill not in existing]
+    updates["skills_used"] = existing + selected
+    for skill in selected:
+        _emit({"type": "progress", "stage": "skill_selected", "skill": skill})
     pending: list[dict[str, Any]] = []
     blocks: list[dict[str, Any]] = []
     for c in calls:

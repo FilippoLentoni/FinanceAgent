@@ -12,6 +12,7 @@ _RECOMMENDATION = re.compile(
     r"|\bportfolio\b[^.!?]{0,70}\b(?:plan\w*|recommend\w*|allocat\w*|rebalanc\w*)\b"
     r"|\b(?:recommend\w*|rebalanc\w*|allocat\w*)\b[^.!?]{0,70}\b(?:portfolio|invest\w*|today|stocks?|shares?)\b"
     r"|\bpolicy\b[^.!?]{0,70}\b(?:recommend\w*|today|buy|sell)\b"
+    r"|\b(?:ppo|reinforcement|invest\w*)\b[^.!?]{0,70}\brecommend\w*\b"
     r"|\b(?:buy|sell)\b[^.!?]{0,70}\b(?:google|googl?|nvidia|nvda|apple|aapl|netflix|nflx|voo)\b",
     re.I,
 )
