@@ -142,11 +142,72 @@ def test_named_benchmark_obtains_concrete_dry_run_then_confirms_paid_request(rec
     assert "Sandbox benchmark evidence" in result["answer"]["narrative"] and "0.25" in result["answer"]["narrative"]
     pending = ask(service, "Run the " + name + " benchmark")
     assert pending["status"] == "awaiting_confirmation" and len(tools.calls) == 2
-    paid = pending["confirmation"]["calls"][0]["arguments"]
-    assert paid["job_type"] == family and paid["dry_run"] is False and paid["idempotency_key"] != args["idempotency_key"]
+    call = pending["confirmation"]["calls"][0]
+    paid = call["arguments"]
+    assert call["tool"] == "run_recursive_improvement"
+    assert paid["cycle_id"] == CYCLE and paid["dry_run"] is False and paid["confirmed_by_user"] is True
+    assert paid["idempotency_key"] != args["idempotency_key"] and "job_type" not in paid
     declined = service.handle({"action": "confirm", "approve": False, "stream": False}, auth(), runtime_session_id=SESSION)
     assert declined["status"] == "completed" and len(tools.calls) == 2
     assert "No experiment was launched" in declined["answer"]["narrative"]
+
+
+def test_confirmed_benchmark_job_is_owned_by_same_cycle_and_resume_cannot_duplicate_it(recommendation):
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    request.update(job_type="swarm_mode_a")
+    request["configuration"]["payload"].update(strategy="qwen_swarm", objective="llm_benchmark")
+    preview = cycle(proposed_experiment={"tool_request": {"name": "submit_experiment", "arguments": request}})
+    job = {"run_id": "run_01JA2B3C4D5E6F7G8H9JKMNPQR", "state": "awaiting_approval"}
+    launched = cycle(**{**preview, "job": job, "dry_run": False, "iteration": 1,
+                        "lineage": [{"analysis_id": ITERATION, "iteration": 0}]})
+    calls = []
+    def recursive(args):
+        calls.append(args)
+        return deepcopy(launched if len(calls) > 1 else preview)
+    service, tools = setup(recommendation, {
+        "run_recursive_improvement": recursive,
+        "submit_experiment": lambda _: {"dry_run": True, "cost_estimate": {"estimated_usd_upper_bound": .25}, "tool_limit": {"within_limit": True}}})
+    ask(service, "Estimate Qwen swarm benchmark")
+    pending = ask(service, "Run the Qwen benchmark")
+    assert pending["status"] == "awaiting_confirmation"
+    result = service.handle({"action": "confirm", "approve": True, "stream": False}, auth(), runtime_session_id=SESSION)
+    assert result["status"] == "completed" and job["run_id"] in result["answer"]["narrative"]
+    assert tools.calls[-1][0] == "run_recursive_improvement" and tools.calls[-1][1]["cycle_id"] == CYCLE
+    assert tools.calls[-1][1]["dry_run"] is False
+    resumed = ask(service, "Run the Qwen benchmark")
+    assert resumed["status"] == "completed"
+    assert tools.calls[-1] == ("run_recursive_improvement", {"cycle_id": CYCLE, "dry_run": True})
+    assert sum(name == "submit_experiment" for name, _ in tools.calls) == 1
+    assert sum(args.get("dry_run") is False for _, args in tools.calls) == 1
+
+
+def test_explicit_benchmark_cycle_cannot_launch_another_family(recommendation):
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    request.update(job_type="swarm_mode_a")
+    request["configuration"]["payload"].update(strategy="qwen_swarm", objective="llm_benchmark")
+    preview = cycle(proposed_experiment={"tool_request": {"name": "submit_experiment", "arguments": request}})
+    service, tools = setup(recommendation, {
+        "run_recursive_improvement": lambda _: deepcopy(preview),
+        "submit_experiment": lambda _: {"dry_run": True, "cost_estimate": {"estimated_usd_upper_bound": .25}, "tool_limit": {"within_limit": True}}})
+    ask(service, "Estimate the Qwen benchmark")
+    result = ask(service, "Run the Jev benchmark in cycle " + CYCLE)
+    assert result["status"] == "completed"
+    assert "complete matching sandbox benchmark request is unavailable" in result["answer"]["narrative"]
+    assert tools.calls[-1] == ("run_recursive_improvement", {"cycle_id": CYCLE, "dry_run": True})
+    assert all(args.get("dry_run") is True for _, args in tools.calls)
+
+
+def test_unlinked_sandbox_estimate_does_not_authorize_recursive_launch(recommendation):
+    from finplan_agent.graph.improvement import _benchmark_history
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    request.update(job_type="swarm_mode_a", dry_run=True)
+    request["configuration"]["payload"].update(strategy="qwen_swarm", objective="llm_benchmark")
+    preview = cycle(proposed_experiment={"tool_request": {"name": "submit_experiment", "arguments": request}})
+    messages = [{"role": "tool", "content": [{"tool_result": {"name": "run_recursive_improvement", "status": "success", "content": preview}}]},
+                {"role": "user", "content": [{"text": "Estimate a separate sandbox job"}]},
+                {"role": "assistant", "content": [{"tool_use": {"name": "submit_experiment", "id": "independent", "input": request}}]},
+                {"role": "tool", "content": [{"tool_result": {"name": "submit_experiment", "id": "independent", "status": "success", "content": {"dry_run": True, "cost_estimate": {}, "tool_limit": {"within_limit": True}}}}]}]
+    assert _benchmark_history(messages) == []
 
 
 def test_named_benchmark_does_not_submit_a_different_family(recommendation):

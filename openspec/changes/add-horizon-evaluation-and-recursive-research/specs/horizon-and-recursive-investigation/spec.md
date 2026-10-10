@@ -19,11 +19,15 @@ The agent SHALL offer a persisted recursive improvement workflow with a dry-run 
 - **THEN** the agent presents exact arguments for confirmation and preserves the tool's verified researcher and budget checks.
 
 ### Requirement: Honest benchmark discovery
-The agent SHALL expose deployed benchmark capabilities and unavailable configurations before a Qwen swarm or Jev experiment, using the existing sandbox tool interface. When the producer supplies a complete matching benchmark request, the agent SHALL validate it and obtain a concrete submit_experiment dry-run cost estimate before offering a confirmed paid submission.
+The agent SHALL expose actual Qwen/Jev readiness and validate the producer's matching benchmark request before obtaining a concrete submit_experiment dry-run estimate. Confirmed launches SHALL advance that same recursive cycle with retained job/result lineage. Independent estimates and other benchmark families SHALL NOT authorize the launch.
 
 #### Scenario: Configured benchmark preview
 - **WHEN** a named benchmark review supplies a valid matching sandbox request
 - **THEN** the agent invokes submit_experiment with dry_run=true, displays its estimate and approval requirements, and records no paid run.
+
+#### Scenario: Benchmark confirmation and approval resume
+- **WHEN** the user confirms a benchmark launch after its matching cycle preview and estimate
+- **THEN** the agent invokes run_recursive_improvement with that cycle_id, dry_run=false and confirmed_by_user=true; later requests for an existing job awaiting compute approval resume read-only without another paid call.
 
 #### Scenario: Unconfigured benchmark
 - **WHEN** a user requests a benchmark that is not configured
