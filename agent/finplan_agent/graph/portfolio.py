@@ -207,7 +207,11 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
             parts.append("Binding constraints: " + ", ".join(explanation.get("binding_constraints", [])) + ".")
             parts.append("Coalition/reconciliation evidence: " + json.dumps({k: shapley[k] for k in ("coalition_count", "reconciliation_residual", "tolerance", "hybrid_constraint_handling", "infeasible_hybrids") if k in shapley}, sort_keys=True))
     if kind == "comparison":
-        parts.append("Comparison alignment: " + json.dumps(doc.get("alignment", {}), sort_keys=True))
+        # Implementation identity remains in the raw analysis for reproducibility;
+        # the recommendation narrative shows the decision's comparison context.
+        alignment = doc.get("alignment", {})
+        comparison_context = {k: alignment[k] for k in ("algorithm", "previous_as_of", "current_as_of", "horizon_sessions", "instruments") if k in alignment}
+        parts.append("Comparison alignment: " + json.dumps(comparison_context, sort_keys=True))
         for row in doc.get("changes", []):
             parts.append(f"{row['instrument_id']}: {row['previous_action']} → {row['current_action']}; target weight {_number(row['previous_target_weight'])} → {_number(row['current_target_weight'])}. Grouped modeled effects: " + json.dumps(row["attribution"], sort_keys=True))
         parts.append("Exact grouped Shapley evidence: " + json.dumps(doc.get("shapley", {}), sort_keys=True))
@@ -243,7 +247,8 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             derived.append({"computed_target_cash": None if value is None else value*doc["recommendation"]["cash_weight"]})
         elif doc.get("analysis_id"):
             text, figures = render_classical(doc)
-            parts.append(text); derived.extend(figures)
+            parts.append(text)
+            derived.extend(figures)
     if state.get("draft_text"):
         parts.append(state["draft_text"])
     if not parts:

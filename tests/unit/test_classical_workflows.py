@@ -1,7 +1,6 @@
 """Independent MCP routing and evidence-first classical workflows; no AWS or model calls."""
+import json
 from copy import deepcopy
-
-import pytest
 
 from finplan_agent.core.errors import AgentError
 from finplan_agent.graph.claim_check import claim_check
@@ -9,7 +8,8 @@ from finplan_agent.skills import load_skills
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
 from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, PortfolioMcpClient
 from tests.fakes.agent import SESSION, FakeToolClient, auth, make_service
-from tests.unit.test_saved_portfolio_recommendations import NoProvider, recommendation
+from tests.unit.test_saved_portfolio_recommendations import NoProvider
+from tests.unit.test_saved_portfolio_recommendations import recommendation as recommendation
 
 A = 'ca_' + 'a'*32
 B = 'ca_' + 'b'*32
@@ -75,7 +75,8 @@ def test_both_strategies_are_rendered_and_preserved(recommendation):
 
 def test_two_dates_lookup_then_compare_uses_stored_evidence(recommendation):
     svc,tools=service(doc(recommendation))
-    old=doc(recommendation); old['recommendation']['as_of']='2026-10-07'
+    old=doc(recommendation)
+    old['recommendation']['as_of']='2026-10-07'
     current=doc(recommendation,B)
     tools.results['list_classical_analyses']=lambda _:{'analyses':[current,old]}
     tools.results['compare_classical_plans']=lambda _:{'analysis_id':C,'analysis_kind':'comparison','summary':'No target change','changes':[], 'alignment':{},'shapley':{'coalition_count':16,'reconciliation_residual':[0.]}}
@@ -84,6 +85,53 @@ def test_two_dates_lookup_then_compare_uses_stored_evidence(recommendation):
     assert tools.calls[1][1]=={'previous_analysis_id':A,'current_analysis_id':B}
     assert result['status']=='completed' and result['answer']['claim_check']['passed'],result
     assert any(s['name']=='compare-classical-plans' for s in result['answer']['skills_used'])
+
+
+def test_comparison_narrative_uses_decision_context_and_preserves_raw_implementation(recommendation):
+    comparison = {
+        'analysis_id': C, 'analysis_kind': 'comparison',
+        'summary': 'Exact four-group attribution of target allocation changes between immutable issued plans',
+        'previous_analysis_id': A, 'current_analysis_id': B,
+        'alignment': {
+            'algorithm': 'min_variance', 'previous_as_of': '2026-10-06',
+            'current_as_of': '2026-10-07', 'horizon_sessions': 21,
+            'instruments': ['GOOGL'],
+            'implementation': {'version': 'finplan-classical/1', 'scipy_version': '1.18.1',
+                               'solver_source_checksum': 'sha256:' + 'a'*64},
+        },
+        'changes': [{
+            'instrument_id': 'GOOGL', 'previous_action': 'sell', 'current_action': 'hold',
+            'previous_target_weight': .19, 'current_target_weight': .2,
+            'target_weight_change': .01,
+            'attribution': [{'group': 'expected_returns', 'value': 0},
+                            {'group': 'risk_inputs', 'value': .01},
+                            {'group': 'portfolio_state', 'value': 0},
+                            {'group': 'configuration', 'value': 0}],
+        }],
+        'shapley': {
+            'method': 'exact_shapley', 'coalition_count': 16,
+            'baseline': [.19], 'final': [.2], 'reconciliation_residual': [0.],
+            'tolerance': 1e-8,
+        },
+        'reproduction': {'status': 'verified'},
+        'analysis_ref': {'checksum': 'sha256:' + 'b'*64},
+    }
+    svc, tools = service(doc(recommendation))
+    tools.results['compare_classical_plans'] = lambda _: deepcopy(comparison)
+    result = ask(svc, f'Compare these traditional plans and explain why Google changed: {A} then {B}')
+    assert tools.calls == [('compare_classical_plans', {'previous_analysis_id': A, 'current_analysis_id': B})]
+    assert result['status'] == 'completed'
+    assert result['answer']['claim_check']['passed'], result['answer']['claim_check']
+    narrative = result['answer']['narrative']
+    alignment_text = narrative.split('Comparison alignment: ', 1)[1].split('\n\n', 1)[0]
+    assert json.loads(alignment_text) == {
+        'algorithm': 'min_variance', 'previous_as_of': '2026-10-06',
+        'current_as_of': '2026-10-07', 'horizon_sessions': 21, 'instruments': ['GOOGL'],
+    }
+    assert 'GOOGL: sell → hold; target weight 0.190000 → 0.200000' in narrative
+    assert 'implementation' not in narrative and '1.18.1' not in narrative
+    assert result['answer']['portfolio_analyses'] == [comparison]
+    assert result['answer']['portfolio_analyses'][0]['alignment']['implementation']['scipy_version'] == '1.18.1'
 
 
 def test_missing_dated_plans_does_not_invent_yesterday(recommendation):
