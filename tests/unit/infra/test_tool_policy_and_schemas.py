@@ -128,9 +128,10 @@ def test_each_shared_lifecycle_tool_exports_the_exact_versioned_skill():
     from finplan_agent.tools.portfolio import LIFECYCLE_TOOLS
     from finplan_agent.skills import load_skills
     root=Path(__file__).resolve().parents[3]/'skills'
-    recipe=(root/'paper-portfolio-lifecycle'/'SKILL.md').read_text()
-    skill=next(s for s in load_skills(root)[0] if s['name']=='paper-portfolio-lifecycle')
     for tool in LIFECYCLE_TOOLS:
+        name = 'investigate-portfolio-performance' if tool == 'evaluate_portfolio_decision' else 'paper-portfolio-lifecycle'
+        recipe=(root/name/'SKILL.md').read_text()
+        skill=next(s for s in load_skills(root)[0] if s['name']==name)
         description=tool_definition(tool).description
         assert recipe in description and skill['instructions_checksum'] in description
         assert tool in skill['tools']

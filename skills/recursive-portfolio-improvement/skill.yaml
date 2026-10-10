@@ -1,0 +1,5 @@
+name: recursive-portfolio-improvement
+version: 0.1.0
+purpose: Create and resume bounded, evidence-linked research cycles and inspect Qwen swarm or Jev sandbox readiness.
+tools: [run_recursive_improvement, get_classical_analysis, list_classical_analyses, get_job_status, get_experiment_result, submit_experiment, describe_capabilities]
+output_contract: finance/v1/tools/run-recursive-improvement-response.json

@@ -165,7 +165,7 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     audit = stage_runner.verify_registered_gateways(control, Cfn(), "beta", targets)
     assert set(audit["primary"]["targets"]) == set(primary_tools())
     assert set(audit["classical"]["targets"]) == set(classical_tools())
-    assert set(audit["classical"]["target_metadata"]) == {"run_portfolio_research", "resolve_portfolio_decision"}
+    assert set(audit["classical"]["target_metadata"]) == {"run_portfolio_research", "run_recursive_improvement", "resolve_portfolio_decision"}
     assert audit["classical"]["target_metadata"]["run_portfolio_research"] == {"allowedRequestHeaders": ["X-Finplan-User-Token"]}
     assert audit["primary"]["target_metadata"] == {"resolve_portfolio_decision": {"allowedRequestHeaders": ["X-Finplan-User-Token"]}}
     without_service_header = deepcopy(control)

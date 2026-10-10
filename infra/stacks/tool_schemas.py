@@ -35,14 +35,14 @@ def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
     target verifies the signature and pinned Cognito issuer/client before authorizing.
     Paper resolutions propagate the same header through either independent Gateway.
     """
-    if tool == "resolve_portfolio_decision" or env == "beta" and classical and tool == "run_portfolio_research":
+    if tool == "resolve_portfolio_decision" or env == "beta" and classical and tool in {"run_portfolio_research", "run_recursive_improvement"}:
         return {"allowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
     return {}
 
 CLASSICAL_ONLY_TOOLS = frozenset({
     "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
-    "research_portfolio_models", "research_market_events", "run_portfolio_research", "submit_portfolio_feedback",
+    "research_portfolio_models", "research_market_events", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback",
 })
 CLASSICAL_SHARED_TOOLS = frozenset({
     "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",

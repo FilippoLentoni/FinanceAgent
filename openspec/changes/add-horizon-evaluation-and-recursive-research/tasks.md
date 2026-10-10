@@ -1,0 +1,3 @@
+- [x] 1. Route and render horizon-aware investigations using persisted objective and sequential policy evidence.
+- [x] 2. Add bounded recursive improvement MCP routing, conversation entry path, shared skill and benchmark capability discovery.
+- [x] 3. Verify graph, policy/schema, claim checking and packaged skill behavior; record integration handoff.

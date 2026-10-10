@@ -13,6 +13,7 @@ roles:
     - research_market_events
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
+    - run_recursive_improvement(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -43,6 +44,7 @@ roles:
     - research_market_events
     - submit_portfolio_feedback
     - run_portfolio_research
+    - run_recursive_improvement
     - query_market_data
     - get_plan
     - get_plan_version
@@ -73,6 +75,7 @@ roles:
     - research_market_events
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
+    - run_recursive_improvement(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -103,6 +106,7 @@ roles:
     - research_market_events
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
+    - run_recursive_improvement(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -133,6 +137,7 @@ roles:
     - research_market_events
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
+    - run_recursive_improvement(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version

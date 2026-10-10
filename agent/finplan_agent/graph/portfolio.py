@@ -224,17 +224,37 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         if doc.get("previous_decision_ref"):
             parts.append("Stored decision comparison evidence:\n```json\n" + json.dumps({k: doc[k] for k in ("previous_decision_ref", "current_decision_ref", "attribution", "policy_replay", "input_differences") if k in doc}, indent=2, sort_keys=True) + "\n```")
     if kind == "performance":
-        parts.append(f"Trend: {doc.get('trend', 'not_available')}; observed source: {doc.get('actual_source', 'not_available')}. {doc.get('trend_definition', doc.get('reason', ''))}")
+        parts.append(f"Daily/accounting outcome: {doc.get('trend', 'not_available')}; observed source: {doc.get('actual_source', 'not_available')}. {doc.get('trend_definition', doc.get('reason', ''))}")
         parts.append("Reconciled performance evidence:\n```json\n" + json.dumps({k: v for k, v in doc.items() if k in ("window", "planned_allocation_hold", "observed_paper", "gap", "forecast", "real_execution", "whys", "feedback", "limitations", "partial_horizon", "thresholds", "issued_plan_trend", "gap_trend", "source_decision_ref", "observed_snapshot_id", "observed_snapshot_checksum", "decision_status", "unchanged_holdings_benchmark", "paper_execution_evidence", "instrument_contributions")}, indent=2) + "\n```")
-    if kind in ("research", "research_run", "feedback", "market_events"):
+        horizon = doc.get("horizon_evaluation")
+        if isinstance(horizon, dict):
+            protocol = horizon.get("protocol") or {}
+            objective = protocol.get("objective") or {}
+            parts.append("Strategy evaluation: " + str(horizon.get("status", "not_available"))
+                         + "; contract: " + str(horizon.get("protocol_status", "not_available"))
+                         + "; objective: " + str(objective.get("kind", "not_available")) + ".")
+            if horizon.get("protocol_status") == "retrospective_historical_request":
+                parts.append("This recommendation was issued for a historical market date after its outcomes were already observable. Its replay is a historical counterfactual, not prospective validation.")
+            if "available_forward_sessions" in horizon and "primary_horizon_sessions" in protocol:
+                parts.append(f"Available forward sessions: {horizon['available_forward_sessions']}; declared primary horizon: {protocol['primary_horizon_sessions']}; primary horizon mature: {horizon.get('primary_horizon_mature', False)}.")
+            assessment = horizon.get("evidence_assessment") or {}
+            if assessment:
+                parts.append("Evidence assessment: " + str(assessment.get("status", "not_available")) + ". " + str(assessment.get("recommendation", "")))
+            parts.append("Strategy objective and horizon evaluation (separate from the daily outcome):\n```json\n" + json.dumps(horizon, indent=2, sort_keys=True) + "\n```")
+            parts.append("A short-term loss alone does not establish policy failure. Frozen sequential-policy replay is a hypothetical experiment on observed prices, independent of accepted paper accounting. It evaluates subsequent decisions; holding the first allocation is a different counterfactual. A single observed path cannot establish optimality.")
+        else:
+            parts.append("Strategy-horizon evidence is unavailable in this analysis. Daily accounting and a frozen first-allocation hold do not establish the performance of the ongoing policy.")
+    if kind in ("research", "research_run", "feedback", "market_events", "recursive_cycle", "recursive_iteration"):
         details = {k: v for k, v in doc.items() if k not in ("analysis_ref", "analysis_id", "created_at", "summary", "contract_version", "synthetic")}
         parts.append("Stored evidence:\n```json\n" + json.dumps(details, indent=2, sort_keys=True) + "\n```")
+        if kind in ("recursive_cycle", "recursive_iteration"):
+            parts.append("Research cycle state: " + doc.get("state", "not_available") + ". Strategy changes remain proposals for review; paper holdings are unchanged.")
     if doc.get("sources"):
         parts.append("Sources: " + "; ".join(f"[{s.get('title', s['url'])}]({s['url']})" for s in doc["sources"]))
     if doc.get("analysis_ref"):
         parts.append("Evidence checksum: " + doc["analysis_ref"]["checksum"] + ".")
     if kind in ("recommendation", "explanation", "comparison", "performance", "market_events"):
-        parts.append("Attribution describes model counterfactuals. Dated market events provide context; they do not establish real-world causality. Missing fills and calibrated forecasts remain unavailable.")
+        parts.append("Attribution describes model counterfactuals. Dated market events provide context; they do not establish real-world causality. Missing execution and model evidence remain unavailable.")
     return "\n\n".join(parts), derived
 
 
@@ -246,7 +266,8 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             continue
         if not row.get("ok"):
             if row.get("declined"):
-                parts.append("The requested paper decision resolution was cancelled at confirmation. Saved holdings are unchanged.")
+                parts.append("The requested paper decision resolution was cancelled at confirmation. Saved holdings are unchanged."
+                             if name == "resolve_portfolio_decision" else "The requested research operation was cancelled at confirmation. No experiment was launched.")
                 continue
             error = row.get("error") or {}
             parts.append(f"{name} failed: {error.get('code', 'DEPENDENCY_UNAVAILABLE')}: {error.get('message', 'Evidence unavailable')}.")

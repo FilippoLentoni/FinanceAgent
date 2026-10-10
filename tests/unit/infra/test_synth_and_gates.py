@@ -338,7 +338,7 @@ def test_only_human_resolution_and_beta_paid_research_receive_identity_token_hea
     for env in ENVS:
         for logical, target in resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget").items():
             metadata = target["Properties"].get("MetadataConfiguration")
-            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical == "ClassicalTargetRunPortfolioResearch":
+            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical in {"ClassicalTargetRunPortfolioResearch", "ClassicalTargetRunRecursiveImprovement"}:
                 assert metadata == {"AllowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
             else:
                 assert metadata is None

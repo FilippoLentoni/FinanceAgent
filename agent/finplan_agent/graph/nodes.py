@@ -33,6 +33,7 @@ from .recommendations import explanation_requested, recommendation_arguments, re
 from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
 from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
 from .lifecycle import lifecycle_plan
+from .improvement import improvement_plan
 from ..skills import provider_tool_specs
 from .state import TURN_RESET, AgentContext, AgentState
 
@@ -173,7 +174,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     )
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
-    workflow = lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
+    workflow = improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
     if workflow is not None:
         updates["portfolio_workflow"] = workflow["workflow"]
         if workflow.get("clarification"):
@@ -235,7 +236,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         spec = by_name.get(c.name)
         args = dict(c.arguments)
         state_changing = True if spec is None else spec.state_changing
-        if c.name == "run_portfolio_research" and args.get("dry_run", True) is True:
+        if c.name in {"run_portfolio_research", "run_recursive_improvement"} and args.get("dry_run", True) is True:
             state_changing = False
         if state_changing:
             args.setdefault("idempotency_key", idempotency_key(ctx.session_id, int(state.get("turn", 1)), c.name, args))
@@ -265,7 +266,9 @@ def confirm(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     answer = interrupt(request)
     approved = isinstance(answer, dict) and answer.get("approve") is True
     if approved:
-        pending = [{**p, "arguments": {**p["arguments"], "confirmed_by_user": True}} if p["name"] == "resolve_portfolio_decision" else p for p in pending]
+        pending = [{**p, "arguments": {**p["arguments"], "confirmed_by_user": True}}
+                   if p["name"] == "resolve_portfolio_decision" or p["name"] in {"run_portfolio_research", "run_recursive_improvement"} and p["arguments"].get("dry_run") is False
+                   else p for p in pending]
         return {"pending_calls": pending, "confirmation": {"decision": "approved", "calls": request["calls"]}}
     keep = [p for p in pending if not p["state_changing"]]
     results = [{"tool_result": {"id": p["id"], "name": p["name"], "content": {"declined": True}, "status": "error"}} for p in changing]

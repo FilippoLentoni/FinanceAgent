@@ -14,7 +14,7 @@ LIFECYCLE_TOOLS = frozenset({
 CLASSICAL_TOOLS = frozenset({
     "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
-    "research_portfolio_models", "run_portfolio_research", "submit_portfolio_feedback", "research_market_events",
+    "research_portfolio_models", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback", "research_market_events",
 })
 
 
