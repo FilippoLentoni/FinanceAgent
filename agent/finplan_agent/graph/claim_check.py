@@ -28,6 +28,8 @@ REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
 _NUM = re.compile(r"(?<![\w.$/-])-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?%?(?![\w])")
 _LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)](?=\s)")
+_VERSION_FIELD = re.compile(r'"(?:[A-Za-z_]\w*_)?version"\s*:\s*"(?P<value>[^"\n]+)"')
+_DOTTED_VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?")
 
 
 @dataclass
@@ -105,6 +107,13 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
     # Dated news/literature titles may contain figures. Preserve them only when the
     # complete source string is reproduced verbatim, rather than trusting an isolated digit.
     verbatim = []
+    # A quoted software/schema version is metadata, not a financial figure.
+    # Accept only the complete exact version from this turn's evidence, scoped
+    # to a version field; its digits cannot authorize figures elsewhere.
+    for match in _VERSION_FIELD.finditer(text):
+        source = match.group('value')
+        if source in strings and _DOTTED_VERSION.fullmatch(source):
+            verbatim.append(match.span('value'))
     for source in strings:
         if len(source) < 16:
             continue
