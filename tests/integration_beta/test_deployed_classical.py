@@ -5,6 +5,7 @@ import pytest
 
 from finplan_agent.skills import CLASSICAL_SKILLS, load_skills
 from finplan_agent.tools.mcp_client import GatewayMcpClient
+from infra.stacks.tool_policy import CLASSICAL_POLICY_FILE, grants, load_policy
 from tests.deployed import deployed, requires_deployed
 
 pytestmark = requires_deployed
@@ -24,11 +25,15 @@ def classical():
 def test_independent_gateway_discovery_and_packaged_skill_parity(classical):
     _, client = classical
     offered = {tool.name: tool for tool in client.list_tools()}
-    assert set(CLASSICAL_SKILLS) <= set(offered)
+    ci_grants = {tool: roles["ci_test"] for tool, roles in grants(load_policy(CLASSICAL_POLICY_FILE)).items() if "ci_test" in roles}
+    unrestricted = {tool for tool, limit in ci_grants.items() if limit is None}
+    assert unrestricted <= set(offered) <= set(ci_grants)
+    assert 'record_agent_activity' in offered and 'resolve_portfolio_decision' not in offered
     assert 'recommend_portfolio' not in offered
     inventory, _ = load_skills()
     by_name = {s['name']: s for s in inventory}
-    for name, skill in CLASSICAL_SKILLS.items():
+    for name in set(CLASSICAL_SKILLS) & set(offered):
+        skill = CLASSICAL_SKILLS[name]
         assert by_name[skill]['instructions_checksum'] in offered[name].description
         assert f"{skill}@{by_name[skill]['version']}" in offered[name].description
 

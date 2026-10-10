@@ -1,9 +1,11 @@
 """Exercise complete hosted MCP orchestration, approval interrupts and durable evidence."""
 from copy import deepcopy
+import base64
 import hashlib
 import json
 
 import pytest
+from finplan_contracts.validate import validate
 
 from finplan_agent.skills import load_skills
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
@@ -170,6 +172,55 @@ def test_completed_turn_fails_explicitly_if_durable_archive_is_unavailable(recom
     result = ask(svc, "How should I invest today?")
     assert result["status"] == "failed" and result["answer"]["recommendation"] is None
     assert result["answer"]["activity_receipt"] is None
+
+
+def restore_archived_diagnostic(value):
+    if isinstance(value, dict):
+        if value.get('representation') == 'json_pointer':
+            assert value['encoding'] == 'base64url_utf8_segments'
+            parts = [base64.urlsafe_b64decode(s + '=' * (-len(s) % 4)).decode() for s in value['segments']]
+            return '/' + '/'.join(parts) if parts else ''
+        if value.get('representation') == 'json_pointer_diagnostic':
+            return restore_archived_diagnostic(value['pointer']) + value['suffix']
+        return {key: restore_archived_diagnostic(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [restore_archived_diagnostic(item) for item in value]
+    return value
+
+
+def test_malformed_explanation_is_archived_without_replacing_the_original_validation_error(recommendation):
+    svc, tools, _ = setup(recommendation, durable=True)
+    archives = []
+
+    def archive(arguments):
+        validation = validate(arguments, 'tools/record-agent-activity-request')
+        assert validation.valid, validation.to_dict()
+        archives.append(deepcopy(arguments))
+        return {'activity_event_id': 'stored-validation-turn'}
+
+    tools.results['record_agent_activity'] = archive
+    result = svc.handle({'explanation': {'type': 'not-a-workflow'}, 'stream': False}, auth(), runtime_session_id=SESSION)
+    assert result['status'] == 'failed', result
+    assert result['error']['code'] == 'VALIDATION_FAILED'
+    assert result['error']['details']['pointer'] == '/explanation/type'
+    assert result['answer']['activity_receipt'] == {'activity_event_id': 'stored-validation-turn'}
+    assert len(archives) == 1
+    stored = archives[0]['payload']['error']
+    assert stored['details']['pointer']['representation'] == 'json_pointer'
+    assert restore_archived_diagnostic(stored) == result['error']
+
+
+@pytest.mark.parametrize('pointer', ['', '/', '/explanation/type', '//items/0/', '/a~1b/~0/café/💹', '/arn:aws:s3:::bucket/s3:~1~1private'])
+def test_hosted_archived_diagnostics_roundtrip_exactly_and_pass_the_pinned_contract(pointer):
+    from finplan_agent.graph.activity import sanitize
+
+    original = {'details': {'pointer': pointer, 'errors': [{'pointer': pointer, 'message': (pointer or '/') + ': invalid value'}]}}
+    saved = sanitize(original)
+    request = {'event_kind': 'agent_turn', 'correlation_id': 'corr-pointer-roundtrip', 'idempotency_key': 'pointer-roundtrip', 'payload': saved}
+    validation = validate(request, 'tools/record-agent-activity-request')
+    assert validation.valid, validation.to_dict()
+    assert restore_archived_diagnostic(saved) == original
+    assert sanitize(saved) == saved
 
 
 def test_shared_lifecycle_tools_can_use_either_independent_gateway():

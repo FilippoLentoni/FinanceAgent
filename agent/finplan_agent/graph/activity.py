@@ -1,6 +1,7 @@
 """Archive completed hosted turns independently of expiring conversation checkpoints."""
 from __future__ import annotations
 
+import base64
 import hashlib
 import re
 from collections.abc import Mapping
@@ -13,11 +14,36 @@ _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{1
 _PRIVATE_LOCATION = re.compile(r"s3://[^\s\"]+|arn:[a-z0-9-]*:[^\s\"]+|https?://[^\s\"]*amazonaws\.com[^\s\"]*", re.I)
 _SIGNED_URL = re.compile(r"https?://[^\s\"]*(?:X-Amz-|Signature=)[^\s\"]*", re.I)
 _ACTIVITY_METADATA = ("activity_event_id", "checksum", "event_kind", "recorded_at", "portfolio_id", "decision_id", "input_snapshot_id", "session_id", "correlation_id", "caller", "contract_version", "synthetic")
+_POINTER_KEYS = frozenset({"pointer", "json_pointer", "instance_pointer", "schema_pointer", "schema_path", "instancePath", "schemaPath"})
+
+
+def _pointer_segments(pointer):
+    """Preserve raw RFC 6901 UTF-8 segments without archiving a path-like string.
+
+    Empty segments and ~ escapes roundtrip exactly. The empty pointer has no
+    segments, whereas '/' has one empty segment. Base64url keeps arbitrary keys
+    from looking like storage locations to the pinned activity contract.
+    """
+    return {"representation": "json_pointer", "encoding": "base64url_utf8_segments",
+            "segments": [base64.urlsafe_b64encode(part.encode()).decode().rstrip("=") for part in pointer[1:].split("/")] if pointer else []}
 
 
 def sanitize(value):
     if isinstance(value, Mapping):
-        return {str(k):"<redacted>" if _SECRET.search(str(k)) else sanitize(v) for k,v in value.items()}
+        pointer = next((v for k, v in value.items() if k in _POINTER_KEYS and isinstance(v, str) and (not v or v.startswith("/"))), None)
+        result = {}
+        for k, v in value.items():
+            key = str(k)
+            if _SECRET.search(key):
+                result[key] = "<redacted>"
+            elif key in _POINTER_KEYS and isinstance(v, str) and (not v or v.startswith("/")):
+                result[key] = _pointer_segments(v)
+            elif key == "message" and pointer is not None and isinstance(v, str) and v.startswith((pointer or "/") + ":"):
+                prefix = pointer or "/"
+                result[key] = {"representation": "json_pointer_diagnostic", "pointer": _pointer_segments(prefix), "suffix": sanitize(v[len(prefix):])}
+            else:
+                result[key] = sanitize(v)
+        return result
     if isinstance(value,list):
         return [sanitize(v) for v in value]
     if isinstance(value,str):

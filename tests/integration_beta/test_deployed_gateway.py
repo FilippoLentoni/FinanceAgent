@@ -7,12 +7,10 @@ from __future__ import annotations
 import json
 import os
 
+from infra.stacks.tool_policy import grants, load_policy
 from tests.deployed import deployed, requires_deployed
 
 pytestmark = requires_deployed
-
-READ_ONLY = ("recommend_portfolio", "get_performance_evidence", "get_publication", "list_publications", "list_executions", "describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result")
-
 
 def test_release_manifest_and_published_references():
     env = deployed()
@@ -66,9 +64,12 @@ def test_gateway_lists_exactly_the_registered_tools_the_ci_principal_may_use():
     registered = set(env.registered_targets())
     assert registered, "no tool is registered in this environment"
     listed = {t.name for t in env.gateway().list_tools()}
-    # read-only tools are listed for the ci principal; argument-limited grants (production_strategy get)
-    # may be listed too; no other state-changing tool is ever offered (FA-POL-03/05)
-    assert registered & set(READ_ONLY) <= listed <= registered & (set(READ_ONLY) | {"production_strategy"}), (listed, registered)
+    # CI may write immutable audit evidence and use read/analysis tools. Listing an
+    # argument-limited tool does not grant its other actions. Paper resolution is human-only.
+    ci_grants = {tool: roles["ci_test"] for tool, roles in grants(load_policy()).items() if "ci_test" in roles}
+    unrestricted = {tool for tool, limit in ci_grants.items() if limit is None}
+    assert registered & unrestricted <= listed <= registered & set(ci_grants), (listed, registered)
+    assert "record_agent_activity" in listed and "resolve_portfolio_decision" not in listed
 
 
 def test_describe_capabilities_through_the_gateway():
