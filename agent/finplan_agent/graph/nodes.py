@@ -236,9 +236,9 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         spec = by_name.get(c.name)
         args = dict(c.arguments)
         state_changing = True if spec is None else spec.state_changing
-        if c.name in {"run_portfolio_research", "run_recursive_improvement"} and args.get("dry_run", True) is True:
+        if c.name in {"run_portfolio_research", "run_recursive_improvement"} and args.get("dry_run", True) is True or c.name == "submit_experiment" and args.get("dry_run") is True:
             state_changing = False
-        if state_changing:
+        if state_changing or c.name == "submit_experiment":
             args.setdefault("idempotency_key", idempotency_key(ctx.session_id, int(state.get("turn", 1)), c.name, args))
         pending.append({"id": c.id, "name": c.name, "arguments": args, "state_changing": state_changing, "offered": spec is not None})
         blocks.append({"tool_use": {"id": c.id, "name": c.name, "input": args}})

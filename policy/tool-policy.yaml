@@ -15,6 +15,7 @@ roles:
     - query_market_data
     - get_job_status
     - get_experiment_result
+    - submit_experiment(dry_run=true)
     - production_strategy(action=get)
     - get_portfolio_history
     - list_portfolio_decisions
@@ -67,6 +68,7 @@ roles:
     - query_market_data
     - get_job_status
     - get_experiment_result
+    - submit_experiment(dry_run=true)
     - production_strategy(action=get)
     - create_override_version
     - validate_plan_version
@@ -94,6 +96,7 @@ roles:
     - query_market_data
     - get_job_status
     - get_experiment_result
+    - submit_experiment(dry_run=true)
     - validate_plan_version
     - publish_plan_version
     - production_strategy
@@ -121,6 +124,7 @@ roles:
     - query_market_data
     - get_job_status
     - get_experiment_result
+    - submit_experiment(dry_run=true)
     - production_strategy(action=get)
     - get_portfolio_history
     - list_portfolio_decisions

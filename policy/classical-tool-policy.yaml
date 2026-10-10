@@ -14,6 +14,7 @@ roles:
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
     - run_recursive_improvement(dry_run=true)
+    - submit_experiment(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -45,6 +46,7 @@ roles:
     - submit_portfolio_feedback
     - run_portfolio_research
     - run_recursive_improvement
+    - submit_experiment
     - query_market_data
     - get_plan
     - get_plan_version
@@ -76,6 +78,7 @@ roles:
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
     - run_recursive_improvement(dry_run=true)
+    - submit_experiment(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -107,6 +110,7 @@ roles:
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
     - run_recursive_improvement(dry_run=true)
+    - submit_experiment(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version
@@ -138,6 +142,7 @@ roles:
     - submit_portfolio_feedback
     - run_portfolio_research(dry_run=true)
     - run_recursive_improvement(dry_run=true)
+    - submit_experiment(dry_run=true)
     - query_market_data
     - get_plan
     - get_plan_version

@@ -262,7 +262,7 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
     parts, derived = [], []
     for row in state.get("tool_results") or []:
         name = row["tool"]
-        if name not in CLASSICAL_TOOLS and name not in LIFECYCLE_TOOLS and name != "recommend_portfolio":
+        if name not in CLASSICAL_TOOLS and name not in LIFECYCLE_TOOLS and name not in {"recommend_portfolio", "submit_experiment"}:
             continue
         if not row.get("ok"):
             if row.get("declined"):
@@ -273,6 +273,9 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             parts.append(f"{name} failed: {error.get('code', 'DEPENDENCY_UNAVAILABLE')}: {error.get('message', 'Evidence unavailable')}.")
             continue
         doc = row.get("result", {})
+        if name == "submit_experiment":
+            parts.append("Sandbox benchmark evidence:\n```json\n" + json.dumps(doc, indent=2, sort_keys=True) + "\n```")
+            continue
         if doc.get("decision_id") and doc.get("recommendation"):
             parts.append("Issued decision: " + doc["decision_id"] + ". Review this decision before accepting it into the paper portfolio.")
         if name == "recommend_portfolio":

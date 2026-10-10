@@ -1,5 +1,6 @@
 """Hosted investigation and research workflows preserve producer evidence and confirmation."""
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -7,6 +8,7 @@ from finplan_agent.skills import classical_mcp_description, load_skills
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
 from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
 from infra.stacks.tool_policy import CLASSICAL_POLICY_FILE, decide, load_policy
+from finplan_contracts.schemas import contracts_root
 from infra.stacks.tool_schemas import target_metadata
 from tests.fakes.agent import SESSION, SESSION_B, FakeToolClient, auth, make_service
 from tests.unit.test_saved_portfolio_recommendations import NoProvider
@@ -121,6 +123,41 @@ def test_benchmark_request_preserves_unavailable_configuration(recommendation, f
     assert all(name != "submit_experiment" for name, _ in tools.calls)
 
 
+@pytest.mark.parametrize("family,name", [("swarm_mode_a", "Qwen swarm"), ("jev_backtest", "TypeSafe Jev")])
+def test_named_benchmark_obtains_concrete_dry_run_then_confirms_paid_request(recommendation, family, name):
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    request["job_type"] = family
+    request["configuration"]["payload"].update(strategy="qwen_swarm" if family == "swarm_mode_a" else "jev", objective="llm_benchmark")
+    preview = cycle(proposed_experiment={"tool_request": {"name": "submit_experiment", "arguments": request}})
+    estimate = {"dry_run": True, "run_id": None, "state": None,
+                "cost_estimate": {"estimated_usd_upper_bound": .25, "budget_category": "gpu" if family == "swarm_mode_a" else "cpu_research"},
+                "tool_limit": {"within_limit": True}, "message": "Dry run: no run was recorded; explicit approval required before compute."}
+    service, tools = setup(recommendation, {"run_recursive_improvement": lambda _: deepcopy(preview), "submit_experiment": lambda _: deepcopy(estimate)})
+    result = ask(service, "Estimate the " + name + " benchmark")
+    assert [tool for tool, _ in tools.calls] == ["run_recursive_improvement", "submit_experiment"]
+    args = tools.calls[1][1]
+    assert args["job_type"] == family and args["dry_run"] is True and args["purpose"] == "research"
+    assert args["idempotency_key"] != request["idempotency_key"]
+    assert result["status"] == "completed" and result["answer"]["claim_check"]["passed"], result
+    assert "Sandbox benchmark evidence" in result["answer"]["narrative"] and "0.25" in result["answer"]["narrative"]
+    pending = ask(service, "Run the " + name + " benchmark")
+    assert pending["status"] == "awaiting_confirmation" and len(tools.calls) == 2
+    paid = pending["confirmation"]["calls"][0]["arguments"]
+    assert paid["job_type"] == family and paid["dry_run"] is False and paid["idempotency_key"] != args["idempotency_key"]
+    declined = service.handle({"action": "confirm", "approve": False, "stream": False}, auth(), runtime_session_id=SESSION)
+    assert declined["status"] == "completed" and len(tools.calls) == 2
+    assert "No experiment was launched" in declined["answer"]["narrative"]
+
+
+def test_named_benchmark_does_not_submit_a_different_family(recommendation):
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    preview = cycle(proposed_experiment={"tool_request": {"name": "submit_experiment", "arguments": request}})
+    service, tools = setup(recommendation, {"run_recursive_improvement": lambda _: preview})
+    result = ask(service, "Estimate the Qwen swarm benchmark")
+    assert [tool for tool, _ in tools.calls] == ["run_recursive_improvement"]
+    assert "complete matching sandbox benchmark request is unavailable" in result["answer"]["narrative"]
+
+
 def test_direct_and_hosted_investigation_share_versioned_instructions():
     inventory, instructions = load_skills()
     skill = next(row for row in inventory if row["name"] == "investigate-portfolio-performance")
@@ -138,3 +175,7 @@ def test_recursive_gateway_grants_and_identity_transport():
     assert decide("run_recursive_improvement", groups=["researcher"], arguments={"dry_run": False}, doc=policy)
     assert target_metadata("beta", "run_recursive_improvement", classical=True) == {"allowedRequestHeaders": ["X-Finplan-User-Token"]}
     assert target_metadata("beta", "run_recursive_improvement", classical=False) == {}
+    primary_policy = load_policy()
+    for role in ("viewer", "plan_editor", "plan_publisher", "ci_test"):
+        assert decide("submit_experiment", groups=[role], arguments={"dry_run": True}, doc=primary_policy)
+        assert not decide("submit_experiment", groups=[role], arguments={"dry_run": False}, doc=primary_policy)

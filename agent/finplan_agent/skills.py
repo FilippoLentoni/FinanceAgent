@@ -42,6 +42,7 @@ CLASSICAL_SKILLS = {
     'research_portfolio_models': 'research-portfolio-models',
     'run_portfolio_research': 'research-portfolio-models',
     'run_recursive_improvement': 'recursive-portfolio-improvement',
+    'submit_experiment': 'recursive-portfolio-improvement',
     'submit_portfolio_feedback': 'research-portfolio-models',
 }
 

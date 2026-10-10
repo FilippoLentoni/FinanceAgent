@@ -47,7 +47,7 @@ CLASSICAL_ONLY_TOOLS = frozenset({
 CLASSICAL_SHARED_TOOLS = frozenset({
     "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",
     "query_market_data", "get_plan", "get_plan_version", "list_plan_versions", "get_performance_evidence",
-    "get_job_status", "get_experiment_result", "describe_capabilities",
+    "get_job_status", "get_experiment_result", "submit_experiment", "describe_capabilities",
 })
 
 GATEWAY_TYPES = ("string", "number", "integer", "boolean", "object", "array")

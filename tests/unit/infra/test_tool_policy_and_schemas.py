@@ -64,9 +64,9 @@ def test_render_one_permit_per_permitted_tool_and_forbids_for_denied_arguments()
     pols = render(tools, {t: tool_definition(t).input_schema.get("properties", {}) for t in tools})
     permits = {p.tool for p in pols if p.kind == "permit"}
     assert permits == {t for t in tools if allowed_roles(t)}
-    forbids = render(["submit_experiment"], {"submit_experiment": {"mode": {"type": "string"}}})
-    assert [p.kind for p in forbids] == ["permit", "forbid"]
-    assert 'context.input has mode && (context.input.mode == "live")' in forbids[1].statement
+    forbids = render(["submit_experiment"], {"submit_experiment": {"mode": {"type": "string"}, "dry_run": {"type": "boolean"}}})
+    assert [p.kind for p in forbids] == ["permit", "permit", "forbid"]
+    assert 'context.input has mode && (context.input.mode == "live")' in next(p.statement for p in forbids if p.kind == "forbid")
     publish = next(p for p in pols if p.tool == "publish_plan_version")
     assert '\\"plan_publisher\\"' in publish.statement and "ci_test" not in publish.statement
     assert 'action == AgentCore::Action::"publish-plan-version___publish_plan_version"' in publish.statement
