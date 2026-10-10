@@ -129,9 +129,15 @@ def test_latest_three_reads_all_joinable_history_and_archives_completed_turn(rec
 
 def test_why_reads_frozen_decision_and_nested_policy_evidence_without_recommending_again(recommendation):
     svc, tools, _ = setup(recommendation)
+    original_decision=tools.results['get_portfolio_decision']
+    def frozen_decision(args):
+        doc=original_decision(args)
+        doc['decision'].update(contract_version='1.5.0', provenance={'implementation': {'numpy_version': '2.5.3'}, 'policy_inputs': {'prices': [[101.25, 202.50]]}})
+        return doc
+    tools.results['get_portfolio_decision']=frozen_decision
     tools.results["explain_portfolio_decision"] = lambda _: {
         "analysis_id": ANALYSIS, "analysis_kind": "explanation", "summary": "Frozen policy explanation",
-        "source_decision_ref": {"decision_id": PD}, "decision_status": "issued", "recommendation": deepcopy(recommendation),
+        "source_decision_ref": {"decision_id": PD}, "decision_status": "issued", "policy_recommendation": deepcopy(recommendation),
         "explanation": {"policy_replay": {"status": "verified", "maximum_weight_error": 0.0},
                         "attribution": {"status": "not_available", "reason": "No causal feature attribution"}}}
     ask(svc, "PPO portfolio recommendation today")
@@ -139,6 +145,10 @@ def test_why_reads_frozen_decision_and_nested_policy_evidence_without_recommendi
     assert tools.calls[-2:] == [("get_portfolio_decision", {"decision_id": PD}), ("explain_portfolio_decision", {"portfolio_id": recommendation["portfolio_state"]["portfolio_id"], "decision_id": PD, "instrument_id": "GOOGL"})]
     assert result["status"] == "completed" and "No causal feature attribution" in result["answer"]["narrative"]
     assert result["answer"]["claim_check"]["passed"]
+    assert '| Instrument | Action | Current shares |' in result['answer']['narrative']
+    assert 'numpy_version' not in result['answer']['narrative'] and 'policy_inputs' not in result['answer']['narrative']
+    stored=next(row['decision'] for row in result['answer']['portfolio_decisions'] if row.get('decision'))
+    assert stored['contract_version']=='1.5.0' and stored['provenance']['implementation']['numpy_version']=='2.5.3'
 
 
 def test_generic_comparison_preserves_descriptive_changes_without_missing_shapley_failure(recommendation):

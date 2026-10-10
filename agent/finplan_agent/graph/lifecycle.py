@@ -192,7 +192,23 @@ def render_lifecycle(doc):
         return "Stored activity history. Full original evidence remains in immutable records identified by the event IDs and checksums below:\n```json\n" + json.dumps(shown,indent=2,sort_keys=True) + "\n```"
     if doc.get("decision"):
         row=doc["decision"]
-        return "Stored decision " + row["decision_id"] + ":\n```json\n" + json.dumps(row,indent=2,sort_keys=True) + "\n```"
+        rec=row.get("recommendation", {})
+        parts=[f"Stored paper decision {row['decision_id']}: {row.get('status', 'not_available')}.",
+               f"Strategy: {row.get('algorithm', rec.get('strategy', 'not_available'))}; saved holdings revision: {row.get('portfolio_revision', 'not_available')}; completed market session: {row.get('reference_date', rec.get('as_of', 'not_available'))}."]
+        weights={w['instrument_id']:w['weight'] for w in rec.get('target_weights', [])}
+        trades=rec.get('decisions', [])
+        if trades:
+            table=["| Instrument | Action | Current shares | Target shares | Change in shares | Target weight |",
+                   "|---|---|---:|---:|---:|---:|"]
+            for trade in trades:
+                quantities=[f"{trade[key]:.4f}" if isinstance(trade.get(key), (int, float)) else "not_available" for key in ('current_quantity', 'target_quantity', 'delta_quantity')]
+                weight=f"{weights[trade['instrument_id']]*100:.2f}%" if trade['instrument_id'] in weights else "not_available"
+                table.append(f"| {trade['instrument_id']} | {trade['action']} | {' | '.join(quantities)} | {weight} |")
+            parts.append('\n'.join(table))
+        if 'cash_weight' in rec:
+            parts.append(f"Target cash weight: {rec['cash_weight']*100:.2f}%.")
+        parts.append("Full frozen inputs, model provenance and resolution evidence remain in the stored decision record.")
+        return '\n\n'.join(parts)
     if doc.get("status") in ("accepted","rejected") and doc.get("decision_id"):
         text=f"Paper decision {doc['decision_id']}: {doc['status']}. Holdings revision {doc['before_revision']} → {doc['after_revision']}."
         if doc["status"]=="accepted":
