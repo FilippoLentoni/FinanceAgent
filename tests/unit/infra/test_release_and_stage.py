@@ -136,6 +136,8 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
             self.bad_alias = False
             self.shared_engine = False
             self.bad_metadata = False
+            self.service_policy_header = True
+            self.metadata_overrides = {}
 
         def get_gateway(self, gatewayIdentifier):  # noqa: N803
             return {
@@ -151,6 +153,9 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
             metadata = target_metadata("beta", targetId, classical=gatewayIdentifier == "classical")
             if self.bad_metadata and targetId == "run_portfolio_research":
                 metadata = {}
+            if self.service_policy_header:
+                metadata.setdefault("allowedRequestHeaders", []).append("x-amzn-bedrock-agentcore-policy-session-id")
+            metadata = self.metadata_overrides.get((gatewayIdentifier, targetId), metadata)
             return {"status": "READY", "metadataConfiguration": metadata, "targetConfiguration": {"mcp": {"lambda": {
                 "lambdaArn": _arn("prod" if self.bad_alias else "beta", targetId),
                 "toolSchema": {"inlinePayload": [{"name": targetId, "description": tool_definition(targetId).description}]},
@@ -161,7 +166,11 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     assert set(audit["primary"]["targets"]) == set(primary_tools())
     assert set(audit["classical"]["targets"]) == set(classical_tools())
     assert set(audit["classical"]["target_metadata"]) == {"run_portfolio_research"}
+    assert audit["classical"]["target_metadata"]["run_portfolio_research"] == {"allowedRequestHeaders": ["X-Finplan-User-Token"]}
     assert audit["primary"]["target_metadata"] == {}
+    without_service_header = deepcopy(control)
+    without_service_header.service_policy_header = False
+    assert stage_runner.verify_registered_gateways(without_service_header, Cfn(), "beta", targets) == audit
     bad = deepcopy(control)
     bad.bad_alias = True
     with pytest.raises(rel.DependencyMissing, match="resolved Lambda alias"):
@@ -178,6 +187,17 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     bad.bad_metadata = True
     with pytest.raises(rel.DependencyMissing, match="identity header propagation"):
         stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    for kind, tool, metadata in (
+        ("primary", "query_market_data", {"allowedRequestHeaders": ["Authorization", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("primary", "query_market_data", {"allowedRequestHeaders": ["X-Finplan-User-Token", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("classical", "run_portfolio_research", {"allowedRequestHeaders": ["X-Finplan-User-Token", "Authorization", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("classical", "run_portfolio_research", {"allowedRequestHeaders": ["x-finplan-user-token", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("primary", "query_market_data", {"allowedResponseHeaders": ["X-Finplan-User-Token"]}),
+    ):
+        bad = deepcopy(control)
+        bad.metadata_overrides[(kind, tool)] = metadata
+        with pytest.raises(rel.DependencyMissing, match="identity header propagation"):
+            stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
 
 
 class _FakeS3:

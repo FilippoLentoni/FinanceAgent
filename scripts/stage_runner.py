@@ -148,6 +148,17 @@ def verify_registered_gateways(control: Any, cfn: Any, env: str, targets: Mappin
                 if len(definitions) != 1 or definitions[0].get("name") != tool or definitions[0].get("description") != tool_definition(tool).description:
                     raise DependencyMissing(f"{kind} Gateway target {tool} schema/skill description differs from this release")
                 metadata = {k: v for k, v in (target.get("metadataConfiguration") or {}).items() if v}
+                # ENFORCE Gateways inject their reserved policy-session header on
+                # readback, including targets whose template has no propagation.
+                # Ignore only that service-owned header; caller/response headers
+                # must still match this release exactly.
+                request_headers = metadata.get("allowedRequestHeaders")
+                if isinstance(request_headers, list):
+                    request_headers = [h for h in request_headers if h != "x-amzn-bedrock-agentcore-policy-session-id"]
+                    if request_headers:
+                        metadata["allowedRequestHeaders"] = request_headers
+                    else:
+                        metadata.pop("allowedRequestHeaders")
                 if metadata != target_metadata(env, tool, classical=kind == "classical"):
                     raise DependencyMissing(f"{kind} Gateway target {tool} identity header propagation differs from this release")
                 if metadata:
