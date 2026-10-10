@@ -8,9 +8,9 @@ constructs of ``aws_cdk.aws_bedrockagentcore`` in aws-cdk-lib 2.270, so no custo
   FA-SS-04); event expiry from ``config/<env>.json`` ``session.memory_event_expiry_days``.
 * ``AWS::BedrockAgentCore::PolicyEngine`` + one ``AWS::BedrockAgentCore::Policy`` per registered tool
   (``policy/tool-policy.yaml`` rendered to Cedar, :mod:`infra.stacks.tool_policy`).
-* ``AWS::BedrockAgentCore::Gateway`` - MCP, ``CUSTOM_JWT`` from the SAME environment's Cognito pool
-  (discovery URL + allowed clients), the bootstrap-created Gateway service role, the policy engine in
-  ``ENFORCE`` mode.
+* Two ``AWS::BedrockAgentCore::Gateway`` endpoints - primary/PPO and traditional portfolio analysis.
+  Each has its own ``ENFORCE`` policy engine and catalog; both use ``CUSTOM_JWT`` from the SAME
+  environment's Cognito pool and the explicitly trusted bootstrap-created Gateway service role.
 * ``AWS::BedrockAgentCore::GatewayTarget`` - one per contract tool, each behind a condition: a tool is
   registered only when the stage's ``Resolve`` action found it in THIS environment's FinanceLambdasTool
   catalog (compatibility gate) and passed its alias-qualified Lambda ARN read from
@@ -19,7 +19,8 @@ constructs of ``aws_cdk.aws_bedrockagentcore`` in aws-cdk-lib 2.270, so no custo
 * ``AWS::BedrockAgentCore::Runtime`` - the ARM64 image BY DIGEST (``ImageUri`` from the Build stage),
   ``PUBLIC`` network, HTTP protocol, ``customJWTAuthorizer`` from the same pool, request header
   allowlist ``Authorization`` (the agent forwards the caller's own token to the Gateway), lifecycle from
-  config, environment ``FINPLAN_ENV`` / ``FINPLAN_RELEASE_ID`` / ``FINPLAN_MEMORY_ID`` / ``FINPLAN_GATEWAY_URL``.
+  config, environment ``FINPLAN_ENV`` / ``FINPLAN_RELEASE_ID`` / ``FINPLAN_MEMORY_ID`` /
+  ``FINPLAN_GATEWAY_URL`` / ``FINPLAN_CLASSICAL_GATEWAY_URL``.
 * the Runtime execution role ``finplan-<env>-financeagent-runtime-role`` (:func:`infra.stacks.policies.runtime_role_policy`);
   its Bedrock grant is a separate policy that exists only when ``BedrockInvokeArns`` is not ``none``
   (resolved at deploy time from the model-id configuration by ``GetInferenceProfile``; FA-PRV-08).
@@ -44,8 +45,8 @@ from . import naming as n
 from .common import EnvStack, cfn_tags, tag_role
 from .identity import IdentityStack
 from .policies import runtime_role_policy, runtime_trust_conditions
-from .tool_policy import load_policy, policy_digest, render
-from .tool_schemas import contract_tools, to_cfn, tool_definition
+from .tool_policy import CLASSICAL_POLICY_FILE, load_policy, policy_digest, render
+from .tool_schemas import classical_tools, contract_tools, primary_tools, target_metadata, to_cfn, tool_definition
 
 __all__ = ["AgentStack", "bedrock_param", "image_pattern", "target_param", "target_variable"]
 
@@ -131,57 +132,111 @@ class AgentStack(EnvStack):
             tags=cfn_tags(env, "agent-gateway"),
         )
 
+        # Independent traditional catalog and policy engine. The original Gateway IDs,
+        # target names and authorization document remain unchanged.
+        self.classical_policy_engine = agentcore.CfnPolicyEngine(
+            self, "ClassicalToolPolicyEngine", name=n.classical_policy_engine_name(env),
+            description=f"FinanceAgent {env} traditional portfolio analysis policy",
+        )
+        tag_role(self.classical_policy_engine, "gateway-policy-engine")
+        self.classical_gateway = agentcore.CfnGateway(
+            self, "ClassicalGateway", name=n.classical_gateway_name(env),
+            description=f"FinanceAgent {env} traditional portfolio optimization and explanation MCP",
+            protocol_type="MCP",
+            protocol_configuration=agentcore.CfnGateway.GatewayProtocolConfigurationProperty(
+                mcp=agentcore.CfnGateway.MCPGatewayConfigurationProperty(supported_versions=[str(gw_cfg.get("mcp_protocol_version", "2025-11-25"))])
+            ),
+            authorizer_type="CUSTOM_JWT",
+            authorizer_configuration=agentcore.CfnGateway.AuthorizerConfigurationProperty(
+                custom_jwt_authorizer=agentcore.CfnGateway.CustomJWTAuthorizerConfigurationProperty(discovery_url=identity.discovery_url, allowed_clients=identity.allowed_clients)
+            ),
+            role_arn=gateway_role_arn,
+            policy_engine_configuration=agentcore.CfnGateway.GatewayPolicyEngineConfigurationProperty(
+                arn=self.classical_policy_engine.attr_policy_engine_arn, mode=str(gw_cfg.get("policy_mode", "ENFORCE"))
+            ),
+            tags=cfn_tags(env, "agent-gateway"),
+        )
+
         # ------------------------------------------------------------- targets + policies
-        policy_doc = load_policy()
-        self.tools = contract_tools()
+        self.tools = contract_tools()  # union exported by Resolve/CodePipeline exactly once
+        self.primary_tools = primary_tools()
+        self.classical_tools = classical_tools()
         self.definitions = {t: tool_definition(t) for t in self.tools}
-        rendered = render(self.tools, {t: d.input_schema.get("properties", {}) for t, d in self.definitions.items()}, policy_doc)
-        self.policy_digest = policy_digest(rendered)
-        self.targets: dict[str, agentcore.CfnGatewayTarget] = {}
         self.target_params: dict[str, CfnParameter] = {}
+        conditions: dict[str, CfnCondition] = {}
         for tool in self.tools:
-            d = self.definitions[tool]
             param = CfnParameter(
-                self,
-                target_param(tool),
-                type="String",
-                default=NONE,
+                self, target_param(tool), type="String", default=NONE,
                 allowed_pattern=lambda_pattern(env),
                 description=f"{tool}: alias-qualified Lambda ARN from /finplan/{env}/financelambdastool/lambda/{tool.replace('_', '-')}-arn (Resolve action), or none",
             )
-            cond = CfnCondition(self, f"Register{_camel(tool)}", expression=Fn.condition_not(Fn.condition_equals(param.value_as_string, NONE)))
-            target = agentcore.CfnGatewayTarget(
-                self,
-                f"Target{_camel(tool)}",
-                gateway_identifier=self.gateway.attr_gateway_identifier,
-                name=n.target_name(tool),
-                description=d.description[:200],
-                credential_provider_configurations=[agentcore.CfnGatewayTarget.CredentialProviderConfigurationProperty(credential_provider_type="GATEWAY_IAM_ROLE")],
-                target_configuration=agentcore.CfnGatewayTarget.TargetConfigurationProperty(
-                    mcp=agentcore.CfnGatewayTarget.McpTargetConfigurationProperty(
-                        lambda_=agentcore.CfnGatewayTarget.McpLambdaTargetConfigurationProperty(lambda_arn=param.value_as_string, tool_schema=agentcore.CfnGatewayTarget.ToolSchemaProperty(inline_payload=[]))
-                    )
-                ),
-            )
-            target.add_property_override("TargetConfiguration.Mcp.Lambda.ToolSchema.InlinePayload", [{"Name": tool, "Description": d.description, "InputSchema": to_cfn(d.input_schema), "OutputSchema": to_cfn(d.output_schema)}])
-            target.cfn_options.condition = cond
-            target.add_metadata("logical-role", "gateway-target")
-            self.targets[tool] = target
             self.target_params[tool] = param
-            for pol in [x for x in rendered if x.tool == tool]:
-                cp = agentcore.CfnPolicy(
-                    self,
-                    f"Policy{_camel(tool)}{_camel(pol.name)}",
-                    name=_policy_resource_name(env, tool, pol.name),
-                    policy_engine_id=self.policy_engine.attr_policy_engine_id,
-                    description=f"{pol.kind} {tool} ({env}; policy/tool-policy.yaml)",
-                    definition=agentcore.CfnPolicy.PolicyDefinitionProperty(cedar=agentcore.CfnPolicy.CedarPolicyProperty(statement=Fn.sub(pol.statement, {"GatewayArn": self.gateway.attr_gateway_arn}))),
-                    enforcement_mode="ACTIVE",
-                    validation_mode="IGNORE_ALL_FINDINGS",
+            conditions[tool] = CfnCondition(self, f"Register{_camel(tool)}", expression=Fn.condition_not(Fn.condition_equals(param.value_as_string, NONE)))
+        self.targets: dict[str, agentcore.CfnGatewayTarget] = {}
+        self.classical_targets: dict[str, agentcore.CfnGatewayTarget] = {}
+        for prefix, tools, gateway, engine, policy_doc, targets in (
+            ("", self.primary_tools, self.gateway, self.policy_engine, load_policy(), self.targets),
+            ("Classical", self.classical_tools, self.classical_gateway, self.classical_policy_engine, load_policy(CLASSICAL_POLICY_FILE), self.classical_targets),
+        ):
+            rendered = render(tools, {t: self.definitions[t].input_schema.get("properties", {}) for t in tools}, policy_doc)
+            if prefix:
+                self.classical_policy_digest = policy_digest(rendered)
+            else:
+                self.policy_digest = policy_digest(rendered)
+            predecessor = NONE
+            for tool in tools:
+                d = self.definitions[tool]
+                param, cond = self.target_params[tool], conditions[tool]
+                target = agentcore.CfnGatewayTarget(
+                    self, f"{prefix}Target{_camel(tool)}", gateway_identifier=gateway.attr_gateway_identifier,
+                    # Gateway action-schema updates share a catalog. Serialize
+                    # targets within each Gateway, while the two Gateways remain
+                    # independent. Conditional references preserve sparse catalogs:
+                    # DependsOn an omitted target would suppress later resources.
+                    name=n.target_name(tool),
+                    description=Fn.join("", [d.description[:140], " [catalog predecessor: ", predecessor, "]"]),
+                    credential_provider_configurations=[agentcore.CfnGatewayTarget.CredentialProviderConfigurationProperty(credential_provider_type="GATEWAY_IAM_ROLE")],
+                    target_configuration=agentcore.CfnGatewayTarget.TargetConfigurationProperty(
+                        mcp=agentcore.CfnGatewayTarget.McpTargetConfigurationProperty(
+                            lambda_=agentcore.CfnGatewayTarget.McpLambdaTargetConfigurationProperty(lambda_arn=param.value_as_string, tool_schema=agentcore.CfnGatewayTarget.ToolSchemaProperty(inline_payload=[]))
+                        )
+                    ),
                 )
-                cp.cfn_options.condition = cond
-                cp.node.add_dependency(target)  # policies validate against the registered tool schema
-                cp.add_metadata("logical-role", "gateway-policy-engine")
+                target.add_property_override("TargetConfiguration.Mcp.Lambda.ToolSchema.InlinePayload", [{"Name": tool, "Description": d.description, "InputSchema": to_cfn(d.input_schema), "OutputSchema": to_cfn(d.output_schema)}])
+                metadata = target_metadata(env, tool, classical=bool(prefix))
+                if metadata:
+                    target.metadata_configuration = agentcore.CfnGatewayTarget.MetadataConfigurationProperty(allowed_request_headers=metadata["allowedRequestHeaders"])
+                target.cfn_options.condition = cond
+                target.add_metadata("logical-role", "gateway-target")
+                targets[tool] = target
+                predecessor = cdk.Token.as_string(Fn.condition_if(cond.logical_id, target.attr_target_id, predecessor))
+
+            # Policy creation performs a schema check against the Gateway's
+            # complete action catalog. Each policy therefore waits for every
+            # enabled target, rather than just its own concurrently created target.
+            # A harmless Cedar comment carries conditional resource references;
+            # disabled optional targets do not become hard DependsOn dependencies.
+            # The final enabled target transitively depends on its predecessors.
+            # Reference that selector once per policy instead of repeating the
+            # full catalog, keeping the deployable template comfortably bounded.
+            catalog_ids = predecessor
+            for tool in tools:
+                target, cond = targets[tool], conditions[tool]
+                for pol in [x for x in rendered if x.tool == tool]:
+                    cp = agentcore.CfnPolicy(
+                        self, f"{prefix}Policy{_camel(tool)}{_camel(pol.name)}",
+                        name=_policy_resource_name(env, ("classical_" if prefix else "") + tool, pol.name),
+                        policy_engine_id=engine.attr_policy_engine_id,
+                        description=f"{pol.kind} {tool} ({env}; policy/{'classical-' if prefix else ''}tool-policy.yaml)",
+                        definition=agentcore.CfnPolicy.PolicyDefinitionProperty(cedar=agentcore.CfnPolicy.CedarPolicyProperty(statement=Fn.sub(
+                            pol.statement + "\n// Registered catalog readiness: ${CatalogTargetIds}\n",
+                            {"GatewayArn": gateway.attr_gateway_arn, "CatalogTargetIds": catalog_ids},
+                        ))),
+                        enforcement_mode="ACTIVE", validation_mode="IGNORE_ALL_FINDINGS",
+                    )
+                    cp.cfn_options.condition = cond
+                    cp.node.add_dependency(target)
+                    cp.add_metadata("logical-role", "gateway-policy-engine")
 
         # ------------------------------------------------------------- runtime role
         memory_arn = self.memory.attr_memory_arn
@@ -227,6 +282,7 @@ class AgentStack(EnvStack):
                 "FINPLAN_RELEASE_ID": self.release_id.value_as_string,
                 "FINPLAN_MEMORY_ID": self.memory.attr_memory_id,
                 "FINPLAN_GATEWAY_URL": self.gateway.attr_gateway_url,
+                "FINPLAN_CLASSICAL_GATEWAY_URL": self.classical_gateway.attr_gateway_url,
             },
             tags=cfn_tags(env, "agent-runtime"),
         )
@@ -245,6 +301,11 @@ class AgentStack(EnvStack):
             "MemoryId": self.memory.attr_memory_id,
             "PolicyEngineArn": self.policy_engine.attr_policy_engine_arn,
             "PolicyDigest": self.policy_digest,
+            "ClassicalGatewayUrl": self.classical_gateway.attr_gateway_url,
+            "ClassicalGatewayId": self.classical_gateway.attr_gateway_identifier,
+            "ClassicalGatewayArn": self.classical_gateway.attr_gateway_arn,
+            "ClassicalPolicyEngineArn": self.classical_policy_engine.attr_policy_engine_arn,
+            "ClassicalPolicyDigest": self.classical_policy_digest,
         }
         for k, v in outputs.items():
             cdk.CfnOutput(self, k, value=v)

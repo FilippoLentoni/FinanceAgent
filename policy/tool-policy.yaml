@@ -1,40 +1,152 @@
-# FinanceAgent Gateway tool policy (task 5.4; spec mcp-access-policy; design D2 "Policy").
-#
-# ONE policy for every channel: the hosted agent (it forwards the end user's own token) and direct MCP
-# clients (Claude Code, Codex) reach the Gateway with tokens from the SAME environment's Cognito pool,
-# and the AgentCore policy engine attached to that Gateway evaluates THIS file, rendered to Cedar by
-# infra/stacks/tool_policy.py. The decision never depends on the channel (FA-POL-03).
-#
-# The policy engine denies by default: a tool is callable only when a role below lists it. Roles are
-# Cognito groups (cognito:groups claim of user tokens). Machine clients carry no groups; the ci_test
-# client-credentials client is identified by its custom OAuth scope (scope claim), which only that
-# client is allowed to request (infra/stacks/identity.py).
-#
-# A grant is a tool name, or tool(arg=v1|v2): allowed only when that (string) argument has one of the
-# values (production_strategy: everyone may 'get'; only plan_publisher may 'set'/'clear').
-#
-# Only paper and research operations are listed (FA-POL-05). Any tool whose name names live
-# execution, trading, orders, payments or wallets is refused by the build even if listed here, and
-# argument-level denials (denied_arguments) are rendered as forbid policies for every tool whose
-# projected input schema carries that argument.
+# Both hosted and direct MCP clients use these same role grants.
 version: 1
 roles:
   viewer:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
+    tools:
+    - recommend_portfolio
+    - get_performance_evidence
+    - get_publication
+    - list_publications
+    - list_executions
+    - describe_capabilities
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - query_market_data
+    - get_job_status
+    - get_experiment_result
+    - production_strategy(action=get)
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   researcher:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", refresh_market_data, submit_experiment]
+    tools:
+    - recommend_portfolio
+    - get_performance_evidence
+    - get_publication
+    - list_publications
+    - list_executions
+    - describe_capabilities
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - query_market_data
+    - get_job_status
+    - get_experiment_result
+    - production_strategy(action=get)
+    - refresh_market_data
+    - submit_experiment
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   plan_editor:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)", create_override_version, validate_plan_version]
+    tools:
+    - recommend_portfolio
+    - get_performance_evidence
+    - get_publication
+    - list_publications
+    - list_executions
+    - describe_capabilities
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - query_market_data
+    - get_job_status
+    - get_experiment_result
+    - production_strategy(action=get)
+    - create_override_version
+    - validate_plan_version
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   plan_publisher:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, validate_plan_version, publish_plan_version, production_strategy]
-  # Pipeline test principal: read-only tools only (prod smoke is read-only; FA-PL-04).
+    tools:
+    - recommend_portfolio
+    - get_performance_evidence
+    - get_publication
+    - list_publications
+    - list_executions
+    - describe_capabilities
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - query_market_data
+    - get_job_status
+    - get_experiment_result
+    - validate_plan_version
+    - publish_plan_version
+    - production_strategy
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   ci_test:
-    tools: [describe_capabilities, get_plan, get_plan_version, list_plan_versions, query_market_data, get_job_status, get_experiment_result, "production_strategy(action=get)"]
+    tools:
+    - recommend_portfolio
+    - get_performance_evidence
+    - get_publication
+    - list_publications
+    - list_executions
+    - describe_capabilities
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - query_market_data
+    - get_job_status
+    - get_experiment_result
+    - production_strategy(action=get)
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
 machine_roles:
-  # role -> custom scope (resource server finplan-agent) that identifies the machine client
   ci_test: ci_test
-denied_tool_words: [execute, execution, trade, trading, order, payment, wallet, live, broker, coinbase, transfer]
+denied_tool_words:
+- execute
+- execution
+- trade
+- trading
+- order
+- payment
+- wallet
+- live
+- broker
+- coinbase
+- transfer
 denied_arguments:
-  # argument -> values refused with OPERATION_NOT_PERMITTED before the target (FA-POL-05)
-  mode: [live]
-  execution_mode: [live]
+  mode:
+  - live
+  execution_mode:
+  - live

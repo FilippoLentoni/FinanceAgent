@@ -3,12 +3,16 @@ Gateway ``SchemaDefinition`` subset (FA-GW-04)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
+from finplan_contracts.schemas import load_store
+from finplan_contracts.validate import validate
 
-from infra.stacks.tool_policy import PolicyError, allowed_roles, decide, load_policy, policy_digest, render, validate_policy
-from infra.stacks.tool_schemas import GATEWAY_TYPES, contract_tools, project, to_cfn, tool_definition
+from infra.stacks.tool_policy import CLASSICAL_POLICY_FILE, PolicyError, allowed_roles, decide, load_policy, policy_digest, render, validate_policy
+from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS, GATEWAY_TYPES, _Projector, contract_tools, project, to_cfn, tool_definition
 
 READ = ["describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result"]
 CI_SCOPE = ["finplan-agent/ci_test"]
@@ -85,6 +89,70 @@ def test_policy_file_validates(tmp_path):
         load_policy(bad)
 
 
+def test_classical_policy_denies_ppo_and_paid_ci_research():
+    doc = load_policy(CLASSICAL_POLICY_FILE)
+    for role in ("viewer", "researcher", "plan_editor", "plan_publisher"):
+        assert decide("recommend_classical_portfolio", groups=[role], doc=doc)
+        assert decide("submit_portfolio_feedback", groups=[role], doc=doc)
+        assert not decide("recommend_portfolio", groups=[role], doc=doc)
+    for args in ({}, {"dry_run": False}):
+        assert not decide("run_portfolio_research", scopes=CI_SCOPE, arguments=args, doc=doc)
+        assert not decide("run_portfolio_research", groups=["viewer"], arguments=args, doc=doc)
+    assert decide("run_portfolio_research", scopes=CI_SCOPE, arguments={"dry_run": True}, doc=doc)
+    assert decide("run_portfolio_research", groups=["researcher"], arguments={"dry_run": False}, doc=doc)
+    assert not decide("production_strategy", groups=["plan_publisher"], doc=doc)
+
+
+def test_classical_boolean_dry_run_grant_renders_a_boolean_cedar_condition():
+    policies = render(["run_portfolio_research"], {"run_portfolio_research": {"dry_run": {"type": "boolean"}}}, load_policy(CLASSICAL_POLICY_FILE))
+    limited = next(p for p in policies if p.name == "allow_dry_run_true")
+    assert 'context.input has dry_run && (context.input.dry_run == true)' in limited.statement
+    assert '\\"ci_test' not in limited.statement  # custom OAuth scope, not a forged group
+    assert "finplan-agent/ci_test" in limited.statement
+
+
+def test_lifecycle_tools_are_shared_and_human_resolution_excludes_ci_scope():
+    from finplan_agent.tools.portfolio import LIFECYCLE_TOOLS
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, target_metadata
+    assert LIFECYCLE_TOOLS <= set(primary_tools()) & set(classical_tools())
+    for policy in (load_policy(), load_policy(CLASSICAL_POLICY_FILE)):
+        for tool in LIFECYCLE_TOOLS:
+            assert decide(tool, groups=['viewer'], doc=policy)
+            assert decide(tool, scopes=CI_SCOPE, doc=policy) is (tool != 'resolve_portfolio_decision')
+    for classical in (False, True):
+        assert target_metadata('beta','resolve_portfolio_decision',classical=classical)=={'allowedRequestHeaders':['X-Finplan-User-Token']}
+        assert target_metadata('beta','get_portfolio_history',classical=classical)=={}
+
+
+def test_each_shared_lifecycle_tool_exports_the_exact_versioned_skill():
+    from finplan_agent.tools.portfolio import LIFECYCLE_TOOLS
+    from finplan_agent.skills import load_skills
+    root=Path(__file__).resolve().parents[3]/'skills'
+    recipe=(root/'paper-portfolio-lifecycle'/'SKILL.md').read_text()
+    skill=next(s for s in load_skills(root)[0] if s['name']=='paper-portfolio-lifecycle')
+    for tool in LIFECYCLE_TOOLS:
+        description=tool_definition(tool).description
+        assert recipe in description and skill['instructions_checksum'] in description
+        assert tool in skill['tools']
+
+
+def test_each_classical_remote_tool_exports_the_exact_versioned_hosted_skill():
+    from finplan_agent.skills import CLASSICAL_SKILLS, load_skills
+
+    root = Path(__file__).resolve().parents[3] / "skills"
+    inventory = {s["name"]: s for s in load_skills(root)[0]}
+    assert CLASSICAL_ONLY_TOOLS <= set(contract_tools())
+    for tool in CLASSICAL_ONLY_TOOLS:
+        name = CLASSICAL_SKILLS[tool]
+        recipe = (root / name / "SKILL.md").read_text()
+        checksum = "sha256:" + hashlib.sha256(recipe.encode()).hexdigest()
+        description = tool_definition(tool).description
+        assert recipe in description
+        assert f"Skill: {name}@{inventory[name]['version']}" in description
+        assert checksum == inventory[name]["instructions_checksum"] and checksum in description
+        assert tool in inventory[name]["tools"]
+
+
 # ------------------------------------------------------------------ schema projection (FA-GW-04)
 def _walk(schema):
     yield schema
@@ -104,7 +172,8 @@ def test_every_contract_tool_projects_to_the_gateway_subset():
             for node in _walk(schema):
                 assert set(node) <= {"type", "description", "properties", "required", "items"}
                 assert node["type"] in GATEWAY_TYPES
-        assert d.input_schema_id.endswith(f"tools/{t.replace('_', '-')}-request.json")
+        stem = "recommend-portfolio-invocation" if t == "recommend_portfolio" else t.replace('_', '-')
+        assert d.input_schema_id.endswith(f"tools/{stem}-request.json")
 
 
 def test_pattern_constraint_moves_to_the_description():
@@ -112,6 +181,42 @@ def test_pattern_constraint_moves_to_the_description():
     pv = s["properties"]["plan_version_id"]
     assert pv["type"] == "string" and "pattern" in pv["description"] and "pv_" in pv["description"]
     assert s["required"] == ["plan_version_id"]
+
+
+def test_pinned_resolution_confirmation_projects_to_boolean_without_relaxing_the_contract():
+    name = "tools/resolve-portfolio-decision-request"
+    store = load_store()
+    assert store.get(name).schema["properties"]["confirmed_by_user"] == {"const": True}
+    schema = tool_definition("resolve_portfolio_decision", store=store).input_schema
+    confirmation = schema["properties"]["confirmed_by_user"]
+    assert confirmation == {"type": "boolean", "description": "[const true]"}
+    assert "confirmed_by_user" in schema["required"]
+    assert to_cfn(schema)["Properties"]["confirmed_by_user"]["Type"] == "boolean"
+    request = {"decision_id": "pd_01JA2B3C4D5E6F7G8H9JKMNPQR", "action": "accept", "expected_revision": 1,
+               "idempotency_key": "confirmed-paper-decision", "confirmed_by_user": True}
+    assert validate(request, name).valid
+    for unconfirmed in (False, 1, "true", {}):
+        assert not validate({**request, "confirmed_by_user": unconfirmed}, name).valid
+
+
+@pytest.mark.parametrize("literal,expected", [(True, "boolean"), (False, "boolean"), (7, "integer"), (0.5, "number"), ("accept", "string")])
+def test_const_only_primitive_types_and_constraints_survive_gateway_projection(literal, expected):
+    schema = _Projector(load_store()).project({"const": literal}, "", 0)
+    assert schema == {"type": expected, "description": f"[const {json.dumps(literal)}]"}
+
+
+@pytest.mark.parametrize("values,expected", [([True, False], "boolean"), ([1, 2], "integer"), ([1, 0.5], "number"), (["accept", "reject"], "string")])
+def test_enum_only_primitive_types_survive_gateway_projection(values, expected):
+    schema = _Projector(load_store()).project({"enum": values}, "", 0)
+    assert schema["type"] == expected
+    assert all(json.dumps(value) in schema["description"] for value in values)
+
+
+def test_literal_union_infers_boolean_and_explicit_type_stays_authoritative():
+    projector = _Projector(load_store())
+    schema = projector.project({"oneOf": [{"const": True}, {"const": False}]}, "", 0)
+    assert schema == {"type": "boolean", "description": "[one of: true; false]"}
+    assert projector.project({"type": "number", "const": 1}, "", 0)["type"] == "number"
 
 
 def test_cfn_casing():

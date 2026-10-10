@@ -27,3 +27,23 @@ def test_identifiers_and_hashes_are_not_figures():
 
 def test_numbers_only_from_current_turn_results():
     assert not claim_check("The weight is 0.6.", []).passed
+
+
+def test_numbered_list_markers_are_formatting_but_financial_figures_are_checked():
+    text = '1. Weight 60%.\n2) NAV 104,250.5.\n10. Expected return 7.5%.'
+    res = claim_check(text, RESULTS)
+    assert res.unsupported == ['7.5%']
+    assert res.text.startswith('1. Weight 60%.\n2) NAV 104,250.5.\n10.')
+    assert res.checked == 3
+
+
+def test_exact_evidence_versions_in_metadata_do_not_authorize_financial_figures():
+    evidence=[{'contract_version': '1.5.0', 'domain_schema_version': '1.0', 'implementation': {'numpy_version': '2.5.3'}}]
+    metadata='{"contract_version": "1.5.0", "domain_schema_version": "1.0", "numpy_version": "2.5.3"}'
+    assert claim_check(metadata, evidence).passed
+    result=claim_check(metadata+'; return 1.5% and volatility 2.5.', evidence)
+    assert result.unsupported==['1.5%', '2.5']
+    assert result.text.startswith(metadata)
+    assert not claim_check(metadata, []).passed
+    assert not claim_check('{"contract_version": "1.5.1"}', evidence).passed
+    assert not claim_check('{"version": "9.9%"}', [{'version': '9.9%'}]).passed

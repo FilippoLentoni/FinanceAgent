@@ -7,12 +7,13 @@
     1
   ],
   "provider_kind_allowed": [
-    "fixture"
+    "fixture",
+    "bedrock"
   ],
   "guard_defaults": {
     "max_tokens_invocation": 1024,
-    "max_tokens_turn": 4096,
-    "max_tokens_session": 32768,
+    "max_tokens_turn": 49152,
+    "max_tokens_session": 131072,
     "max_tool_calls_turn": 6,
     "max_cost_session_usd": 0.5,
     "prompt_caching": "disabled"
@@ -32,13 +33,13 @@
   },
   "gateway": {
     "max_response_bytes": 262144,
-    "request_timeout_seconds": 60,
+    "request_timeout_seconds": 330,
     "mcp_protocol_version": "2025-11-25",
     "policy_mode": "ENFORCE"
   },
   "log_retention_days": 30,
   "explanation": {
-    "provider": "fixture",
+    "provider": "bedrock",
     "model_id": "us.amazon.nova-lite-v1:0"
   },
   "identity": {

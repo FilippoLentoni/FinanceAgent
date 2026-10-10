@@ -8,6 +8,15 @@ synthesized. The ownership gate (``scripts/infra_gates.py``) still fails on ever
 exact match of an entry below (row, resource type, logical role) and the CDK helpers (default
 policies) of such a resource. Anything else - another type, another role, another repository's row -
 fails the build as before. Remove an entry as soon as the pinned contracts list the type.
+
+FA-GAP-RESOLVE-METADATA (pipeline structure, not an ownership exception): the beta
+Resolve action carries generated JSON CloudFormation parameters in a separate
+artifact because CodePipeline limits ParameterOverrides to 1KB. The validator in
+scripts/infra_gates.py admits only the named beta producer/consumer and JSON path,
+keeps executable templates in BuildOutput and image/release identity in immutable
+Build variables, and runs the unchanged generic contract checker after removing
+only that validated metadata input. Stage generation accepts only declared CFN
+parameter keys. Gamma/prod roles and artifact wiring are unchanged.
 """
 
 from __future__ import annotations

@@ -78,10 +78,12 @@ def test_caching_without_cache_rates_stays_disabled():
     assert cfg.prompt_caching == "enabled" and not cfg.caching_effective
 
 
-def test_beta_allows_fixture_only():
+def test_beta_allows_guarded_bedrock_but_requires_rates():
     repo = load_repo_config("beta")
-    with pytest.raises(ProviderConfigError, match="not allowed in beta"):
-        build_provider_config("beta", "bedrock", MID["prod_profile"], GUARDS, allowed_kinds=repo["provider_kind_allowed"])
+    cfg = build_provider_config("beta", "bedrock", MID["prod_profile"], GUARDS, allowed_kinds=repo["provider_kind_allowed"])
+    assert cfg.kind == "bedrock"
+    with pytest.raises(ProviderConfigError):
+        build_provider_config("beta", "bedrock", MID["prod_profile"], {}, allowed_kinds=repo["provider_kind_allowed"])
 
 
 def test_cost_from_configured_rates():

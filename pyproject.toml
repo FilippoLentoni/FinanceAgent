@@ -10,7 +10,7 @@ dependencies = [
     # The wheel is the FinancialPlanning-built artifact, vendored byte for byte until the
     # CodeArtifact registry (/finplan/shared/financialplanning/contract/registry-ref) serves it.
     # Re-pin with: uv run python scripts/check_contracts_pin.py --repin
-    "finplan-contracts==1.1.0",
+    "finplan-contracts==1.5.0",
     # The agent framework (design D1). LangGraph only: no other agent framework, no managed harness.
     "langgraph>=1.0,<2",
     "langchain-core>=1.0,<2",
@@ -36,7 +36,7 @@ default-groups = ["dev"]
 exclude-newer = "2026-09-24T00:00:00Z"
 
 [tool.uv.sources]
-finplan-contracts = { path = "vendor/finplan-contracts/finplan_contracts-1.1.0-py3-none-any.whl" }
+finplan-contracts = { path = "vendor/finplan-contracts/finplan_contracts-1.5.0-py3-none-any.whl" }
 
 [build-system]
 requires = ["hatchling>=1.25"]

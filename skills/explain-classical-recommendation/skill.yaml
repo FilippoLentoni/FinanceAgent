@@ -1,0 +1,5 @@
+name: explain-classical-recommendation
+version: 0.1.0
+purpose: Explain a traditional optimizer recommendation using keep counterfactuals and exact Shapley evidence.
+tools: [explain_classical_recommendation, get_classical_analysis, query_market_data]
+output_contract: finance/v1/tools/explain-classical-recommendation-response.json

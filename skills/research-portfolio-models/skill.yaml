@@ -1,0 +1,5 @@
+name: research-portfolio-models
+version: 0.1.0
+purpose: Record feedback and sourced modeling hypotheses and run bounded sandbox comparisons.
+tools: [research_portfolio_models, run_portfolio_research, submit_portfolio_feedback, get_classical_analysis, get_job_status, get_experiment_result]
+output_contract: finance/v1/tools/research-portfolio-models-response.json

@@ -29,6 +29,23 @@ def test_every_post_synth_gate_passes(assembly):
     assert "FA-GAP-RUNTIME-ROLE" in gaps and "FA-GAP-POLICY" in gaps  # reported, not hidden
 
 
+def test_template_compaction_preserves_values_and_size_gate_checks_packaged_bytes(tmp_path):
+    from scripts.synth import _compact_templates
+
+    doc = {"Resources": {"Policy": {"Statement": "// readiness comment\npermit(principal, action, resource);"}}, "Description": "é"}
+    path = tmp_path / "BetaAgent.template.json"
+    path.write_text(json.dumps(doc, indent=8), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    _compact_templates(tmp_path)
+    assert json.loads(path.read_text()) == doc
+    assert path.read_bytes() == (json.dumps(doc, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    assert manifest.read_bytes() == b"{}\n"
+    assert not run_gates(GateContext(tmp_path), ["template-size"])["template-size"]
+    path.write_text(json.dumps({"Description": "x" * (1024 * 1024)}))
+    assert run_gates(GateContext(tmp_path), ["template-size"])["template-size"]
+
+
 def test_ownership_gate_still_fails_on_an_unlisted_resource(assembly, tmp_path):
     import shutil
 
@@ -115,9 +132,9 @@ def test_gateway_and_runtime_bound_to_the_same_environments_pool(templates, env)
 def test_targets_are_conditional_on_resolved_references_and_never_literal(templates):
     t = templates["agent:gamma"]
     targets = resources(t, "AWS::BedrockAgentCore::GatewayTarget")
-    from infra.stacks.tool_schemas import contract_tools
+    from infra.stacks.tool_schemas import classical_tools, primary_tools
 
-    assert len(targets) == len(contract_tools()) >= 12
+    assert len(targets) == len(primary_tools()) + len(classical_tools()) >= 12
     for _lid, r in targets.items():
         lam = r["Properties"]["TargetConfiguration"]["Mcp"]["Lambda"]
         assert lam["LambdaArn"]["Ref"].startswith("Target") and r["Condition"].startswith("Register")
@@ -131,6 +148,18 @@ def test_targets_are_conditional_on_resolved_references_and_never_literal(templa
     assert re.match(pat, "none")
 
 
+@pytest.mark.parametrize("env", ENVS)
+def test_both_gateway_targets_accept_a_boolean_paper_confirmation(templates, env):
+    targets = resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget")
+    schemas = [r["Properties"]["TargetConfiguration"]["Mcp"]["Lambda"]["ToolSchema"]["InlinePayload"][0]
+               for r in targets.values()]
+    resolutions = [s["InputSchema"] for s in schemas if s["Name"] == "resolve_portfolio_decision"]
+    assert len(resolutions) == 2
+    for schema in resolutions:
+        assert schema["Properties"]["confirmed_by_user"] == {"Type": "boolean", "Description": "[const true]"}
+        assert "confirmed_by_user" in schema["Required"]
+
+
 def test_policies_follow_their_target_and_the_engine_enforces(templates):
     t = templates["agent:beta"]
     gw = next(iter(resources(t, "AWS::BedrockAgentCore::Gateway").values()))["Properties"]
@@ -140,12 +169,76 @@ def test_policies_follow_their_target_and_the_engine_enforces(templates):
     assert pols
     for r in pols.values():
         stmt = r["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"][0]
-        target = next(d for d in r["DependsOn"] if d.startswith("Target"))
-        assert r["Condition"] == "Register" + target[len("Target") :]
+        target = next(d for d in r["DependsOn"] if d.startswith(("Target", "ClassicalTarget")))
+        assert r["Condition"] == "Register" + target.removeprefix("Classical")[len("Target") :]
         assert "${GatewayArn}" in stmt and "AgentCore::OAuthUser" in stmt
     allow_publish = next(r for lid, r in pols.items() if lid.startswith("PolicyPublishPlanVersion"))
     assert '"plan_publisher' in allow_publish["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"][0]
     assert "ci_test" not in allow_publish["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"][0]
+
+
+def _active_references(value, enabled):
+    """Resolve conditional dependency branches, like CloudFormation does for sparse catalogs."""
+    if isinstance(value, list):
+        return set().union(*(_active_references(v, enabled) for v in value))
+    if not isinstance(value, dict):
+        return set()
+    if "Fn::If" in value:
+        condition, yes, no = value["Fn::If"]
+        return _active_references(yes if condition in enabled else no, enabled)
+    if "Fn::GetAtt" in value:
+        return {value["Fn::GetAtt"][0]}
+    return set().union(*(_active_references(v, enabled) for v in value.values()))
+
+
+@pytest.mark.parametrize("env", ENVS)
+@pytest.mark.parametrize("catalog", ("all", "alternating", "single", "none"))
+def test_catalog_updates_are_serial_and_policies_wait_for_all_enabled_targets(templates, env, catalog):
+    t = templates[f"agent:{env}"]
+    targets = resources(t, "AWS::BedrockAgentCore::GatewayTarget")
+    policies = resources(t, "AWS::BedrockAgentCore::Policy")
+    conditions = sorted({r["Condition"] for r in targets.values()})
+    enabled = set(conditions if catalog == "all" else conditions[::2] if catalog == "alternating" else ["RegisterGetPortfolioHistory"] if catalog == "single" else [])
+    active_targets = {lid: r for lid, r in targets.items() if r["Condition"] in enabled}
+    active_policies = {lid: r for lid, r in policies.items() if r["Condition"] in enabled}
+    dependencies = {}
+    groups = {}
+    for gateway in ("Gateway", "ClassicalGateway"):
+        group = {lid: r for lid, r in targets.items() if r["Properties"]["GatewayIdentifier"] == {"Fn::GetAtt": [gateway, "GatewayIdentifier"]}}
+        active = {lid: r for lid, r in group.items() if r["Condition"] in enabled}
+        groups[gateway] = set(active)
+        previous = None
+        for lid, resource in sorted(active.items(), key=lambda pair: pair[1]["Properties"]["Name"]):
+            refs = _active_references(resource["Properties"]["Description"], enabled)
+            assert refs == ({previous} if previous else set())
+            # Hard dependencies on an optional target would suppress enabled
+            # later targets whenever the predecessor is configured as none.
+            assert not (set(resource.get("DependsOn", [])) & set(targets))
+            dependencies[lid] = refs
+            previous = lid
+        for lid, resource in active_policies.items():
+            if resource["Properties"]["PolicyEngineId"] != {"Fn::GetAtt": ["ClassicalToolPolicyEngine" if gateway == "ClassicalGateway" else "ToolPolicyEngine", "PolicyEngineId"]}:
+                continue
+            statement, substitutions = resource["Properties"]["Definition"]["Cedar"]["Statement"]["Fn::Sub"]
+            assert "// Registered catalog readiness: ${CatalogTargetIds}" in statement
+            refs = _active_references(substitutions["CatalogTargetIds"], enabled)
+            assert refs == ({previous} if previous else set())
+            direct = set(resource.get("DependsOn", [])) & set(targets)
+            assert len(direct) == 1 and direct <= set(active)
+            dependencies[lid] = refs | direct
+    # Simulate a legal CloudFormation schedule. Concurrent writes to the same
+    # catalog and policy creation against a partial catalog must be impossible.
+    completed = set()
+    while len(completed) < len(dependencies):
+        ready = {lid for lid, deps in dependencies.items() if lid not in completed and deps <= completed}
+        assert ready, "the deployment dependency graph contains a cycle"
+        for gateway, group in groups.items():
+            assert len(ready & group) <= 1, (gateway, "parallel catalog updates")
+        for lid in ready & set(active_policies):
+            gateway = "ClassicalGateway" if lid.startswith("Classical") else "Gateway"
+            assert groups[gateway] <= completed, "policy started before its complete catalog was ready"
+        completed.update(ready)
+    assert completed == set(active_targets) | set(active_policies)
 
 
 # ------------------------------------------------------------------ runtime (FA-PRV-08, FA-POL-01, L3)
@@ -154,7 +247,7 @@ def test_runtime_contract_wiring(templates):
     rt = next(iter(resources(t, "AWS::BedrockAgentCore::Runtime").values()))["Properties"]
     assert rt["NetworkConfiguration"] == {"NetworkMode": "PUBLIC"} and rt["ProtocolConfiguration"] == "HTTP"
     assert rt["RequestHeaderConfiguration"]["RequestHeaderAllowlist"] == ["Authorization"]
-    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL"}
+    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL"}
     assert rt["AgentRuntimeName"] == "finplan_beta_financeagent"
     pat = t["Parameters"]["ImageUri"]["AllowedPattern"]
     good = FAKE_ACCOUNT + ".dkr.ecr.us-east-2.amazonaws.com/finplan-shared-financeagent-runtime-images@sha256:" + "a" * 64
@@ -206,6 +299,62 @@ def test_gateway_service_roles_exist_per_environment_in_tooling(templates):
         assert f"function:finplan-{env}-financelambdastool-*" in json.dumps(r)
 
 
+def test_classical_catalog_and_policy_are_separate_from_the_existing_ppo_gateway(templates):
+    from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS, CLASSICAL_SHARED_TOOLS, classical_tools, primary_tools
+
+    t = templates["agent:beta"]
+    gateways = resources(t, "AWS::BedrockAgentCore::Gateway")
+    assert set(gateways) == {"Gateway", "ClassicalGateway"}
+    assert gateways["Gateway"]["Properties"]["AuthorizerConfiguration"] == gateways["ClassicalGateway"]["Properties"]["AuthorizerConfiguration"]
+    assert gateways["Gateway"]["Properties"]["PolicyEngineConfiguration"] != gateways["ClassicalGateway"]["Properties"]["PolicyEngineConfiguration"]
+    actual = {"Gateway": set(), "ClassicalGateway": set()}
+    for target in resources(t, "AWS::BedrockAgentCore::GatewayTarget").values():
+        props = target["Properties"]
+        gateway_id = props["GatewayIdentifier"]["Fn::GetAtt"][0]
+        actual[gateway_id].add(props["TargetConfiguration"]["Mcp"]["Lambda"]["ToolSchema"]["InlinePayload"][0]["Name"])
+    assert actual["Gateway"] == set(primary_tools())
+    assert actual["ClassicalGateway"] == set(classical_tools())
+    assert not actual["Gateway"] & CLASSICAL_ONLY_TOOLS
+    assert actual["ClassicalGateway"] <= CLASSICAL_ONLY_TOOLS | CLASSICAL_SHARED_TOOLS
+    assert "recommend_portfolio" not in actual["ClassicalGateway"]
+
+
+def test_classical_bootstrap_grants_extend_beta_only(templates):
+    roles = {r["Properties"]["RoleName"]: r["Properties"] for r in resources(templates["tooling"], "AWS::IAM::Role").values()}
+    for env in ENVS:
+        role = roles[n.gateway_role_name(env)]
+        trust = role["AssumeRolePolicyDocument"]["Statement"][0]["Condition"]
+        assert ("classical-gateway" in json.dumps(trust)) == (env == "beta")
+        assert ("classical_tools" in json.dumps(role["Policies"])) == (env == "beta")
+        if env != "beta":
+            # No shared-bootstrap permission changes in Gamma/prod.
+            assert trust["StringEquals"] == {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
+            assert trust["ArnLike"]["aws:SourceArn"]["Fn::Join"][1][-1] == f":gateway/finplan-{env}-financeagent-gateway-*"
+
+
+def test_only_human_resolution_and_beta_paid_research_receive_identity_token_header(templates):
+    from infra.stacks.tool_schemas import CLASSICAL_IDENTITY_HEADER
+
+    for env in ENVS:
+        for logical, target in resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget").items():
+            metadata = target["Properties"].get("MetadataConfiguration")
+            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical == "ClassicalTargetRunPortfolioResearch":
+                assert metadata == {"AllowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
+            else:
+                assert metadata is None
+
+
+def test_environment_gate_rejects_missing_or_overbroad_identity_header_propagation(templates):
+    from copy import deepcopy
+
+    t = deepcopy(templates["agent:beta"])
+    t["Resources"]["ClassicalTargetRunPortfolioResearch"]["Properties"].pop("MetadataConfiguration")
+    assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
+    t = deepcopy(templates["agent:beta"])
+    t["Resources"]["TargetRecommendPortfolio"]["Properties"]["MetadataConfiguration"] = {"AllowedRequestHeaders": ["X-Finplan-User-Token"]}
+    assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
+
+
 def test_pipeline_wiring(templates):
     t = templates["tooling"]
     p = next(iter(resources(t, "AWS::CodePipeline::Pipeline").values()))["Properties"]
@@ -217,12 +366,44 @@ def test_pipeline_wiring(templates):
     assert resolve["Namespace"] == "ResolveBeta"
     deploy_agent = next(a for a in beta["Actions"] if a["Name"] == "DeployAgent")
     overrides = json.loads(deploy_agent["Configuration"]["ParameterOverrides"])
-    assert overrides["ImageUri"] == "#{BuildVariables.IMAGE_URI}" and overrides["BedrockInvokeArns"] == "#{ResolveBeta.BEDROCK_INVOKE_ARNS}"
-    assert overrides["TargetDescribeCapabilitiesArn"] == "#{ResolveBeta.TARGET_DESCRIBE_CAPABILITIES}"
+    assert overrides == {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"}
+    assert len(deploy_agent["Configuration"]["ParameterOverrides"].encode()) <= 1024
+    resolved_artifact = resolve["OutputArtifacts"][0]["Name"]
+    assert deploy_agent["Configuration"]["TemplateConfiguration"] == f"{resolved_artifact}::agent-parameters.json"
+    assert {a["Name"] for a in deploy_agent["InputArtifacts"]} == {"BuildOutput", resolved_artifact}
     build_project = next(r for r in resources(t, "AWS::CodeBuild::Project").values() if r["Properties"]["Name"] == "finplan-shared-financeagent-pipeline-build-project")
     env = build_project["Properties"]["Environment"]
     assert env["Type"] == "ARM_CONTAINER" and env["PrivilegedMode"] is True
     assert "connection" not in json.dumps(p).lower() or "codeconnection-ref" in json.dumps(t)
+
+
+def test_metadata_artifact_exception_rejects_executable_substitution_and_other_consumers(templates):
+    from copy import deepcopy
+
+    from scripts.infra_gates import validated_resolve_metadata_template
+
+    template = templates["tooling"]
+    projected, problems = validated_resolve_metadata_template(template)
+    assert not problems and projected != template
+
+    def actions_for(t, stage="Beta"):
+        pipeline = next(iter(resources(t, "AWS::CodePipeline::Pipeline").values()))["Properties"]
+        return next(s["Actions"] for s in pipeline["Stages"] if s["Name"] == stage)
+
+    for invalid in ("template", "image", "consumer", "producer"):
+        bad = deepcopy(template)
+        beta = actions_for(bad)
+        deploy = next(a for a in beta if a["Name"] == "DeployAgent")
+        if invalid == "template":
+            deploy["Configuration"]["TemplatePath"] = "ResolvedBetaConfiguration::replacement.template.json"
+        elif invalid == "image":
+            deploy["Configuration"]["ParameterOverrides"] = json.dumps({"ImageUri": "arbitrary-later-image", "ReleaseId": "#{BuildVariables.RELEASE_ID}"})
+        elif invalid == "consumer":
+            actions_for(bad, "Gamma")[0]["InputArtifacts"].append({"Name": "ResolvedBetaConfiguration"})
+        else:
+            next(a for a in beta if a["Name"] == "Resolve")["InputArtifacts"] = [{"Name": "SourceOutput"}]
+        rejected, errors = validated_resolve_metadata_template(bad)
+        assert rejected == bad and errors, invalid
 
 
 def test_no_budget_and_30_day_logs_everywhere(assembly):

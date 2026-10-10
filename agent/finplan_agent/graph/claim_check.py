@@ -26,7 +26,10 @@ __all__ = ["ClaimCheckResult", "claim_check", "collect_values", "REMOVED"]
 
 REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
-_NUM = re.compile(r"(?<![\w.$/-])-?\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?(?![\w])|(?<![\w.$/-])-?\$?\d+(?:\.\d+)?%?(?![\w])")
+_NUM = re.compile(r"(?<![\w.$/-])-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?%?(?![\w])")
+_LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)](?=\s)")
+_VERSION_FIELD = re.compile(r'"(?:[A-Za-z_]\w*_)?version"\s*:\s*"(?P<value>[^"\n]+)"')
+_DOTTED_VERSION = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?")
 
 
 @dataclass
@@ -83,6 +86,10 @@ def _matches(token: str, values: list[float]) -> bool:
         return True
     decimals = len(raw.split(".", 1)[1]) if "." in raw else 0
     for v in values:
+        if "e" in raw.lower():
+            if math.isclose(v * (100 if pct else 1), n, rel_tol=1e-12, abs_tol=1e-30):
+                return True
+            continue
         if round(v, decimals) == n:
             return True
         if pct and round(v * 100, decimals) == n:
@@ -96,17 +103,35 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
     out: list[str] = []
     pos = 0
     spans: list[tuple[int, int, str]] = []
+    markers = [(m.start(), m.end()) for m in _LIST_MARKER.finditer(text)]
+    # Dated news/literature titles may contain figures. Preserve them only when the
+    # complete source string is reproduced verbatim, rather than trusting an isolated digit.
+    verbatim = []
+    # A quoted software/schema version is metadata, not a financial figure.
+    # Accept only the complete exact version from this turn's evidence, scoped
+    # to a version field; its digits cannot authorize figures elsewhere.
+    for match in _VERSION_FIELD.finditer(text):
+        source = match.group('value')
+        if source in strings and _DOTTED_VERSION.fullmatch(source):
+            verbatim.append(match.span('value'))
+    for source in strings:
+        if len(source) < 16:
+            continue
+        offset = 0
+        while (start := text.find(source, offset)) >= 0:
+            verbatim.append((start, start + len(source)))
+            offset = start + len(source)
     for m in _DATE.finditer(text):
         spans.append((m.start(), m.end(), "date"))
     for m in _NUM.finditer(text):
-        if any(s <= m.start() < e for s, e, _ in spans):
+        if any(s <= m.start() < e for s, e, _ in spans) or any(s <= m.start() < e for s, e in markers):
             continue
         spans.append((m.start(), m.end(), "num"))
     spans.sort()
     for start, end, kind in spans:
         token = text[start:end]
         result.checked += 1
-        ok = any(token in s for s in strings) if kind == "date" else _matches(token, values)
+        ok = any(a <= start and end <= b for a, b in verbatim) or (any(token in s for s in strings) if kind == "date" else _matches(token, values))
         out.append(text[pos:start])
         if ok:
             out.append(token)

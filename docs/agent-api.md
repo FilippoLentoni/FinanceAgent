@@ -12,6 +12,7 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 | `action` | all | `invoke` (default), `confirm`, `describe`, `delete_session` |
 | `prompt` | invoke | the user message (at most 20,000 characters) |
 | `tool_request` | invoke | optional structured request `{"name": "<tool>", "arguments": {...}}` |
+| `recommendation` | invoke | `{}` for the saved paper portfolio and latest approved market session, or an explicit snapshot/session/holdings request; returns `answer.recommendation` |
 | `explanation` | invoke | optional structured explanation request (workflows of `add-explanation-workflows`; see `docs/explanations.md`); the answer carries `answer.explanation` (a contract explanation result) and `prompt` becomes optional |
 | `approve` | confirm | `true` runs the pending state-changing call(s) once; `false` declines |
 | `stream` | all | `true` (default): SSE events; `false`: one JSON document (the `final` payload) |
@@ -20,10 +21,10 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 ## `describe`
 
 ```json
-{"type": "describe", "framework": "langgraph", "graph_version": 1, "environment": "gamma",
- "release_id": "rel_...", "contract_version": "1.0.0",
+{"type": "describe", "framework": "langgraph", "graph_version": 1, "environment": "beta",
+ "release_id": "rel_...", "contract_version": "1.3.0",
  "provider": {"kind": "bedrock", "model_id": "<from SSM>", "max_tokens_invocation": 1024,
-              "prompt_caching": "enabled", "rates_source": "configured", "rates_retrieved_at": "..."},
+              "prompt_caching": "disabled", "rates_source": "aws_price_list", "rates_retrieved_at": "..."},
  "skills": [...], "streaming": {"http": true, "websocket": false}}
 ```
 
@@ -31,6 +32,8 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 
 1. `{"type": "progress", "stage": "accepted", "session_id", "correlation_id"}`, then `progress` per
    graph node (`route`, `plan`, `tool_call`, `narrate`, `claim_check`);
+   deterministic policy routing also emits `skill_selected` with the applied skill's name,
+   version, declared tools and instruction checksum;
 2. `{"type": "tool_call", "tool", "arguments", "id"}` and `{"type": "tool_result_summary", "tool",
    "id", "ok", "summary", "error_code"}` per tool call;
 3. `{"type": "token", "text"}` narrative deltas (drafts: the `final` narrative is authoritative
@@ -66,3 +69,44 @@ while one is pending), `OPERATION_NOT_PERMITTED` (live trading, paid-job approva
 risk-preference change), `BUDGET_EXCEEDED` (token, tool-call, session or `bedrock_explanations`
 limits; details name the limit, remaining amount and estimate), `DEPENDENCY_UNAVAILABLE` (Gateway,
 tool release or Bedrock model access), `RATE_LIMITED`, `INTERNAL` (never with a stack trace).
+
+## Selected strategy recommendation
+
+Ask naturally, for example `{"prompt":"How should I invest today?","stream":false}`, or
+send `{"recommendation":{},"stream":false}`. The graph invokes the existing read-only
+`recommend_portfolio` MCP tool with `{}`. FinanceModel resolves the persisted beta paper book and
+latest approved completed market session. No repeated holdings input or new training job is needed.
+The tool does not initialize the book or apply the recommended trades.
+
+The deterministic answer includes every supported instrument and cash, current/target quantities,
+signed proposed fractional share and value changes, reference close/date, saved portfolio revision,
+strategy identity and exact policy/data provenance. The complete validated producer result is also
+returned in `answer.recommendation`. The explanation identifies movement from current holdings to
+constrained model targets; it does not invent news or feature-level causal reasons.
+
+In the same session, ask `{"prompt":"Why is this your recommendation?","stream":true}`. The
+graph re-calls `recommend_portfolio` pinned to the original snapshot/date and saved portfolio ID
+(or the exact original explicit holdings), then calls `query_market_data` for that same session.
+It verifies that the selected policy/configuration, state revision and allocation still reproduce
+the earlier result. Changed or unavailable evidence is reported explicitly, without explaining a
+new result as the old recommendation. A why question without prior tool evidence requests context.
+The response's `answer.skills_used` identifies the applied packaged recommendation skill.
+
+Direct MCP `tools/list` exposes the same complete recommendation instructions, version and checksum
+in `recommend_portfolio`'s tool description. This is an instruction recipe for clients to follow,
+not another callable model. Native MCP prompt/resource lists may be empty. Direct clients can call
+the same policy and market-data tools without invoking the hosted LangGraph agent.
+
+Existing explicit-state requests remain supported: send `recommendation` with `input_snapshot_id`,
+completed-session `as_of` and `holdings` (`weights` of `{instrument_id, weight}`, `cash_weight`,
+`portfolio_value`, `high_watermark`). For natural questions explicitly supplying actual holdings,
+the provider collects any missing state rather than substituting the saved paper book. A bare
+recommendation does not claim the paper positions are actual brokerage holdings. Missing state,
+prices or selected policy produce a tool error without fabricated allocations.
+
+Hosted beta uses guarded Bedrock; offline CI retains fixtures/stubs with no network model calls.
+The beta Gateway client waits up to 330 seconds. User authorization is enforced by the Gateway;
+the Lambda target currently audits a Gateway caller identity, as documented in `docs/gateway.md`.
+
+See `docs/strategy-lifecycle.md` for the four pipelines, beta-to-beta references, artifact activation,
+explanations and the future research feedback loop. No recurring research schedule is enabled.

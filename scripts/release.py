@@ -31,7 +31,9 @@ The resolved values are exported as pipeline variables (never an artifact, never
 * ``agent/user-pool-ref``, ``agent/authorizer-metadata-ref`` (JSON ``discovery_url``, ``issuer``,
   ``allowed_clients``, ``token_endpoint``, ``scopes``), ``secret-ref/ci-test-client`` (secret NAME),
   ``agent/runtime-ref``, ``agent/gateway-endpoint-ref``, ``agent/gateway-principal-ref``,
-  ``agent/policy-digest``, ``agent/gateway-targets``, ``agent/runtime-image``;
+  ``agent/policy-digest``, ``agent/gateway-targets``, ``agent/runtime-image``; corresponding separate
+  ``agent/classical-gateway-endpoint-ref``, ``agent/classical-gateway-principal-ref``,
+  ``agent/classical-policy-digest`` and ``agent/classical-gateway-targets`` for traditional analysis;
 * ``config/explanation-provider``, ``config/explanation-model-id`` (from ``config/<env>.json``) and
   ``config/explanation-guards`` (caps from config; operator-entered ``rates`` are preserved, never
   invented: no price lives in this repository);
@@ -302,7 +304,7 @@ def resolve_targets(ssm: Any, env: str, *, account: str, tools: list[str], pinne
     targets = {t: NONE for t in tools}
     for entry in catalog["tools"]:
         tool = entry["name"]
-        if any(w in tool for w in words):
+        if tool != "list_executions" and any(w in tool for w in words):
             notes.append(f"{tool}: names a denied capability; never registered")
             continue
         if tool not in targets:
@@ -386,7 +388,7 @@ def stack_outputs(cfn: Any, env: str) -> dict[str, str]:
     return out
 
 
-REQUIRED_OUTPUTS = ("UserPoolId", "PkceClientId", "CiTestClientId", "DiscoveryUrl", "Issuer", "TokenEndpoint", "RuntimeArn", "GatewayUrl", "PolicyDigest")
+REQUIRED_OUTPUTS = ("UserPoolId", "PkceClientId", "CiTestClientId", "DiscoveryUrl", "Issuer", "TokenEndpoint", "RuntimeArn", "GatewayUrl", "PolicyDigest", "ClassicalGatewayUrl", "ClassicalPolicyDigest")
 
 
 def explanation_guards(cfg: Mapping[str, Any], existing: str | None) -> str:
@@ -403,10 +405,12 @@ def explanation_guards(cfg: Mapping[str, Any], existing: str | None) -> str:
 
 def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], cfg: Mapping[str, Any], *, targets: Mapping[str, str], existing_guards: str | None) -> dict[str, tuple[str, str]]:
     """``{manifest output key: (SSM name, value)}`` of every reference this deploy publishes."""
+    from infra.stacks.tool_schemas import classical_tools, primary_tools
+
     expl = dict(cfg.get("explanation") or {})
     kind = str(expl.get("provider", "fixture"))
-    if env == "beta" and kind != "fixture":
-        raise ManifestError("beta allows only the fixture provider (no Bedrock calls in CI, FA-PRV-14)")
+    if kind not in (cfg.get("provider_kind_allowed") or []):
+        raise ManifestError(f"provider {kind!r} is not allowed in {env}")
     meta = {
         "discovery_url": outputs["DiscoveryUrl"],
         "issuer": outputs["Issuer"],
@@ -429,7 +433,11 @@ def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], 
     add("gateway-endpoint-ref", "agent", "gateway-endpoint-ref", outputs["GatewayUrl"])
     add("gateway-principal-ref", "agent", "gateway-principal-ref", n.gateway_role_name(env))
     add("policy-digest", "agent", "policy-digest", outputs["PolicyDigest"])
-    add("gateway-targets", "agent", "gateway-targets", json.dumps({t: v for t, v in sorted(targets.items())}, sort_keys=True, separators=(",", ":")))
+    add("gateway-targets", "agent", "gateway-targets", json.dumps({t: v for t, v in sorted(targets.items()) if t in primary_tools()}, sort_keys=True, separators=(",", ":")))
+    add("classical-gateway-endpoint-ref", "agent", "classical-gateway-endpoint-ref", outputs["ClassicalGatewayUrl"])
+    add("classical-gateway-principal-ref", "agent", "classical-gateway-principal-ref", n.gateway_role_name(env))
+    add("classical-policy-digest", "agent", "classical-policy-digest", outputs["ClassicalPolicyDigest"])
+    add("classical-gateway-targets", "agent", "classical-gateway-targets", json.dumps({t: v for t, v in sorted(targets.items()) if t in classical_tools()}, sort_keys=True, separators=(",", ":")))
     add("runtime-image", "agent", "runtime-image", info.image_uri)
     add("explanation-provider", "config", "explanation-provider", kind)
     add("explanation-model-id", "config", "explanation-model-id", str(expl.get("model_id") or ""))
@@ -493,7 +501,8 @@ def approval_record(codepipeline: Any, pipeline_name: str, execution_id: str, ac
 
 
 def publish_release(
-    info: ReleaseInfo, env: str, *, ssm: Any, cfn: Any, targets: Mapping[str, str], s3: Any | None = None, store_bucket: str | None = None, now: datetime | None = None, approval: Mapping[str, str] | None = None, root: Path = ROOT
+    info: ReleaseInfo, env: str, *, ssm: Any, cfn: Any, targets: Mapping[str, str], s3: Any | None = None, store_bucket: str | None = None, now: datetime | None = None, approval: Mapping[str, str] | None = None, root: Path = ROOT,
+    gateway_audit: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if env == "prod" and not approval:
         raise ManifestError("prod manifests require the approval record (approved_by, approved_at)")
@@ -523,6 +532,8 @@ def publish_release(
     if s3 is not None and store_bucket:
         s3.put_object(Bucket=store_bucket, Key=f"{RELEASES_PREFIX}{info.release_id}/manifests/{env}.json", Body=body.encode("utf-8"), ContentType="application/json")
         s3.put_object(Bucket=store_bucket, Key=f"{RELEASES_PREFIX}{info.release_id}/targets/{env}.json", Body=json.dumps(dict(targets), sort_keys=True).encode("utf-8"), ContentType="application/json")
+        if gateway_audit is not None:
+            s3.put_object(Bucket=store_bucket, Key=f"{RELEASES_PREFIX}{info.release_id}/gateway-audit/{env}.json", Body=json.dumps(dict(gateway_audit), sort_keys=True).encode("utf-8"), ContentType="application/json")
     return manifest
 
 

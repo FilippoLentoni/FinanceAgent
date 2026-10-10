@@ -94,6 +94,112 @@ def test_registration_from_the_environments_released_references(ssm):
     assert cat_rel.startswith("rel_")
 
 
+def test_read_only_execution_history_is_registered(ssm):
+    _seed(ssm, "beta", ["list_executions", "recommend_portfolio"])
+    targets, _, notes = rel.resolve_targets(ssm, "beta", account=ACCOUNT, tools=contract_tools(), pinned_major=1)
+    assert targets["list_executions"] == _arn("beta", "list_executions")
+    assert targets["recommend_portfolio"] == _arn("beta", "recommend_portfolio")
+    assert not notes
+
+
+def test_stale_pipeline_target_handoff_cannot_publish_a_successful_release():
+    expected = {"describe_capabilities": _arn("beta", "describe_capabilities"), "recommend_portfolio": _arn("beta", "recommend_portfolio")}
+    with pytest.raises(rel.DependencyMissing, match="shared pipeline wiring"):
+        stage_runner.verify_target_handoff(expected, expected | {"recommend_portfolio": "none"})
+    stage_runner.verify_target_handoff(expected, expected)
+
+
+def test_enabled_classical_deploy_refuses_an_older_producer_catalog_before_deploy():
+    from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS
+
+    with pytest.raises(rel.DependencyMissing, match="FinanceModel and FinanceLambdasTool"):
+        stage_runner.verify_classical_dependencies("beta", {"recommend_portfolio": _arn("beta", "recommend_portfolio")})
+    stage_runner.verify_classical_dependencies("beta", {t: _arn("beta", t) for t in CLASSICAL_ONLY_TOOLS})
+    # Higher environments are not opted into this deployment yet.
+    stage_runner.verify_classical_dependencies("gamma", {})
+
+
+def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
+    from copy import deepcopy
+
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, target_metadata, tool_definition
+
+    targets = {t: _arn("beta", t) for t in contract_tools()}
+
+    class Cfn:
+        def describe_stacks(self, **_kwargs):
+            return {"Stacks": [{"Outputs": [{"OutputKey": "GatewayId", "OutputValue": "primary"}, {"OutputKey": "ClassicalGatewayId", "OutputValue": "classical"}]}]}
+
+    class Control:
+        def __init__(self):
+            self.catalogs = {"primary": primary_tools(), "classical": classical_tools()}
+            self.bad_alias = False
+            self.shared_engine = False
+            self.bad_metadata = False
+            self.service_policy_header = True
+            self.metadata_overrides = {}
+
+        def get_gateway(self, gatewayIdentifier):  # noqa: N803
+            return {
+                "status": "READY", "authorizerType": "CUSTOM_JWT", "authorizerConfiguration": {"customJWTAuthorizer": {"discoveryUrl": "same-beta-pool"}},
+                "policyEngineConfiguration": {"mode": "ENFORCE", "arn": "primary" if self.shared_engine else gatewayIdentifier},
+                "gatewayUrl": f"https://{gatewayIdentifier}.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
+            }
+
+        def list_gateway_targets(self, gatewayIdentifier, **_kwargs):  # noqa: N803
+            return {"items": [{"targetId": t, "name": t.replace("_", "-")} for t in self.catalogs[gatewayIdentifier]]}
+
+        def get_gateway_target(self, gatewayIdentifier, targetId):  # noqa: N803
+            metadata = target_metadata("beta", targetId, classical=gatewayIdentifier == "classical")
+            if self.bad_metadata and targetId == "run_portfolio_research":
+                metadata = {}
+            if self.service_policy_header:
+                metadata.setdefault("allowedRequestHeaders", []).append("x-amzn-bedrock-agentcore-policy-session-id")
+            metadata = self.metadata_overrides.get((gatewayIdentifier, targetId), metadata)
+            return {"status": "READY", "metadataConfiguration": metadata, "targetConfiguration": {"mcp": {"lambda": {
+                "lambdaArn": _arn("prod" if self.bad_alias else "beta", targetId),
+                "toolSchema": {"inlinePayload": [{"name": targetId, "description": tool_definition(targetId).description}]},
+            }}}}
+
+    control = Control()
+    audit = stage_runner.verify_registered_gateways(control, Cfn(), "beta", targets)
+    assert set(audit["primary"]["targets"]) == set(primary_tools())
+    assert set(audit["classical"]["targets"]) == set(classical_tools())
+    assert set(audit["classical"]["target_metadata"]) == {"run_portfolio_research", "resolve_portfolio_decision"}
+    assert audit["classical"]["target_metadata"]["run_portfolio_research"] == {"allowedRequestHeaders": ["X-Finplan-User-Token"]}
+    assert audit["primary"]["target_metadata"] == {"resolve_portfolio_decision": {"allowedRequestHeaders": ["X-Finplan-User-Token"]}}
+    without_service_header = deepcopy(control)
+    without_service_header.service_policy_header = False
+    assert stage_runner.verify_registered_gateways(without_service_header, Cfn(), "beta", targets) == audit
+    bad = deepcopy(control)
+    bad.bad_alias = True
+    with pytest.raises(rel.DependencyMissing, match="resolved Lambda alias"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.catalogs["classical"].append("recommend_portfolio")
+    with pytest.raises(rel.DependencyMissing, match="unexpected target"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.shared_engine = True
+    with pytest.raises(rel.DependencyMissing, match="Gateway separation"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.bad_metadata = True
+    with pytest.raises(rel.DependencyMissing, match="identity header propagation"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    for kind, tool, metadata in (
+        ("primary", "query_market_data", {"allowedRequestHeaders": ["Authorization", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("primary", "query_market_data", {"allowedRequestHeaders": ["X-Finplan-User-Token", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("classical", "run_portfolio_research", {"allowedRequestHeaders": ["X-Finplan-User-Token", "Authorization", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("classical", "run_portfolio_research", {"allowedRequestHeaders": ["x-finplan-user-token", "x-amzn-bedrock-agentcore-policy-session-id"]}),
+        ("primary", "query_market_data", {"allowedResponseHeaders": ["X-Finplan-User-Token"]}),
+    ):
+        bad = deepcopy(control)
+        bad.metadata_overrides[(kind, tool)] = metadata
+        with pytest.raises(rel.DependencyMissing, match="identity header propagation"):
+            stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+
+
 class _FakeS3:
     def __init__(self, objects):
         self.objects = objects
@@ -157,9 +263,9 @@ def test_cross_account_lambda_ref_is_refused(ssm):
 
 def test_resolution_variables_are_exported_safely(tmp_path, ssm):
     _seed(ssm, "beta", ["describe_capabilities"])
-    res = rel.resolve("beta", ssm=ssm, bedrock=None, account=ACCOUNT, region=REGION)
+    res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION)
     v = res.variables()
-    assert v["BEDROCK_INVOKE_ARNS"] == "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
+    assert v["BEDROCK_INVOKE_ARNS"] != "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
     assert res.registered == ["describe_capabilities"]
     out = tmp_path / "resolved.env"
     rel.write_variables(out, v)
@@ -168,9 +274,27 @@ def test_resolution_variables_are_exported_safely(tmp_path, ssm):
         rel.write_variables(out, {"X": "a;rm -rf /"})
 
 
+def test_resolved_template_configuration_preserves_all_dynamic_parameters(tmp_path):
+    from infra.stacks.agent import bedrock_param, target_param
+
+    targets = {t: _arn("beta", t) for t in contract_tools()}
+    resolution = rel.Resolution(env="beta", targets=targets, bedrock_arns=["arn:fake:resolved-model"])
+    path = tmp_path / "agent-parameters.json"
+    info = _info()
+    stage_runner.write_template_configuration(path, info, resolution)
+    parameters = json.loads(path.read_text())["Parameters"]
+    assert {t: parameters[target_param(t)] for t in contract_tools()} == targets
+    assert parameters["ImageUri"] == info.image_uri and parameters["ReleaseId"] == info.release_id
+    assert parameters[bedrock_param()] == "arn:fake:resolved-model"
+    assert set(json.loads(path.read_text())) == {"Parameters"}
+    resolution.targets["unregistered_executable_substitution"] = "arbitrary-input"
+    with pytest.raises(rel.ManifestError, match="declared contract tool parameter set"):
+        stage_runner.write_template_configuration(path, info, resolution)
+
+
 def test_rollback_reuses_the_recorded_target_set(ssm):
     recorded = {"describe_capabilities": _arn("beta", "describe_capabilities")}
-    res = rel.resolve("beta", ssm=ssm, bedrock=None, account=ACCOUNT, region=REGION, recorded_targets=recorded)
+    res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION, recorded_targets=recorded)
     assert res.registered == ["describe_capabilities"]  # no catalog read needed
 
 
@@ -195,6 +319,8 @@ class FakeCfn:
                 "RuntimeArn": f"arn:aws:bedrock-agentcore:{REGION}:{ACCOUNT}:runtime/finplan_{self.env}_financeagent-abcdefghij",
                 "GatewayUrl": "https://fakegw.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
                 "PolicyDigest": "sha256:" + "c" * 64,
+                "ClassicalGatewayUrl": "https://fakeclassical.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
+                "ClassicalPolicyDigest": "sha256:" + "b" * 64,
             }
         return {"Stacks": [{"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in outs.items()], "Parameters": []}]}
 
@@ -237,13 +363,16 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     m = rel.publish_release(info, "beta", ssm=ssm, cfn=FakeCfn("beta"), targets=targets, s3=s3, store_bucket="store")
     get = lambda name: ssm.get_parameter(Name=name)["Parameter"]["Value"]  # noqa: E731
     assert get("/finplan/beta/financeagent/release/current-release-id") == info.release_id
-    assert get("/finplan/beta/financeagent/config/explanation-provider") == "fixture"
+    assert get("/finplan/beta/financeagent/config/explanation-provider") == "bedrock"
     assert get("/finplan/beta/financeagent/agent/gateway-principal-ref") == "finplan-beta-financeagent-gateway-service-role"
     assert get("/finplan/beta/financeagent/secret-ref/ci-test-client") == "finplan/beta/financeagent/ci-test-client"
     meta = json.loads(get("/finplan/beta/financeagent/agent/authorizer-metadata-ref"))
     assert set(meta) >= {"discovery_url", "issuer", "allowed_clients", "token_endpoint"}
     assert get("/finplan/beta/financeagent/config/budget-enforced-role-names").split(",")[0] == "finplan-beta-financeagent-runtime-role"
     assert json.loads(get("/finplan/beta/financeagent/agent/gateway-targets"))["describe_capabilities"].endswith(":current")
+    assert get("/finplan/beta/financeagent/agent/classical-gateway-endpoint-ref") != get("/finplan/beta/financeagent/agent/gateway-endpoint-ref")
+    assert get("/finplan/beta/financeagent/agent/classical-policy-digest") == "sha256:" + "b" * 64
+    assert json.loads(get("/finplan/beta/financeagent/agent/classical-gateway-targets"))["describe_capabilities"].endswith(":current")
     assert m["outputs"]["policy-digest"] == "/finplan/beta/financeagent/agent/policy-digest" and m["previous_release_id"] is None
     assert ("store", f"releases/{info.release_id}/targets/beta.json") in s3.objects
     # a second release records the first as previous
@@ -258,11 +387,11 @@ def test_operator_rates_are_preserved_never_invented(ssm):
     assert guards["rates"]["source"] == "configured" and guards["max_tokens_invocation"] == __import__("json").loads(Path(__file__).resolve().parents[3].joinpath("config", "gamma.json").read_text())["guard_defaults"]["max_tokens_invocation"]
 
 
-def test_prod_needs_the_approval_and_beta_refuses_bedrock(ssm):
+def test_prod_needs_approval_and_unknown_beta_provider_is_rejected(ssm):
     with pytest.raises(rel.ManifestError, match="approval"):
         rel.publish_release(_info(), "prod", ssm=ssm, cfn=FakeCfn("prod"), targets={})
-    cfg = rel.load_env_config("beta") | {"explanation": {"provider": "bedrock", "model_id": "x"}}
-    with pytest.raises(rel.ManifestError, match="fixture"):
+    cfg = rel.load_env_config("beta") | {"explanation": {"provider": "unknown", "model_id": "x"}}
+    with pytest.raises(rel.ManifestError, match="not allowed"):
         rel.planned_parameters(
             "beta",
             _info(),
@@ -321,3 +450,8 @@ def test_suite_counts(tmp_path):
     p = tmp_path / "j.xml"
     _junit(p, 5, 2)
     assert stage_runner.suite_counts(p)["executed"] == 3
+
+
+class FakeBedrock:
+    def get_inference_profile(self, **kwargs):
+        return {"status":"ACTIVE", "inferenceProfileArn":f"arn:aws:bedrock:{REGION}:{ACCOUNT}:inference-profile/test", "models":[{"modelArn":f"arn:aws:bedrock:{REGION}::foundation-model/test"}]}

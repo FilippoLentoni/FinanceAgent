@@ -143,23 +143,29 @@ def runtime_role_policy(env: str, *, memory_arn: str, bedrock_resources: Any = N
 
 
 # ===================================================================== gateway service role
-def gateway_trust_conditions(env: str, *, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> dict[str, Any]:
-    return {"StringEquals": {"aws:SourceAccount": account}, "ArnLike": {"aws:SourceArn": _arn("bedrock-agentcore", f"gateway/{n.gateway_name(env)}-*", partition=partition, region=region, account=account)}}
+def gateway_trust_conditions(env: str, *, classical: bool = False, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> dict[str, Any]:
+    primary = _arn("bedrock-agentcore", f"gateway/{n.gateway_name(env)}-*", partition=partition, region=region, account=account)
+    source = [primary, _arn("bedrock-agentcore", f"gateway/{n.classical_gateway_name(env)}-*", partition=partition, region=region, account=account)] if classical else primary
+    return {"StringEquals": {"aws:SourceAccount": account}, "ArnLike": {"aws:SourceArn": source}}
 
 
-def gateway_role_policy(env: str, *, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> dict[str, Any]:
+def gateway_role_policy(env: str, *, classical: bool = False, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> dict[str, Any]:
     """``finplan-<env>-financeagent-gateway-service-role``: invoke this environment's tool Lambdas only
     (published at ``/finplan/<env>/financeagent/agent/gateway-principal-ref`` for the FinanceLambdasTool
-    invoke grant) and evaluate this environment's policy engine."""
+    invoke grant) and evaluate only this environment's explicitly named policy engines. The second
+    Gateway/engine is opted in by shared configuration; higher environment grants stay unchanged."""
     a = lambda svc, res: _arn(svc, res, partition=partition, region=region, account=account)  # noqa: E731
-    engine = a("bedrock-agentcore", f"policy-engine/{n.policy_engine_name(env)}-*")
-    gateway = a("bedrock-agentcore", f"gateway/{n.gateway_name(env)}-*")
+    engines = [a("bedrock-agentcore", f"policy-engine/{n.policy_engine_name(env)}-*")]
+    gateways = [a("bedrock-agentcore", f"gateway/{n.gateway_name(env)}-*")]
+    if classical:
+        engines.append(a("bedrock-agentcore", f"policy-engine/{n.classical_policy_engine_name(env)}-*"))
+        gateways.append(a("bedrock-agentcore", f"gateway/{n.classical_gateway_name(env)}-*"))
     return {
         "Version": "2012-10-17",
         "Statement": [
             {"Sid": "InvokeSameEnvironmentToolLambdas", "Effect": "Allow", "Action": ["lambda:InvokeFunction"], "Resource": [a("lambda", f"function:finplan-{env}-{FLT}-*")]},
-            {"Sid": "PolicyEngineConfiguration", "Effect": "Allow", "Action": ["bedrock-agentcore:GetPolicyEngine"], "Resource": [engine]},
-            {"Sid": "PolicyEngineAuthorization", "Effect": "Allow", "Action": ["bedrock-agentcore:AuthorizeAction", "bedrock-agentcore:PartiallyAuthorizeActions"], "Resource": [engine, gateway]},
+            {"Sid": "PolicyEngineConfiguration", "Effect": "Allow", "Action": ["bedrock-agentcore:GetPolicyEngine"], "Resource": engines},
+            {"Sid": "PolicyEngineAuthorization", "Effect": "Allow", "Action": ["bedrock-agentcore:AuthorizeAction", "bedrock-agentcore:PartiallyAuthorizeActions"], "Resource": engines + gateways},
             {"Sid": "DenyOtherEnvironmentToolLambdas", "Effect": "Deny", "Action": ["lambda:InvokeFunction"], "Resource": [a("lambda", f"function:finplan-{o}-*") for o in _others(env)]},
         ],
     }

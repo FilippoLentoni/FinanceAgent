@@ -24,6 +24,7 @@ HTTP 404               NOT_FOUND
 HTTP 429               RATE_LIMITED
 HTTP 400               VALIDATION_FAILED
 HTTP 5xx / network     DEPENDENCY_UNAVAILABLE
+JSON-RPC -32002        FORBIDDEN only with a recognized Gateway authorization message
 oversized result       DEPENDENCY_UNAVAILABLE (``details.reason = response_too_large``)
 =====================  ======================
 
@@ -119,6 +120,11 @@ def _sse_messages(body: bytes) -> list[dict[str, Any]]:
 
 
 _HTTP_CODES = {401: "UNAUTHORIZED", 403: "FORBIDDEN", 404: "NOT_FOUND", 429: "RATE_LIMITED", 400: "VALIDATION_FAILED"}
+_GATEWAY_AUTHORIZATION_MESSAGES = frozenset({
+    "Authorization error - Insufficient permissions",
+    "Authorization error - Request forbidden",
+})
+_GATEWAY_CEDAR_DENIAL_PREFIX = "Tool Execution Denied: Tool call not allowed due to policy enforcement ["
 
 
 class GatewayMcpClient:
@@ -134,6 +140,7 @@ class GatewayMcpClient:
         max_response_bytes: int = 262144,
         transport: Transport | None = None,
         initialize: bool = True,
+        forward_identity: bool = False,
     ) -> None:
         if not url.startswith("https://") and not url.startswith("http://127.0.0.1"):
             raise ValueError("the Gateway URL must be https")
@@ -144,6 +151,7 @@ class GatewayMcpClient:
         self._max_bytes = max_response_bytes
         self._transport = transport or urllib_transport
         self._do_initialize = initialize
+        self._forward_identity = forward_identity
         self._session_id: str | None = None
         self._initialized = False
         self._names: dict[str, str] = {}
@@ -162,6 +170,8 @@ class GatewayMcpClient:
         }
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
+        if self._forward_identity:
+            headers["X-Finplan-User-Token"] = token
         msg: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
         if params is not None:
             msg["params"] = params
@@ -199,6 +209,15 @@ class GatewayMcpClient:
             rpc_code = err.get("code")
             code = "VALIDATION_FAILED" if rpc_code == -32602 else "NOT_FOUND" if rpc_code == -32601 else "DEPENDENCY_UNAVAILABLE"
             details = {"rpc_code": rpc_code, "method": method}
+            rpc_message = err.get("message")
+            # AgentCore can carry a Cedar denial in HTTP 200. Require its observed
+            # denial shape or a documented AWS authorization message as well as
+            # -32002; that code alone is ambiguous across MCP implementations.
+            if rpc_code == -32002 and isinstance(rpc_message, str) and (
+                rpc_message in _GATEWAY_AUTHORIZATION_MESSAGES
+                or (rpc_message.startswith(_GATEWAY_CEDAR_DENIAL_PREFIX) and rpc_message.endswith("]"))
+            ):
+                raise AgentError.forbidden("the tool Gateway denied authorization", **details, reason="gateway_authorization_denied")
             if code == "VALIDATION_FAILED":
                 details["pointer"] = "/params"
             raise AgentError(code, f"the tool Gateway returned a JSON-RPC error for {method}", details)
@@ -253,5 +272,11 @@ class GatewayMcpClient:
         if is_error_envelope(doc):
             return ToolOutcome(tool=name, ok=False, error=doc, size_bytes=size)
         if result.get("isError"):
+            # Gateway schema validation can reject arguments before Lambda is invoked.
+            # Unlike a producer error envelope, AWS returns this as plain text in a
+            # successful JSON-RPC result. Do not tell clients to retry invalid input.
+            text = str(doc.get("text", "") if isinstance(doc, dict) else doc or "").strip()
+            if text.startswith("ValidationException - Parameter validation failed: Invalid request parameters:"):
+                return ToolOutcome(tool=name, ok=False, error={"code": "VALIDATION_FAILED", "message": "the MCP Gateway rejected the tool arguments", "retryable": False, "details": {"pointer": "/arguments", "reason": "gateway_input_validation", "validation_message": text[:2048]}}, size_bytes=size)
             return ToolOutcome(tool=name, ok=False, error={"code": "DEPENDENCY_UNAVAILABLE", "message": "the tool call failed at the Gateway", "retryable": True, "details": {}}, size_bytes=size)
         return ToolOutcome(tool=name, ok=True, result=doc, size_bytes=size)
