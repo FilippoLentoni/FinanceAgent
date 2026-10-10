@@ -58,14 +58,27 @@ def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill()
     assert code == 200 and first[-1]["status"] == "completed", first[-1]
     rec = first[-1]["answer"]["recommendation"]
     assert rec and first[-1]["usage"]["tool_calls"] == 1
+    issued = first[-1]["answer"]["portfolio_decisions"][0]
+    decision_id = issued["decision_id"]
+    assert decision_id.startswith("pd_") and issued["recommendation"] == rec
     code, second = env.invoke_agent({"prompt": "Why is this your recommendation?", "stream": True}, sid)
     final = second[-1]
     assert code == 200 and final["status"] == "completed", final
-    assert [e["tool"] for e in second if e.get("type") == "tool_call"] == ["recommend_portfolio", "query_market_data"]
-    assert final["answer"]["recommendation"] == rec
+    calls = [e for e in second if e.get("type") == "tool_call"]
+    assert [e["tool"] for e in calls] == ["get_portfolio_decision", "explain_portfolio_decision"]
+    assert all(e["arguments"]["decision_id"] == decision_id for e in calls)
+    stored = final["answer"]["portfolio_decisions"][0]["decision"]
+    assert stored["decision_id"] == decision_id and stored["recommendation"] == rec
+    analysis = final["answer"]["portfolio_analyses"][0]
+    assert analysis["source_decision_ref"]["decision_id"] == decision_id
+    assert analysis["source_decision_ref"]["checksum"] == stored["checksum"]
+    assert analysis["policy_recommendation"] == rec
+    replay = analysis["explanation"]["policy_replay"]
+    assert replay["status"] == "verified" and replay["maximum_weight_error"] <= replay["weight_tolerance"]
     assert final["answer"]["claim_check"]["passed"] and not final["answer"]["claim_check"]["removed_figures"]
     assert final["usage"]["invocations"] == 0
-    skill = next(s for s in final["answer"]["skills_used"] if s["name"] == "recommend-portfolio")
-    remote = next(t for t in env.gateway().list_tools() if t.name == "recommend_portfolio")
-    assert skill["instructions_checksum"] in remote.description
-    assert f"recommend-portfolio@{skill['version']}" in remote.description
+    skill = next(s for s in final["answer"]["skills_used"] if s["name"] == "paper-portfolio-lifecycle")
+    remote = {t.name: t for t in env.gateway().list_tools()}
+    for tool in ("get_portfolio_decision", "explain_portfolio_decision"):
+        assert skill["instructions_checksum"] in remote[tool].description
+        assert f"paper-portfolio-lifecycle@{skill['version']}" in remote[tool].description

@@ -8,9 +8,11 @@ import json
 from pathlib import Path
 
 import pytest
+from finplan_contracts.schemas import load_store
+from finplan_contracts.validate import validate
 
 from infra.stacks.tool_policy import CLASSICAL_POLICY_FILE, PolicyError, allowed_roles, decide, load_policy, policy_digest, render, validate_policy
-from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS, GATEWAY_TYPES, contract_tools, project, to_cfn, tool_definition
+from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS, GATEWAY_TYPES, _Projector, contract_tools, project, to_cfn, tool_definition
 
 READ = ["describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result"]
 CI_SCOPE = ["finplan-agent/ci_test"]
@@ -179,6 +181,42 @@ def test_pattern_constraint_moves_to_the_description():
     pv = s["properties"]["plan_version_id"]
     assert pv["type"] == "string" and "pattern" in pv["description"] and "pv_" in pv["description"]
     assert s["required"] == ["plan_version_id"]
+
+
+def test_pinned_resolution_confirmation_projects_to_boolean_without_relaxing_the_contract():
+    name = "tools/resolve-portfolio-decision-request"
+    store = load_store()
+    assert store.get(name).schema["properties"]["confirmed_by_user"] == {"const": True}
+    schema = tool_definition("resolve_portfolio_decision", store=store).input_schema
+    confirmation = schema["properties"]["confirmed_by_user"]
+    assert confirmation == {"type": "boolean", "description": "[const true]"}
+    assert "confirmed_by_user" in schema["required"]
+    assert to_cfn(schema)["Properties"]["confirmed_by_user"]["Type"] == "boolean"
+    request = {"decision_id": "pd_01JA2B3C4D5E6F7G8H9JKMNPQR", "action": "accept", "expected_revision": 1,
+               "idempotency_key": "confirmed-paper-decision", "confirmed_by_user": True}
+    assert validate(request, name).valid
+    for unconfirmed in (False, 1, "true", {}):
+        assert not validate({**request, "confirmed_by_user": unconfirmed}, name).valid
+
+
+@pytest.mark.parametrize("literal,expected", [(True, "boolean"), (False, "boolean"), (7, "integer"), (0.5, "number"), ("accept", "string")])
+def test_const_only_primitive_types_and_constraints_survive_gateway_projection(literal, expected):
+    schema = _Projector(load_store()).project({"const": literal}, "", 0)
+    assert schema == {"type": expected, "description": f"[const {json.dumps(literal)}]"}
+
+
+@pytest.mark.parametrize("values,expected", [([True, False], "boolean"), ([1, 2], "integer"), ([1, 0.5], "number"), (["accept", "reject"], "string")])
+def test_enum_only_primitive_types_survive_gateway_projection(values, expected):
+    schema = _Projector(load_store()).project({"enum": values}, "", 0)
+    assert schema["type"] == expected
+    assert all(json.dumps(value) in schema["description"] for value in values)
+
+
+def test_literal_union_infers_boolean_and_explicit_type_stays_authoritative():
+    projector = _Projector(load_store())
+    schema = projector.project({"oneOf": [{"const": True}, {"const": False}]}, "", 0)
+    assert schema == {"type": "boolean", "description": "[one of: true; false]"}
+    assert projector.project({"type": "number", "const": 1}, "", 0)["type"] == "number"
 
 
 def test_cfn_casing():

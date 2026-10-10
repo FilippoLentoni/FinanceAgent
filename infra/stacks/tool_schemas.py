@@ -119,6 +119,41 @@ def _absolutize(node: Any, base: str) -> Any:
     return node
 
 
+def _literal_type(value: Any) -> str:
+    """JSON literal type, with booleans distinguished from Python integers."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    return "array" if isinstance(value, list) else "object"
+
+
+def _implicit_type(node: Mapping[str, Any]) -> str:
+    """Infer the type constrained by a literal before falling back to structural hints."""
+    if "const" in node:
+        return _literal_type(node["const"])
+    if "enum" in node:
+        types = {_literal_type(value) for value in node["enum"]} - {"null"}
+        if len(types) == 1:
+            return types.pop()
+        if types and types <= {"integer", "number"}:
+            return "number"
+        # The Gateway cannot express a heterogeneous or null-only enum. Keep the
+        # existing string relaxation; its full constraint remains in the description.
+        return "string"
+    if "properties" in node or "additionalProperties" in node:
+        return "object"
+    if "items" in node:
+        return "array"
+    return "string" if "pattern" in node or "format" in node else "object"
+
+
 class _Projector:
     def __init__(self, store: SchemaStore) -> None:
         self.store = store
@@ -162,7 +197,8 @@ class _Projector:
                 node = {**node, "type": "object", "properties": {**props, **(node.get("properties") or {})}, "required": sorted(set.intersection(*req_sets) | set(node.get("required") or [])) if req_sets else node.get("required")}
                 notes.append(f"one of {len(resolved)} shapes; the tool validates the exact shape")
             else:
-                types = [t for v in resolved for t in ([v["type"]] if isinstance(v.get("type"), str) else v.get("type") or []) if t != "null"]
+                variant_types = [v.get("type", _implicit_type(v)) for v in resolved]
+                types = [t for variant_type in variant_types for t in ([variant_type] if isinstance(variant_type, str) else variant_type or []) if t != "null"]
                 node = {**node, "type": types[0] if types else "string"}
                 notes.append("one of: " + "; ".join(_short(v) for v in resolved))
         t = node.get("type")
@@ -172,7 +208,7 @@ class _Projector:
                 notes.append("may be " + " or ".join(t))
             t = non_null[0] if non_null else "string"
         if t is None:
-            t = "object" if ("properties" in node or "additionalProperties" in node) else ("array" if "items" in node else ("string" if ("pattern" in node or "enum" in node or "format" in node) else "object"))
+            t = _implicit_type(node)
         if t == "null":
             t = "string"
             notes.append("null")

@@ -148,6 +148,18 @@ def test_targets_are_conditional_on_resolved_references_and_never_literal(templa
     assert re.match(pat, "none")
 
 
+@pytest.mark.parametrize("env", ENVS)
+def test_both_gateway_targets_accept_a_boolean_paper_confirmation(templates, env):
+    targets = resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget")
+    schemas = [r["Properties"]["TargetConfiguration"]["Mcp"]["Lambda"]["ToolSchema"]["InlinePayload"][0]
+               for r in targets.values()]
+    resolutions = [s["InputSchema"] for s in schemas if s["Name"] == "resolve_portfolio_decision"]
+    assert len(resolutions) == 2
+    for schema in resolutions:
+        assert schema["Properties"]["confirmed_by_user"] == {"Type": "boolean", "Description": "[const true]"}
+        assert "confirmed_by_user" in schema["Required"]
+
+
 def test_policies_follow_their_target_and_the_engine_enforces(templates):
     t = templates["agent:beta"]
     gw = next(iter(resources(t, "AWS::BedrockAgentCore::Gateway").values()))["Properties"]
