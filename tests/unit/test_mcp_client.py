@@ -97,6 +97,37 @@ def test_http_errors_map_to_contract_codes(status, code):
     assert e.value.code == code
 
 
+@pytest.mark.parametrize("sse", [False, True])
+@pytest.mark.parametrize("rpc_code,message,expected", [
+    (-32002, "Tool Execution Denied: Tool call not allowed due to policy enforcement [No policy applies to the request (denied by default).]", "FORBIDDEN"),
+    (-32002, "Tool Execution Denied: Tool call not allowed due to policy enforcement [opaque-sensitive-policy-reason]", "FORBIDDEN"),
+    (-32002, "Authorization error - Insufficient permissions", "FORBIDDEN"),
+    (-32002, "Authorization error - Request forbidden", "FORBIDDEN"),
+    (-32002, "Resource not found", "DEPENDENCY_UNAVAILABLE"),
+    (-32002, "AccessDeniedException: Gateway role cannot invoke Lambda", "DEPENDENCY_UNAVAILABLE"),
+    (-32603, "Authorization error - Insufficient permissions", "DEPENDENCY_UNAVAILABLE"),
+])
+def test_rpc_authorization_denials_require_recognized_code_and_message(sse, rpc_code, message, expected):
+    base = FakeGateway(sse=sse)
+
+    def transport(url, headers, body, timeout):
+        request = json.loads(body)
+        if request["method"] != "tools/call":
+            return base(url, headers, body, timeout)
+        reply = {"jsonrpc": "2.0", "id": request["id"], "error": {"code": rpc_code, "message": message}}
+        encoded = json.dumps(reply)
+        return HttpResponse(200, {"content-type": "text/event-stream" if sse else "application/json"}, (f"event: message\ndata: {encoded}\n\n" if sse else encoded).encode())
+
+    result = client(transport).call_tool("get_plan_version", {})
+    assert not result.ok and result.error["code"] == expected
+    assert result.error["details"]["rpc_code"] == rpc_code
+    assert message not in json.dumps(result.error)
+    assert "opaque-sensitive-policy-reason" not in json.dumps(result.error)
+    if expected == "FORBIDDEN":
+        assert result.error["retryable"] is False
+        assert result.error["details"]["reason"] == "gateway_authorization_denied"
+
+
 def test_oversized_result_is_refused():
     out = client(FakeGateway(oversized=True)).call_tool("get_plan_version", {})
     assert not out.ok and out.error["details"]["reason"] == "response_too_large"
