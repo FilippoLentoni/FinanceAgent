@@ -90,13 +90,14 @@ def test_hosted_beta_token_cap_fits_the_real_catalog_and_skills():
     from finplan_agent.providers.base import GenerateRequest, ToolSpec, estimate_tokens
     from infra.stacks.tool_policy import decide
     from infra.stacks.tool_schemas import contract_tools, tool_definition
+    from finplan_agent.skills import provider_tool_specs
     cfg = json.loads((ROOT/'config/beta.json').read_text())
     _, instructions = load_skills(ROOT/'skills')
     definitions = [tool_definition(t) for t in contract_tools() if decide(t, groups=['researcher'])]
     specs = tuple(ToolSpec(name=d.name,description=d.description,input_schema=d.input_schema) for d in definitions)
     request = GenerateRequest(purpose='plan',system=SYSTEM_PROMPT,stable_instructions=instructions,
                               messages=[{'role':'user','content':[{'text':'Recommend from my portfolio state.'}]}],
-                              tools=specs,max_tokens=cfg['guard_defaults']['max_tokens_invocation'])
+                              tools=provider_tool_specs(specs),max_tokens=cfg['guard_defaults']['max_tokens_invocation'])
     first_call = estimate_tokens(request.prompt_chars()) + request.max_tokens
     # Planning, a second pass after the tool result, and bounded narration must fit.
     assert cfg['guard_defaults']['max_tokens_turn'] >= 2 * first_call + 5000

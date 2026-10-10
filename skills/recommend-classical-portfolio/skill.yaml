@@ -1,0 +1,5 @@
+name: recommend-classical-portfolio
+version: 0.1.0
+purpose: Obtain an immutable traditional optimizer plan independently of the selected PPO policy.
+tools: [recommend_classical_portfolio, get_classical_analysis, list_classical_analyses, query_market_data]
+output_contract: finance/v1/tools/recommend-classical-portfolio-response.json

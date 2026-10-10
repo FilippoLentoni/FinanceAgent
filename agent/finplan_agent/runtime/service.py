@@ -114,13 +114,14 @@ class AgentService:
         gw = settings.gateway
 
         def tool_client(caller: Caller) -> ToolClient:
-            return GatewayMcpClient(
-                settings.gateway_url or "",
-                lambda: caller.bearer,
-                protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
-                timeout_seconds=float(gw.get("request_timeout_seconds", 60)),
-                max_response_bytes=int(gw.get("max_response_bytes", 262144)),
-            )
+            def gateway(url: str) -> GatewayMcpClient:
+                return GatewayMcpClient(url, lambda: caller.bearer, protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
+                                        timeout_seconds=float(gw.get("request_timeout_seconds", 60)), max_response_bytes=int(gw.get("max_response_bytes", 262144)))
+            primary = gateway(settings.gateway_url or "")
+            if not settings.classical_gateway_url:
+                return primary
+            from ..tools.portfolio import PortfolioMcpClient
+            return PortfolioMcpClient(primary, gateway(settings.classical_gateway_url))
 
         def sink(usage: dict[str, Any]) -> None:
             put_usage(
@@ -230,7 +231,7 @@ class AgentService:
         if snap.interrupts:
             status = "awaiting_confirmation"
             confirmation = snap.interrupts[0].value
-        evidence = [{k: v for k, v in r.items() if k in ("id", "tool", "ok", "summary", "error", "declined")} for r in st.get("tool_results") or []]
+        evidence = [{k: v for k, v in r.items() if k in ("id", "tool", "ok", "summary", "error", "declined", "gateway")} for r in st.get("tool_results") or []]
         return {
             "type": "final",
             "session_id": session_id,
@@ -243,7 +244,8 @@ class AgentService:
                 "claim_check": st.get("claim_check") or {},
                 "skills_used": st.get("skills_used") or [],
                 "explanation": st.get("explanation_result"),
-                "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in reversed(st.get("tool_results") or []) if r.get("ok") and r.get("tool")=="recommend_portfolio"),None),
+                "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in st.get("tool_results") or [] if r.get("ok") and r.get("result", {}).get("recommendation")),None),
+                "portfolio_analyses": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and r["result"].get("analysis_id")],
             },
             "confirmation": confirmation,
             "in_progress": st.get("in_progress"),

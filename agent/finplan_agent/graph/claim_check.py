@@ -26,7 +26,7 @@ __all__ = ["ClaimCheckResult", "claim_check", "collect_values", "REMOVED"]
 
 REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
-_NUM = re.compile(r"(?<![\w.$/-])-?\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?%?(?![\w])|(?<![\w.$/-])-?\$?\d+(?:\.\d+)?%?(?![\w])")
+_NUM = re.compile(r"(?<![\w.$/-])-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?%?(?![\w])")
 _LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)](?=\s)")
 
 
@@ -84,6 +84,10 @@ def _matches(token: str, values: list[float]) -> bool:
         return True
     decimals = len(raw.split(".", 1)[1]) if "." in raw else 0
     for v in values:
+        if "e" in raw.lower():
+            if math.isclose(v * (100 if pct else 1), n, rel_tol=1e-12, abs_tol=1e-30):
+                return True
+            continue
         if round(v, decimals) == n:
             return True
         if pct and round(v * 100, decimals) == n:
@@ -98,6 +102,16 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
     pos = 0
     spans: list[tuple[int, int, str]] = []
     markers = [(m.start(), m.end()) for m in _LIST_MARKER.finditer(text)]
+    # Dated news/literature titles may contain figures. Preserve them only when the
+    # complete source string is reproduced verbatim, rather than trusting an isolated digit.
+    verbatim = []
+    for source in strings:
+        if len(source) < 16:
+            continue
+        offset = 0
+        while (start := text.find(source, offset)) >= 0:
+            verbatim.append((start, start + len(source)))
+            offset = start + len(source)
     for m in _DATE.finditer(text):
         spans.append((m.start(), m.end(), "date"))
     for m in _NUM.finditer(text):
@@ -108,7 +122,7 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
     for start, end, kind in spans:
         token = text[start:end]
         result.checked += 1
-        ok = any(token in s for s in strings) if kind == "date" else _matches(token, values)
+        ok = any(a <= start and end <= b for a, b in verbatim) or (any(token in s for s in strings) if kind == "date" else _matches(token, values))
         out.append(text[pos:start])
         if ok:
             out.append(token)

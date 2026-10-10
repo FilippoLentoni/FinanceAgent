@@ -1,0 +1,5 @@
+name: compare-classical-plans
+version: 0.1.0
+purpose: Attribute changes between immutable traditional plans across completed decision dates.
+tools: [compare_classical_plans, list_classical_analyses, get_classical_analysis]
+output_contract: finance/v1/tools/compare-classical-plans-response.json

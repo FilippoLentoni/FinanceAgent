@@ -75,6 +75,89 @@ def verify_target_handoff(expected: Mapping[str, str], actual: Mapping[str, str]
         raise DependencyMissing("deployed targets differ from resolved targets; refresh the shared pipeline wiring before releasing: " + ", ".join(mismatches))
 
 
+def verify_classical_dependencies(env: str, targets: Mapping[str, str]) -> None:
+    """An enabled classical deployment requires every promised traditional tool.
+
+    Generic contract resolution remains additive for other environments; beta must
+    fail before any deployment if its producer release is still the older catalog.
+    """
+    from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS
+    from scripts.release import load_env_config
+
+    if env not in (load_env_config(env).get("classical_gateway_environments") or []):
+        return
+    missing = sorted(t for t in CLASSICAL_ONLY_TOOLS if targets.get(t, NONE) == NONE)
+    if missing:
+        raise DependencyMissing("traditional MCP dependencies are missing; deploy the same-environment FinanceModel and FinanceLambdasTool releases first: " + ", ".join(missing))
+
+
+def write_template_configuration(path: Path, info: ReleaseInfo, resolution: Any) -> None:
+    """Dynamic CFN parameters without exceeding CodePipeline's 1KB override quota."""
+    from infra.stacks.agent import bedrock_param, target_param
+    from infra.stacks.tool_schemas import contract_tools
+
+    if set(resolution.targets) != set(contract_tools()):
+        raise ManifestError("resolved configuration may contain only the complete declared contract tool parameter set")
+    parameters = {target_param(tool): arn for tool, arn in resolution.targets.items()}
+    parameters.update({"ImageUri": info.image_uri, "ReleaseId": info.release_id, bedrock_param(): ",".join(resolution.bedrock_arns) or NONE})
+    path.write_text(json.dumps({"Parameters": parameters}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def verify_registered_gateways(control: Any, cfn: Any, env: str, targets: Mapping[str, str]) -> dict[str, Any]:
+    """Read back actual AgentCore registrations, independently of CFN parameter handoff.
+
+    Each endpoint must have exactly its own intended targets, same-environment JWT
+    auth, an independent enforced policy engine, and the published Lambda aliases.
+    """
+    from infra.stacks import naming as n
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, tool_definition
+
+    stack = cfn.describe_stacks(StackName=n.agent_stack_name(env))["Stacks"][0]
+    outputs = {o["OutputKey"]: o["OutputValue"] for o in stack.get("Outputs") or []}
+    audit: dict[str, Any] = {}
+    authorizers, engines = [], []
+    for kind, key, tools in (("primary", "GatewayId", primary_tools()), ("classical", "ClassicalGatewayId", classical_tools())):
+        identifier = outputs.get(key)
+        if not identifier:
+            raise DependencyMissing(f"missing deployed {key}; refresh Agent stack and pipeline wiring")
+        gateway = control.get_gateway(gatewayIdentifier=identifier)
+        policy = gateway.get("policyEngineConfiguration") or {}
+        if gateway.get("status") != "READY" or gateway.get("authorizerType") != "CUSTOM_JWT" or policy.get("mode") != "ENFORCE":
+            raise DependencyMissing(f"{kind} Gateway is not READY with enforced JWT authorization")
+        authorizers.append(gateway.get("authorizerConfiguration"))
+        engines.append(policy.get("arn"))
+        expected = {n.target_name(t): (t, targets[t]) for t in tools if targets.get(t, NONE) != NONE}
+        actual: dict[str, str] = {}
+        token = None
+        while True:
+            kwargs = {"gatewayIdentifier": identifier, "maxResults": 100}
+            if token:
+                kwargs["nextToken"] = token
+            page = control.list_gateway_targets(**kwargs)
+            for item in page.get("items") or []:
+                name = item["name"]
+                if name not in expected:
+                    raise DependencyMissing(f"{kind} Gateway contains unexpected target {name}")
+                tool, arn = expected[name]
+                target = control.get_gateway_target(gatewayIdentifier=identifier, targetId=item["targetId"])
+                lam = (((target.get("targetConfiguration") or {}).get("mcp") or {}).get("lambda")) or {}
+                definitions = (lam.get("toolSchema") or {}).get("inlinePayload") or []
+                if target.get("status") != "READY" or lam.get("lambdaArn") != arn:
+                    raise DependencyMissing(f"{kind} Gateway target {tool} is not READY at the resolved Lambda alias")
+                if len(definitions) != 1 or definitions[0].get("name") != tool or definitions[0].get("description") != tool_definition(tool).description:
+                    raise DependencyMissing(f"{kind} Gateway target {tool} schema/skill description differs from this release")
+                actual[tool] = arn
+            token = page.get("nextToken")
+            if not token:
+                break
+        if set(actual) != {tool for tool, _arn in expected.values()}:
+            raise DependencyMissing(f"{kind} Gateway is missing registered targets")
+        audit[kind] = {"gateway_id": identifier, "gateway_url": gateway["gatewayUrl"], "policy_engine_arn": policy["arn"], "targets": actual}
+    if authorizers[0] != authorizers[1] or not engines[0] or engines[0] == engines[1] or audit["primary"]["gateway_url"] == audit["classical"]["gateway_url"]:
+        raise DependencyMissing("Gateway separation or shared environment identity check failed")
+    return audit
+
+
 def suite_counts(junit_xml: Path) -> dict[str, int]:
     root = ET.parse(junit_xml).getroot()
     suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
@@ -131,20 +214,24 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CodeBuild 
                 return 1
             recorded = recorded_targets(s3, args.store, info.release_id, args.env) if (info.rollback and args.store) else None
             res = resolve(args.env, ssm=ssm, bedrock=client("bedrock", region), account=account, region=region, recorded_targets=recorded, s3=s3)
+            verify_classical_dependencies(args.env, res.targets)
             for note in res.notes:
                 print(f"[NOTE] {note}")
             print(f"{args.env}: registering {res.registered} (tool catalog {res.catalog_release_id}); Bedrock grant: {len(res.bedrock_arns)} ARN(s)")
             if args.variables:
                 write_variables(args.variables, res.variables())
+            write_template_configuration(Path("agent-parameters.json"), info, res)
             return 0
         from infra.stacks import naming as n
 
         approval = approval_record(client("codepipeline", region), n.PIPELINE_NAME, str(args.pipeline_execution_id)) if args.env == "prod" else None
         recorded = recorded_targets(s3, args.store, info.release_id, args.env) if (info.rollback and args.store) else None
         expected = resolve(args.env, ssm=ssm, bedrock=client("bedrock", region), account=account, region=region, recorded_targets=recorded, s3=s3).targets
+        verify_classical_dependencies(args.env, expected)
         actual = deployed_targets(cfn, args.env)
         verify_target_handoff(expected, actual)
-        manifest = publish_release(info, args.env, ssm=ssm, cfn=cfn, targets=actual, s3=s3, store_bucket=args.store, approval=approval)
+        gateway_audit = verify_registered_gateways(client("bedrock-agentcore-control", region), cfn, args.env, actual)
+        manifest = publish_release(info, args.env, ssm=ssm, cfn=cfn, targets=actual, s3=s3, store_bucket=args.store, approval=approval, gateway_audit=gateway_audit)
         print(f"published {args.env} manifest for {manifest['release_id']} (previous {manifest['previous_release_id']}; outputs {sorted(manifest['outputs'])})")
         print(json.dumps({"registered": [t for t, v in deployed_targets(cfn, args.env).items() if v != NONE]}))
         return 0

@@ -109,6 +109,67 @@ def test_stale_pipeline_target_handoff_cannot_publish_a_successful_release():
     stage_runner.verify_target_handoff(expected, expected)
 
 
+def test_enabled_classical_deploy_refuses_an_older_producer_catalog_before_deploy():
+    from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS
+
+    with pytest.raises(rel.DependencyMissing, match="FinanceModel and FinanceLambdasTool"):
+        stage_runner.verify_classical_dependencies("beta", {"recommend_portfolio": _arn("beta", "recommend_portfolio")})
+    stage_runner.verify_classical_dependencies("beta", {t: _arn("beta", t) for t in CLASSICAL_ONLY_TOOLS})
+    # Higher environments are not opted into this deployment yet.
+    stage_runner.verify_classical_dependencies("gamma", {})
+
+
+def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
+    from copy import deepcopy
+
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, tool_definition
+
+    targets = {t: _arn("beta", t) for t in contract_tools()}
+
+    class Cfn:
+        def describe_stacks(self, **_kwargs):
+            return {"Stacks": [{"Outputs": [{"OutputKey": "GatewayId", "OutputValue": "primary"}, {"OutputKey": "ClassicalGatewayId", "OutputValue": "classical"}]}]}
+
+    class Control:
+        def __init__(self):
+            self.catalogs = {"primary": primary_tools(), "classical": classical_tools()}
+            self.bad_alias = False
+            self.shared_engine = False
+
+        def get_gateway(self, gatewayIdentifier):  # noqa: N803
+            return {
+                "status": "READY", "authorizerType": "CUSTOM_JWT", "authorizerConfiguration": {"customJWTAuthorizer": {"discoveryUrl": "same-beta-pool"}},
+                "policyEngineConfiguration": {"mode": "ENFORCE", "arn": "primary" if self.shared_engine else gatewayIdentifier},
+                "gatewayUrl": f"https://{gatewayIdentifier}.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
+            }
+
+        def list_gateway_targets(self, gatewayIdentifier, **_kwargs):  # noqa: N803
+            return {"items": [{"targetId": t, "name": t.replace("_", "-")} for t in self.catalogs[gatewayIdentifier]]}
+
+        def get_gateway_target(self, gatewayIdentifier, targetId):  # noqa: N803
+            return {"status": "READY", "targetConfiguration": {"mcp": {"lambda": {
+                "lambdaArn": _arn("prod" if self.bad_alias else "beta", targetId),
+                "toolSchema": {"inlinePayload": [{"name": targetId, "description": tool_definition(targetId).description}]},
+            }}}}
+
+    control = Control()
+    audit = stage_runner.verify_registered_gateways(control, Cfn(), "beta", targets)
+    assert set(audit["primary"]["targets"]) == set(primary_tools())
+    assert set(audit["classical"]["targets"]) == set(classical_tools())
+    bad = deepcopy(control)
+    bad.bad_alias = True
+    with pytest.raises(rel.DependencyMissing, match="resolved Lambda alias"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.catalogs["classical"].append("recommend_portfolio")
+    with pytest.raises(rel.DependencyMissing, match="unexpected target"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+    bad = deepcopy(control)
+    bad.shared_engine = True
+    with pytest.raises(rel.DependencyMissing, match="Gateway separation"):
+        stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
+
+
 class _FakeS3:
     def __init__(self, objects):
         self.objects = objects
@@ -183,6 +244,24 @@ def test_resolution_variables_are_exported_safely(tmp_path, ssm):
         rel.write_variables(out, {"X": "a;rm -rf /"})
 
 
+def test_resolved_template_configuration_preserves_all_dynamic_parameters(tmp_path):
+    from infra.stacks.agent import bedrock_param, target_param
+
+    targets = {t: _arn("beta", t) for t in contract_tools()}
+    resolution = rel.Resolution(env="beta", targets=targets, bedrock_arns=["arn:fake:resolved-model"])
+    path = tmp_path / "agent-parameters.json"
+    info = _info()
+    stage_runner.write_template_configuration(path, info, resolution)
+    parameters = json.loads(path.read_text())["Parameters"]
+    assert {t: parameters[target_param(t)] for t in contract_tools()} == targets
+    assert parameters["ImageUri"] == info.image_uri and parameters["ReleaseId"] == info.release_id
+    assert parameters[bedrock_param()] == "arn:fake:resolved-model"
+    assert set(json.loads(path.read_text())) == {"Parameters"}
+    resolution.targets["unregistered_executable_substitution"] = "arbitrary-input"
+    with pytest.raises(rel.ManifestError, match="declared contract tool parameter set"):
+        stage_runner.write_template_configuration(path, info, resolution)
+
+
 def test_rollback_reuses_the_recorded_target_set(ssm):
     recorded = {"describe_capabilities": _arn("beta", "describe_capabilities")}
     res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION, recorded_targets=recorded)
@@ -210,6 +289,8 @@ class FakeCfn:
                 "RuntimeArn": f"arn:aws:bedrock-agentcore:{REGION}:{ACCOUNT}:runtime/finplan_{self.env}_financeagent-abcdefghij",
                 "GatewayUrl": "https://fakegw.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
                 "PolicyDigest": "sha256:" + "c" * 64,
+                "ClassicalGatewayUrl": "https://fakeclassical.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp",
+                "ClassicalPolicyDigest": "sha256:" + "b" * 64,
             }
         return {"Stacks": [{"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in outs.items()], "Parameters": []}]}
 
@@ -259,6 +340,9 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     assert set(meta) >= {"discovery_url", "issuer", "allowed_clients", "token_endpoint"}
     assert get("/finplan/beta/financeagent/config/budget-enforced-role-names").split(",")[0] == "finplan-beta-financeagent-runtime-role"
     assert json.loads(get("/finplan/beta/financeagent/agent/gateway-targets"))["describe_capabilities"].endswith(":current")
+    assert get("/finplan/beta/financeagent/agent/classical-gateway-endpoint-ref") != get("/finplan/beta/financeagent/agent/gateway-endpoint-ref")
+    assert get("/finplan/beta/financeagent/agent/classical-policy-digest") == "sha256:" + "b" * 64
+    assert json.loads(get("/finplan/beta/financeagent/agent/classical-gateway-targets"))["describe_capabilities"].endswith(":current")
     assert m["outputs"]["policy-digest"] == "/finplan/beta/financeagent/agent/policy-digest" and m["previous_release_id"] is None
     assert ("store", f"releases/{info.release_id}/targets/beta.json") in s3.objects
     # a second release records the first as previous

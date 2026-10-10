@@ -21,7 +21,7 @@ runtime-role           FA-POL-01 / FA-PRV-08: the Runtime role allows no Lambda 
                        call, denies them explicitly, and its only Bedrock grant is
                        ``InvokeModel`` + ``InvokeModelWithResponseStream`` on the resolved
                        ``BedrockInvokeArns`` parameter (no wildcard, absent while ``none``)
-environment-binding    FA-POL-07 / FA-GW-01: one pool per identity template; one Gateway and one
+environment-binding    FA-POL-07 / FA-GW-01: one pool per identity template; two separate Gateways and one
                        Runtime per agent template, both with a CUSTOM_JWT authorizer imported from
                        the SAME environment's identity stack; target Lambda parameters admit only
                        this environment's FinanceLambdasTool functions; the Runtime image is a
@@ -39,6 +39,7 @@ Usage: ``uv run python scripts/infra_gates.py --assembly cdk.out [--only GATE ..
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
@@ -149,7 +150,60 @@ def gate_pipeline_structure(ctx: GateContext) -> list[str]:
     if not tooling:
         return ["no tooling template (the pipeline) in the assembly"]
     t = _load(tooling[0])
-    return [str(f) for f in check_pipeline_template(t)] + check_deploy_roles(t)
+    projected, problems = validated_resolve_metadata_template(t)
+    if projected != t and not problems:
+        ctx.note("pipeline-structure", "CONTRACT GAP FA-GAP-RESOLVE-METADATA: validated beta Resolve JSON parameters only; executable templates/image remain the immutable BuildOutput")
+    return problems + [str(f) for f in check_pipeline_template(projected)] + check_deploy_roles(t)
+
+
+def validated_resolve_metadata_template(template: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Recognize only the beta JSON parameter artifact, then apply the generic gate.
+
+    finplan-contracts 1.4.0 treats every post-build artifact as executable input.
+    This narrow metadata exception avoids CodePipeline's 1KB ParameterOverrides
+    quota without allowing another code/image/template source or a later rebuild.
+    """
+    artifact = "ResolvedBetaConfiguration"
+    projected = copy.deepcopy(template)
+    for pipeline in _resources(projected, "AWS::CodePipeline::Pipeline").values():
+        stages = pipeline.get("Properties", {}).get("Stages") or []
+        producers, consumers = [], []
+        for stage in stages:
+            for action in stage.get("Actions") or []:
+                if any(a.get("Name") == artifact for a in action.get("OutputArtifacts") or []):
+                    producers.append((stage, action))
+                if any(a.get("Name") == artifact for a in action.get("InputArtifacts") or []):
+                    consumers.append((stage, action))
+        if not producers and not consumers:
+            continue
+        def fail(reason: str) -> tuple[dict[str, Any], list[str]]:
+            return template, [f"FA-GAP-RESOLVE-METADATA rejected: {reason}"]
+        if len(producers) != 1 or len(consumers) != 1:
+            return fail("exactly one beta Resolve producer and DeployAgent consumer are required")
+        producer_stage, producer = producers[0]
+        consumer_stage, consumer = consumers[0]
+        ptype, ctype = producer.get("ActionTypeId", {}), consumer.get("ActionTypeId", {})
+        if producer_stage.get("Name") != "Beta" or producer.get("Name") != "Resolve" or ptype.get("Provider") != "CodeBuild" or ptype.get("Category") != "Build":
+            return fail("metadata must be produced by beta Resolve CodeBuild")
+        if producer.get("InputArtifacts") != [{"Name": "BuildOutput"}] or producer.get("OutputArtifacts") != [{"Name": artifact}]:
+            return fail("Resolve must consume only immutable BuildOutput and emit only its JSON configuration")
+        if consumer_stage.get("Name") != "Beta" or consumer.get("Name") != "DeployAgent" or ctype.get("Provider") != "CloudFormation" or ctype.get("Category") != "Deploy":
+            return fail("metadata may be consumed only by beta DeployAgent CloudFormation")
+        if {a.get("Name") for a in consumer.get("InputArtifacts") or []} != {"BuildOutput", artifact}:
+            return fail("DeployAgent must consume BuildOutput plus the declared metadata artifact only")
+        cfg = consumer.get("Configuration") or {}
+        if cfg.get("TemplateConfiguration") != f"{artifact}::agent-parameters.json" or not str(cfg.get("TemplatePath", "")).startswith("BuildOutput::cdk.out/assembly-Beta/BetaAgent"):
+            return fail("only agent-parameters.json is metadata; the template must remain in immutable BuildOutput")
+        try:
+            overrides = json.loads(cfg.get("ParameterOverrides", "{}"))
+        except (TypeError, json.JSONDecodeError):
+            return fail("identity overrides must be valid JSON")
+        if overrides != {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"} or len(cfg["ParameterOverrides"].encode()) > 1024:
+            return fail("only immutable Build-stage image/release identity overrides are permitted")
+        if int(producer.get("RunOrder", 1)) >= int(consumer.get("RunOrder", 1)):
+            return fail("Resolve must complete before DeployAgent")
+        consumer["InputArtifacts"] = [a for a in consumer["InputArtifacts"] if a.get("Name") != artifact]
+    return projected, []
 
 
 def gate_no_cdk_bootstrap(ctx: GateContext) -> list[str]:
@@ -243,8 +297,15 @@ def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
     out = []
     gws = _resources(t, "AWS::BedrockAgentCore::Gateway")
     rts = _resources(t, "AWS::BedrockAgentCore::Runtime")
-    if len(gws) != 1 or len(rts) != 1:
-        out.append(f"{name}: expected exactly one Gateway and one Runtime, found {len(gws)} and {len(rts)}")
+    if set(gws) != {"Gateway", "ClassicalGateway"} or len(rts) != 1:
+        out.append(f"{name}: expected the primary and classical Gateways and one Runtime, found {list(gws)} and {len(rts)} Runtime(s)")
+    engines = _resources(t, "AWS::BedrockAgentCore::PolicyEngine")
+    if set(engines) != {"ToolPolicyEngine", "ClassicalToolPolicyEngine"}:
+        out.append(f"{name}: primary and classical Gateways require independent policy engines")
+    for gateway_id, engine_id in (("Gateway", "ToolPolicyEngine"), ("ClassicalGateway", "ClassicalToolPolicyEngine")):
+        configuration = ((gws.get(gateway_id) or {}).get("Properties") or {}).get("PolicyEngineConfiguration") or {}
+        if configuration.get("Arn") != {"Fn::GetAtt": [engine_id, "PolicyEngineArn"]} or configuration.get("Mode") != "ENFORCE":
+            out.append(f"{name}: {gateway_id} is not enforced by its own policy engine")
     identity_prefix = n.identity_stack_name(env) + ":"
     for kind, res in (("Gateway", gws), ("Runtime", rts)):
         for lid, r in res.items():
@@ -256,6 +317,9 @@ def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
             if not jwt.get("DiscoveryUrl") or not imports or any(not i.startswith(identity_prefix) for i in imports):
                 out.append(f"{name}: {lid} JWT authorizer is not bound to the {env} identity stack (imports {imports})")
             if kind == "Runtime":
+                runtime_env = props.get("EnvironmentVariables") or {}
+                if runtime_env.get("FINPLAN_GATEWAY_URL") != {"Fn::GetAtt": ["Gateway", "GatewayUrl"]} or runtime_env.get("FINPLAN_CLASSICAL_GATEWAY_URL") != {"Fn::GetAtt": ["ClassicalGateway", "GatewayUrl"]}:
+                    out.append(f"{name}: {lid} does not reference both environment-local MCP endpoints")
                 allow = ((props.get("RequestHeaderConfiguration") or {}).get("RequestHeaderAllowlist")) or []
                 if "Authorization" not in allow:
                     out.append(f"{name}: {lid} does not pass the Authorization header to the agent")

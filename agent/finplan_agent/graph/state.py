@@ -36,6 +36,7 @@ class AgentState(TypedDict, total=False):
     pending_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     recommendation_reference: dict[str, Any] | None
+    portfolio_workflow: dict[str, Any] | None
     skills_used: list[dict[str, Any]]
     turn_tool_calls: int
     turn_tokens: int
@@ -66,6 +67,7 @@ TURN_RESET: dict[str, Any] = {
     "pending_calls": [],
     "tool_results": [],
     "recommendation_reference": None,
+    "portfolio_workflow": None,
     "skills_used": [],
     "turn_tool_calls": 0,
     "turn_tokens": 0,

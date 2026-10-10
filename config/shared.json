@@ -12,5 +12,8 @@
     "cost_metric": "EstimatedCostUSD",
     "category_dimension": "BudgetCategory"
   },
-  "image_repository": "runtime-images"
+  "image_repository": "runtime-images",
+  "classical_gateway_environments": [
+    "beta"
+  ]
 }

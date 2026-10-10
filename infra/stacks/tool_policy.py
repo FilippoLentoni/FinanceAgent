@@ -36,6 +36,7 @@ __all__ = ["GATEWAY_ARN_VAR", "POLICY_FILE", "CedarPolicy", "PolicyError", "allo
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_FILE = ROOT / "policy" / "tool-policy.yaml"
+CLASSICAL_POLICY_FILE = ROOT / "policy" / "classical-tool-policy.yaml"
 GATEWAY_ARN_VAR = "${GatewayArn}"
 _ROLE_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}\Z")
 _TOOL_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}\Z")
@@ -138,7 +139,9 @@ def decide(tool: str, *, groups: Iterable[str] = (), scopes: Iterable[str] = (),
     for role, limit in grants(doc).get(tool, {}).items():
         if role not in held:
             continue
-        if limit is None or str(args.get(limit[0])) in limit[1]:
+        value = args.get(limit[0]) if limit else None
+        normalized = json.dumps(value) if isinstance(value, bool) else str(value)
+        if limit is None or normalized in limit[1]:
             return True
     return False
 
@@ -201,9 +204,13 @@ def render(tools: Iterable[str], input_properties: Mapping[str, Mapping[str, Any
                 out.append(CedarPolicy(tool, "permit", "allow", _head("permit", tool) + "\nwhen {\n  " + who + "\n};"))
                 continue
             arg, values = limit
-            if (props.get(arg) or {}).get("type") != "string":
-                raise PolicyError(f"{tool}: limited grant on {arg!r}, which is not a string argument of the tool's input schema")
-            vals = " || ".join(f"context.input.{arg} == {json.dumps(v)}" for v in values)
+            argument_type = (props.get(arg) or {}).get("type")
+            if argument_type == "boolean" and all(v in ("true", "false") for v in values):
+                vals = " || ".join(f"context.input.{arg} == {v}" for v in values)
+            elif argument_type == "string":
+                vals = " || ".join(f"context.input.{arg} == {json.dumps(v)}" for v in values)
+            else:
+                raise PolicyError(f"{tool}: limited grant on {arg!r}, which is not a supported string or boolean argument of the tool's input schema")
             out.append(CedarPolicy(tool, "permit", f"allow_{arg}_{'_'.join(values)}", _head("permit", tool) + f"\nwhen {{\n  ({who}) &&\n  context.input has {arg} && ({vals})\n}};"))
         for arg, values in sorted((doc.get("denied_arguments") or {}).items()):
             if (props.get(arg) or {}).get("type") != "string":

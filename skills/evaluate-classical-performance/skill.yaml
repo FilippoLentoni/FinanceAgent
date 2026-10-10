@@ -1,0 +1,5 @@
+name: evaluate-classical-performance
+version: 0.1.0
+purpose: Reconcile an issued optimizer plan with observed performance and investigate dated context.
+tools: [evaluate_classical_performance, research_market_events, get_classical_analysis, query_market_data]
+output_contract: finance/v1/tools/evaluate-classical-performance-response.json

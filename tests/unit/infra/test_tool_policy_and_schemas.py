@@ -3,12 +3,14 @@ Gateway ``SchemaDefinition`` subset (FA-GW-04)."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
-from infra.stacks.tool_policy import PolicyError, allowed_roles, decide, load_policy, policy_digest, render, validate_policy
-from infra.stacks.tool_schemas import GATEWAY_TYPES, contract_tools, project, to_cfn, tool_definition
+from infra.stacks.tool_policy import CLASSICAL_POLICY_FILE, PolicyError, allowed_roles, decide, load_policy, policy_digest, render, validate_policy
+from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS, GATEWAY_TYPES, contract_tools, project, to_cfn, tool_definition
 
 READ = ["describe_capabilities", "get_plan", "get_plan_version", "list_plan_versions", "query_market_data", "get_job_status", "get_experiment_result"]
 CI_SCOPE = ["finplan-agent/ci_test"]
@@ -83,6 +85,45 @@ def test_policy_file_validates(tmp_path):
     bad.write_text("roles: {viewer: {tools: [place_order]}}\ndenied_tool_words: [order]\n")
     with pytest.raises(PolicyError):
         load_policy(bad)
+
+
+def test_classical_policy_denies_ppo_and_paid_ci_research():
+    doc = load_policy(CLASSICAL_POLICY_FILE)
+    for role in ("viewer", "researcher", "plan_editor", "plan_publisher"):
+        assert decide("recommend_classical_portfolio", groups=[role], doc=doc)
+        assert decide("submit_portfolio_feedback", groups=[role], doc=doc)
+        assert not decide("recommend_portfolio", groups=[role], doc=doc)
+    for args in ({}, {"dry_run": False}):
+        assert not decide("run_portfolio_research", scopes=CI_SCOPE, arguments=args, doc=doc)
+        assert not decide("run_portfolio_research", groups=["viewer"], arguments=args, doc=doc)
+    assert decide("run_portfolio_research", scopes=CI_SCOPE, arguments={"dry_run": True}, doc=doc)
+    assert decide("run_portfolio_research", groups=["researcher"], arguments={"dry_run": False}, doc=doc)
+    assert not decide("production_strategy", groups=["plan_publisher"], doc=doc)
+
+
+def test_classical_boolean_dry_run_grant_renders_a_boolean_cedar_condition():
+    policies = render(["run_portfolio_research"], {"run_portfolio_research": {"dry_run": {"type": "boolean"}}}, load_policy(CLASSICAL_POLICY_FILE))
+    limited = next(p for p in policies if p.name == "allow_dry_run_true")
+    assert 'context.input has dry_run && (context.input.dry_run == true)' in limited.statement
+    assert '\\"ci_test' not in limited.statement  # custom OAuth scope, not a forged group
+    assert "finplan-agent/ci_test" in limited.statement
+
+
+def test_each_classical_remote_tool_exports_the_exact_versioned_hosted_skill():
+    from finplan_agent.skills import CLASSICAL_SKILLS, load_skills
+
+    root = Path(__file__).resolve().parents[3] / "skills"
+    inventory = {s["name"]: s for s in load_skills(root)[0]}
+    assert CLASSICAL_ONLY_TOOLS <= set(contract_tools())
+    for tool in CLASSICAL_ONLY_TOOLS:
+        name = CLASSICAL_SKILLS[tool]
+        recipe = (root / name / "SKILL.md").read_text()
+        checksum = "sha256:" + hashlib.sha256(recipe.encode()).hexdigest()
+        description = tool_definition(tool).description
+        assert recipe in description
+        assert f"Skill: {name}@{inventory[name]['version']}" in description
+        assert checksum == inventory[name]["instructions_checksum"] and checksum in description
+        assert tool in inventory[name]["tools"]
 
 
 # ------------------------------------------------------------------ schema projection (FA-GW-04)

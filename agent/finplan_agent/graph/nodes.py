@@ -30,6 +30,9 @@ from ..providers.fixture import FixtureProvider
 from .claim_check import claim_check
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
 from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
+from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
+from ..tools.portfolio import CLASSICAL_TOOLS
+from ..skills import provider_tool_specs
 from .state import TURN_RESET, AgentContext, AgentState
 
 __all__ = ["start_turn", "route", "plan", "confirm", "tool_call", "narrate", "check_claims", "respond", "compact", "NON_TERMINAL_JOB_STATES"]
@@ -151,7 +154,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         return updates
     # A recommendation is a single fresh, read-only inference call. Do not let subsequent
     # provider drafts replace a complete allocation or silently retry failed inference.
-    if any(r.get("tool") == "recommend_portfolio" for r in state.get("tool_results") or []):
+    if not state.get("portfolio_workflow") and any(r.get("tool") == "recommend_portfolio" for r in state.get("tool_results") or []):
         return updates
     try:
         offered = ctx.offered_tools()
@@ -164,15 +167,31 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         stable_instructions=ctx.stable_instructions,
         messages=list(state.get("messages", [])),
         max_tokens=ctx.provider_config.max_tokens_invocation,
-        tools=tuple(offered),
+        tools=provider_tool_specs(offered),
         temperature=ctx.provider_config.temperature,
     )
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
-    if explanation_requested(request.messages) and reference is None and arguments is None:
+    workflow = portfolio_plan(state, ctx.session_id)
+    if workflow is not None:
+        updates["portfolio_workflow"] = workflow["workflow"]
+        if workflow.get("clarification"):
+            updates["draft_text"] = workflow["clarification"]
+        calls = workflow["calls"]
+        missing = [c.name for c in calls if not any(t.name == c.name for t in offered)]
+        if missing:
+            updates.update(error=_err(AgentError.dependency("Required MCP tools are unavailable.", tools=missing), state), status="failed", draft_text="The required portfolio MCP tools are unavailable: " + ", ".join(missing) + ".")
+            return updates
+        skills = selected_portfolio_skills(calls, ctx.skills)
+        existing = state.get("skills_used") or []
+        updates["skills_used"] = existing + [s for s in skills if s not in existing]
+        for skill in skills:
+            _emit({"type": "progress", "stage": "skill_selected", "skill": skill})
+        result = GenerateResult(text="", tool_calls=tuple(calls), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+    elif explanation_requested(request.messages) and reference is None and arguments is None:
         updates["draft_text"] = "I need a successful portfolio recommendation in this conversation before I can explain it. Ask for a recommendation first, or provide the complete original portfolio scenario. I will re-read its policy and market evidence rather than infer figures from conversation text."
         return updates
-    if arguments is not None and any(t.name == "recommend_portfolio" for t in offered):
+    elif arguments is not None and any(t.name == "recommend_portfolio" for t in offered):
         calls = [ToolCall(id=f"recommend-{state.get('turn', 1)}", name="recommend_portfolio", arguments=arguments)]
         if reference:
             if not any(t.name == "query_market_data" for t in offered):
@@ -216,6 +235,8 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         spec = by_name.get(c.name)
         args = dict(c.arguments)
         state_changing = True if spec is None else spec.state_changing
+        if c.name == "run_portfolio_research" and args.get("dry_run", True) is True:
+            state_changing = False
         if state_changing:
             args.setdefault("idempotency_key", idempotency_key(ctx.session_id, int(state.get("turn", 1)), c.name, args))
         pending.append({"id": c.id, "name": c.name, "arguments": args, "state_changing": state_changing, "offered": spec is not None})
@@ -276,7 +297,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             outcome = ctx.tools.call_tool(name, args)
             count += 1
             if outcome.ok:
-                kept, summary = compact(outcome.result, 65536 if name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                kept, summary = compact(outcome.result, 65536 if name in CLASSICAL_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
@@ -285,8 +306,10 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
                 err = outcome.error or {}
                 entry = {"id": p["id"], "tool": name, "ok": False, "summary": {}, "error": {k: err.get(k) for k in ("code", "message", "retryable", "details", "correlation_id") if k in err}}
                 content = {"error": {"code": err.get("code"), "message": err.get("message")}}
+            if outcome.extra.get("gateway"):
+                entry["gateway"] = outcome.extra["gateway"]
         results.append(entry)
-        _emit({"type": "tool_result_summary", "tool": name, "id": p["id"], "ok": entry["ok"], "summary": entry["summary"], "error_code": (entry.get("error") or {}).get("code")})
+        _emit({"type": "tool_result_summary", "tool": name, "id": p["id"], "ok": entry["ok"], "gateway": entry.get("gateway"), "summary": entry["summary"], "error_code": (entry.get("error") or {}).get("code")})
         blocks.append({"tool_result": {"id": p["id"], "name": name, "content": content, "status": "success" if entry["ok"] else "error"}})
     return {"tool_results": results, "messages": [{"role": "user", "content": blocks}], "pending_calls": [], "turn_tool_calls": count, "in_progress": in_progress}
 
@@ -315,6 +338,11 @@ def _evidence(state: AgentState) -> tuple[dict[str, Any], ...]:
 def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
     _progress("narrate")
+    if state.get("portfolio_workflow"):
+        text, _ = render_portfolio_results(state)
+        _emit({"type": "token", "text": text})
+        failed = next((r for r in state.get("tool_results") or [] if not r.get("ok")), None)
+        return {"narrative": text, "narrative_status": "generated", **({"status": "failed", "error": failed.get("error")} if failed else {})}
     for item in reversed(state.get("tool_results") or []):
         if item.get("tool") != "recommend_portfolio":
             continue
@@ -360,6 +388,8 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
     if not state.get("narrative") or state.get("narrative_status") != "generated":
         return {"claim_check": {"passed": True, "checked_figures": 0, "removed_figures": []}}
     values = [r.get("result", r.get("summary")) for r in state.get("tool_results") or [] if r.get("ok")]
+    if state.get("portfolio_workflow"):
+        values.extend(render_portfolio_results(state)[1])
     # The cash dollar target is the one derived figure in the deterministic recommendation
     # renderer: verify the same exact multiplication of fresh producer value and target weight.
     for item in state.get("tool_results") or []:

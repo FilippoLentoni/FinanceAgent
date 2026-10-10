@@ -23,7 +23,17 @@ from typing import Any
 
 from finplan_contracts.schemas import SchemaStore, load_store
 
-__all__ = ["GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "contract_tools", "project", "tool_definition", "to_cfn"]
+__all__ = ["CLASSICAL_ONLY_TOOLS", "CLASSICAL_SHARED_TOOLS", "GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "classical_tools", "contract_tools", "primary_tools", "project", "tool_definition", "to_cfn"]
+
+CLASSICAL_ONLY_TOOLS = frozenset({
+    "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
+    "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
+    "research_portfolio_models", "research_market_events", "run_portfolio_research", "submit_portfolio_feedback",
+})
+CLASSICAL_SHARED_TOOLS = frozenset({
+    "query_market_data", "get_plan", "get_plan_version", "list_plan_versions", "get_performance_evidence",
+    "get_job_status", "get_experiment_result", "describe_capabilities",
+})
 
 GATEWAY_TYPES = ("string", "number", "integer", "boolean", "object", "array")
 #: Nesting depth carried into the Gateway schema; deeper structures become an undescribed object
@@ -56,6 +66,16 @@ def contract_tools(store: SchemaStore | None = None) -> list[str]:
             if f"tools/{stem}{_RESP_SUFFIX}" in names:
                 out.append(stem.replace("-", "_"))
     return sorted(out)
+
+
+def primary_tools(store: SchemaStore | None = None) -> list[str]:
+    """Preserve the existing MCP catalog when the contracts package adds traditional tools."""
+    return sorted(set(contract_tools(store)) - CLASSICAL_ONLY_TOOLS)
+
+
+def classical_tools(store: SchemaStore | None = None) -> list[str]:
+    """Traditional analysis catalog, with only the shared reads its workflows require."""
+    return sorted(set(contract_tools(store)) & (CLASSICAL_ONLY_TOOLS | CLASSICAL_SHARED_TOOLS))
 
 
 def _clip(text: str) -> str:
@@ -196,6 +216,9 @@ def tool_definition(tool: str, description: str | None = None, store: SchemaStor
     if tool == "recommend_portfolio":
         from finplan_agent.skills import recommendation_mcp_description
         desc = recommendation_mcp_description(desc)
+    elif tool in CLASSICAL_ONLY_TOOLS:
+        from finplan_agent.skills import classical_mcp_description
+        desc = classical_mcp_description(tool, desc)
     return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)
 
 
