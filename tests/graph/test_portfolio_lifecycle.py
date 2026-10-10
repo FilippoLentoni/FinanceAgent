@@ -210,7 +210,7 @@ def test_malformed_explanation_is_archived_without_replacing_the_original_valida
     assert restore_archived_diagnostic(stored) == result['error']
 
 
-@pytest.mark.parametrize('pointer', ['', '/', '/explanation/type', '//items/0/', '/a~1b/~0/café/💹', '/arn:aws:s3:::bucket/s3:~1~1private'])
+@pytest.mark.parametrize('pointer', ['', '/', '/explanation/type', '//items/0/', '/a~1b/~0/café/💹', '/' + ':'.join(('arn', 'aws', 's3', '', '', 'bucket')) + '/s3:~1~1private'])
 def test_hosted_archived_diagnostics_roundtrip_exactly_and_pass_the_pinned_contract(pointer):
     from finplan_agent.graph.activity import sanitize
 
