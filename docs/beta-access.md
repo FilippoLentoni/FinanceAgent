@@ -103,9 +103,15 @@ human beta account by this release.
 Use the Runtime ARN from `/finplan/beta/financeagent/agent/runtime-ref` to construct the invocation
 URL. Send a beta bearer token and a fresh session ID of
 33–100 allowed characters. `{"action":"describe","stream":false}` reports the deployed release,
-provider and skills. For recommendations, send the approved snapshot, completed-session date and
-current portfolio state in `recommendation`, or supply those same values in a natural-language
-`prompt`. Never infer actual holdings from the demonstration below.
+provider and skills. For the saved paper portfolio, send an ordinary question such as
+`{"prompt":"how should I invest today?","stream":false}`. The agent calls `recommend_portfolio`
+through MCP with `{}`; inference reads the saved quantities/cash and latest approved market data.
+The beta default is the user-approved $10,000 equal-weight paper book, not actual brokerage holdings.
+Results include current/target shares, proposed buys/sells, cash and the market-data date. Asking
+again revalues the saved book; it does not apply the prior recommendation or execute an order.
+
+For a reproducible alternative scenario, send an approved snapshot, completed-session date and
+explicit portfolio state in `recommendation`. Explicit inputs do not overwrite the saved paper book.
 
 After obtaining the token, this example makes the same authenticated HTTP request as the deployed
 test client. It requires AWS permission only to discover the Runtime ARN; the agent call itself uses
@@ -130,10 +136,16 @@ with urllib.request.urlopen(request, timeout=330) as response:
 PY
 ```
 
-Replace the `data` JSON above with the recommendation body below to request an allocation.
-See [agent-api.md](agent-api.md) for streaming, sessions, confirmations and response fields.
+Replace the `data` JSON above with this body to use the saved paper portfolio:
 
-An example **hypothetical paper** request uses $10,000 in cash and the approved snapshot through
+```json
+{"prompt": "Should I buy more Google stocks or sell?", "stream": false}
+```
+
+See [the saved-paper verification record](beta-saved-portfolio-verification.md) for tested outputs,
+and [agent-api.md](agent-api.md) for streaming, sessions, confirmations and response fields.
+
+For comparison, an explicit **hypothetical scenario** uses $10,000 in cash and the approved snapshot through
 2026-10-08:
 
 ```json
@@ -152,7 +164,8 @@ An example **hypothetical paper** request uses $10,000 in cash and the approved 
 }
 ```
 
-For direct MCP, the tool is `recommend_portfolio` and its arguments are the inner recommendation
-object. The Gateway may display a target prefix on the tool name; use the name returned by `/mcp`
-tool discovery. A newer date requires an approved snapshot with corresponding completed-session coverage.
+For direct MCP, call `recommend_portfolio` with `{}` for the saved paper book, or with the inner
+`recommendation` object above for the explicit scenario. The Gateway may display a target prefix
+on the tool name; use the name returned by `/mcp` tool discovery. A newer date requires an approved
+snapshot with corresponding completed-session coverage.
 Recommendations are advisory/paper outputs and do not execute orders.

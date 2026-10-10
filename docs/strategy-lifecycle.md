@@ -2,8 +2,9 @@
 
 Beta is the only deployment stage in scope for the current work. A hosted, usable agent in beta
 is the immediate deliverable; this does not require deploying gamma or prod. The selected-strategy
-handoff passed authenticated MCP and hosted-agent checks on 2026-10-09; see
-[the verification record](beta-strategy-serving-verification.md) for exact scope and evidence.
+handoff passed authenticated MCP and hosted-agent checks on 2026-10-09; the saved-paper follow-up
+passed on 2026-10-10. See [the saved-paper verification record](beta-saved-portfolio-verification.md)
+and [the original serving record](beta-strategy-serving-verification.md) for scope and evidence.
 Human login/client onboarding and the later recurring research controller remain separate work.
 
 ## Four pipelines, one runtime system
@@ -41,6 +42,7 @@ flowchart LR
     G --> T[Beta recommend_portfolio Lambda adapter]
     T --> S[Beta strategy inference Lambda]
     S --> P[Beta approved input snapshots]
+    S --> B[Beta saved paper portfolio]
     S --> R[Beta selected immutable strategy artifact]
     E[Beta offline experiments and benchmarks] --> V[Validation and eligibility checks]
     V --> X[Explicit strategy activation]
@@ -62,9 +64,11 @@ flowchart LR
 4. Check serving parity, data coverage and eligibility. An export is not an automatic promotion.
    An explicit selected-strategy reference identifies the artifact, source experiment and configuration.
    The current PPO can be selected for beta advisory/paper use while remaining ineligible for production.
-5. A recommendation request supplies an approved snapshot, decision date, current weights/cash,
-   portfolio value and high watermark. Inference uses only information available at that decision time,
-   applies the frozen constraints and returns weights, indicative buy/sell deltas and provenance.
+5. A normal recommendation request calls `recommend_portfolio` with `{}` through MCP. Inference
+   reads the saved paper quantities/cash and latest approved snapshot, marks them to completed actual
+   closes, reconstructs high watermark since the book date, and applies the frozen policy and
+   constraints. It returns current/target shares, indicative buy/sell quantities, cash and provenance.
+   Explicit snapshot/date/holdings remain available for reproducible experiment requests.
 6. The agent explains the deterministic result. It does not invent weights, treat realized backtest
    returns as a calibrated forecast, or infer that a recommendation executed in a brokerage account.
 
@@ -113,9 +117,10 @@ Research-agent proposals remain constrained by supported runners, explicit objec
 maximum jobs and spending. Future automatic activation would need a separately agreed policy.
 
 No recurring research schedule is enabled by this change. The overall experimentation budget is
-USD 50; the current serving/export verification round has an incremental USD 2 cap and does not
-retrain. Before starting paid work, estimate it and check the remaining project allocation. Research
-and infrastructure/API costs must both be accounted for; a training-cost estimate alone is insufficient.
+USD 50. The saved-paper rollout has an incremental USD 2 cap, retains the prior serving/export
+round's cost record, and does not retrain. Before starting paid work, estimate it and check the
+remaining project allocation. Research and infrastructure/API costs must both be accounted for;
+a training-cost estimate alone is insufficient.
 
 Hosted beta keeps a USD 0.50 session cost cap and a 1,024-token output cap per model call. Its
 turn/session token caps include the real skill and tool-schema input sizes: 32,768 / 131,072.

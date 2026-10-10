@@ -7,4 +7,4 @@
 
 ## 2. Beta integration
 
-- [ ] 2.1 Deploy beta through the existing pipeline and verify an authenticated natural-language portfolio question invokes MCP and returns the saved paper portfolio recommendation without state writes.
+- [x] 2.1 Deploy beta through the existing pipeline and verify an authenticated natural-language portfolio question invokes MCP and returns the saved paper portfolio recommendation without state writes.
