@@ -27,6 +27,13 @@ _EXPLANATION = re.compile(
     r"|\b(?:recommend\w*|allocation|policy)\b[^.!?]{0,100}\b(?:why|reasoning|rationale)\b"
     r"|^(?:why|why is that|tell me why)[?.!\s]*$", re.I,
 )
+_PORTFOLIO_ID = re.compile(r"\bpf_[0-7][0-9A-HJKMNP-TV-Z]{25}\b")
+
+
+def saved_portfolio_reference(text: str) -> dict[str, str]:
+    """Recognize a stable saved-book identifier without parsing invented holdings."""
+    match = _PORTFOLIO_ID.search(text)
+    return {"portfolio_id": match.group()} if match else {}
 
 
 def explanation_requested(messages: list[dict[str, Any]]) -> bool:
@@ -88,7 +95,7 @@ def recommendation_arguments(messages: list[dict[str, Any]]) -> dict[str, Any] |
     reference = recommendation_reference(messages)
     if reference:
         return reference["arguments"]
-    return {} if _RECOMMENDATION.search(text) and not _SUPPLIED_STATE.search(text) else None
+    return saved_portfolio_reference(text) if _RECOMMENDATION.search(text) and not _SUPPLIED_STATE.search(text) else None
 
 
 def supplied_state_recommendation(messages: list[dict[str, Any]]) -> bool:
@@ -143,7 +150,7 @@ def render_recommendation(rec: dict[str, Any]) -> str:
     provenance = [f"{name}: {rec[name]}" for name in ('input_snapshot_id', 'snapshot_checksum', 'policy_artifact_checksum', 'export_run_id') if rec.get(name)]
     if provenance:
         parts.append("Provenance: " + "; ".join(provenance) + ".")
-    parts.append("These are proposed trades, not executions. Asking again revalues the saved holdings; previous recommendations do not change them." if saved else "These are proposed trades, not executions. The supplied state has not been saved as holdings.")
+    parts.append("These are proposed trades, not executions. Asking again revalues the saved holdings; previous recommendations do not change them until you explicitly accept a stored decision through the paper approval workflow." if saved else "These are proposed trades, not executions. The supplied state has not been saved as holdings.")
     if (rec.get('forecast') or {}).get('status') == 'not_available':
         parts.append("No calibrated return forecast is available.")
     if rec.get('limitations'):

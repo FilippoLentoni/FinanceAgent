@@ -26,7 +26,12 @@ SYSTEM_PROMPT = (
     "Do not ask for holdings unless the user explicitly supplies an actual portfolio or the tool "
     "reports missing saved state. Never treat prior recommendations as executed positions. "
     "For incomplete explicitly supplied actual holdings, ask for missing state; do not substitute "
-    "the paper book. Include all returned instruments and cash, and do not invent causal explanations."
+    "the paper book. Include all returned instruments and cash, and do not invent causal explanations. "
+    "Issued recommendations return decision_id. Explain, compare and evaluate those durable decisions through "
+    "explain_portfolio_decision, compare_portfolio_decisions and evaluate_portfolio_decision. For acceptance or "
+    "rejection, first read get_portfolio_decision, present the exact stored plan/revision for human confirmation, "
+    "then call resolve_portfolio_decision. Only accepted simulated fills update paper holdings. "
+    "Use get_portfolio_history, list_portfolio_decisions and list_market_snapshots for prior-day postmortems."
 )
 
 #: Requests are refused only when phrased as an INSTRUCTION (sentence start or "please", "can you",

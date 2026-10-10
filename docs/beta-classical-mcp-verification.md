@@ -37,7 +37,7 @@ Local raw receipts:
 
 ## Endpoints and lifecycle
 
-AWS account `169976659173`, region `us-east-2`, AgentCore runtime `finplan_beta_financeagent-iv6H71614L`.
+The development EC2's AWS account, region `us-east-2`, AgentCore runtime `finplan_beta_financeagent-iv6H71614L`.
 
 | Interface | Address or reference |
 |---|---|
@@ -45,7 +45,7 @@ AWS account `169976659173`, region `us-east-2`, AgentCore runtime `finplan_beta_
 | New traditional MCP | `https://finplan-beta-financeagent-classical-gateway-8wtvq7k93d.gateway.bedrock-agentcore.us-east-2.amazonaws.com/mcp` |
 | Published traditional endpoint reference | `/finplan/beta/financeagent/agent/classical-gateway-endpoint-ref` |
 | Traditional numerical producer | `/finplan/beta/financemodel/api/classical-function-ref` |
-| Immutable analysis storage | `finplan-beta-financemodel-research-workspace-169976659173`, `classical/` records, index and claims |
+| Immutable analysis storage | FinanceModel's beta research workspace bucket, `classical/` records, index and claims |
 
 ```mermaid
 flowchart LR

@@ -22,6 +22,16 @@ def recommendation_mcp_description(description: str, root=None) -> str:
 
 
 CLASSICAL_SKILLS = {
+    'get_portfolio_history': 'paper-portfolio-lifecycle',
+    'list_portfolio_decisions': 'paper-portfolio-lifecycle',
+    'get_portfolio_decision': 'paper-portfolio-lifecycle',
+    'resolve_portfolio_decision': 'paper-portfolio-lifecycle',
+    'list_market_snapshots': 'paper-portfolio-lifecycle',
+    'record_agent_activity': 'paper-portfolio-lifecycle',
+    'list_agent_activity': 'paper-portfolio-lifecycle',
+    'explain_portfolio_decision': 'paper-portfolio-lifecycle',
+    'compare_portfolio_decisions': 'paper-portfolio-lifecycle',
+    'evaluate_portfolio_decision': 'paper-portfolio-lifecycle',
     'recommend_classical_portfolio': 'recommend-classical-portfolio',
     'get_classical_analysis': 'recommend-classical-portfolio',
     'list_classical_analyses': 'recommend-classical-portfolio',

@@ -239,13 +239,13 @@ def test_classical_bootstrap_grants_extend_beta_only(templates):
             assert trust["ArnLike"]["aws:SourceArn"]["Fn::Join"][1][-1] == f":gateway/finplan-{env}-financeagent-gateway-*"
 
 
-def test_only_beta_classical_research_target_receives_identity_token_header(templates):
+def test_only_human_resolution_and_beta_paid_research_receive_identity_token_header(templates):
     from infra.stacks.tool_schemas import CLASSICAL_IDENTITY_HEADER
 
     for env in ENVS:
         for logical, target in resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget").items():
             metadata = target["Properties"].get("MetadataConfiguration")
-            if env == "beta" and logical == "ClassicalTargetRunPortfolioResearch":
+            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical == "ClassicalTargetRunPortfolioResearch":
                 assert metadata == {"AllowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
             else:
                 assert metadata is None

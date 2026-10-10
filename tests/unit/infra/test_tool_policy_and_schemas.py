@@ -109,6 +109,31 @@ def test_classical_boolean_dry_run_grant_renders_a_boolean_cedar_condition():
     assert "finplan-agent/ci_test" in limited.statement
 
 
+def test_lifecycle_tools_are_shared_and_human_resolution_excludes_ci_scope():
+    from finplan_agent.tools.portfolio import LIFECYCLE_TOOLS
+    from infra.stacks.tool_schemas import classical_tools, primary_tools, target_metadata
+    assert LIFECYCLE_TOOLS <= set(primary_tools()) & set(classical_tools())
+    for policy in (load_policy(), load_policy(CLASSICAL_POLICY_FILE)):
+        for tool in LIFECYCLE_TOOLS:
+            assert decide(tool, groups=['viewer'], doc=policy)
+            assert decide(tool, scopes=CI_SCOPE, doc=policy) is (tool != 'resolve_portfolio_decision')
+    for classical in (False, True):
+        assert target_metadata('beta','resolve_portfolio_decision',classical=classical)=={'allowedRequestHeaders':['X-Finplan-User-Token']}
+        assert target_metadata('beta','get_portfolio_history',classical=classical)=={}
+
+
+def test_each_shared_lifecycle_tool_exports_the_exact_versioned_skill():
+    from finplan_agent.tools.portfolio import LIFECYCLE_TOOLS
+    from finplan_agent.skills import load_skills
+    root=Path(__file__).resolve().parents[3]/'skills'
+    recipe=(root/'paper-portfolio-lifecycle'/'SKILL.md').read_text()
+    skill=next(s for s in load_skills(root)[0] if s['name']=='paper-portfolio-lifecycle')
+    for tool in LIFECYCLE_TOOLS:
+        description=tool_definition(tool).description
+        assert recipe in description and skill['instructions_checksum'] in description
+        assert tool in skill['tools']
+
+
 def test_each_classical_remote_tool_exports_the_exact_versioned_hosted_skill():
     from finplan_agent.skills import CLASSICAL_SKILLS, load_skills
 

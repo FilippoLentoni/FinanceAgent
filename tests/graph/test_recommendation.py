@@ -73,7 +73,7 @@ def test_skill_inventory_and_image_build_include_versioned_instructions():
     sk = next(s for s in inventory if s['name'] == 'recommend-portfolio')
     text = (ROOT/'skills/recommend-portfolio/SKILL.md').read_text()
     assert sk['instructions_checksum'] == 'sha256:'+hashlib.sha256(text.encode()).hexdigest()
-    assert sk['version'] == '0.2.0' and 'recommend_portfolio' in sk['tools'] and text in instructions
+    assert sk['version'] == '0.3.0' and 'recommend_portfolio' in sk['tools'] and text in instructions
     assert 'skills' in PACKAGE_PATHS
     assert 'COPY skills/' in (ROOT/'container/Dockerfile').read_text()
 

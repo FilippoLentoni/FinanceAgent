@@ -125,5 +125,5 @@ remaining project allocation. Research and infrastructure/API costs must both be
 a training-cost estimate alone is insufficient.
 
 Hosted beta keeps a USD 0.50 session cost cap and a 1,024-token output cap per model call. Its
-turn/session token caps include the real skill and tool-schema input sizes: 32,768 / 131,072.
+turn/session token caps include the real skill and tool-schema input sizes: 49,152 / 131,072.
 The former 4,096-token turn cap could not fit even the first planning request with the catalog.

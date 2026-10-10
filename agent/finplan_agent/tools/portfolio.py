@@ -7,6 +7,10 @@ from ..core.errors import AgentError
 from ..providers.base import ToolSpec
 from .mcp_client import ToolClient, ToolOutcome
 
+LIFECYCLE_TOOLS = frozenset({
+    "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",
+})
+
 CLASSICAL_TOOLS = frozenset({
     "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",

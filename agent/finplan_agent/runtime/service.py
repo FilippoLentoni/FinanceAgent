@@ -78,6 +78,7 @@ class Deps:
     #: Re-reads the provider configuration (SSM) so a model change applies without a restart.
     provider_loader: Callable[[], tuple[ProviderConfig, ExplanationProvider]] | None = None
     provider_refresh_seconds: float = 60.0
+    durable_activity: bool = False
 
 
 class AgentService:
@@ -117,7 +118,7 @@ class AgentService:
             def gateway(url: str, *, forward_identity: bool = False) -> GatewayMcpClient:
                 return GatewayMcpClient(url, lambda: caller.bearer, forward_identity=forward_identity, protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
                                         timeout_seconds=float(gw.get("request_timeout_seconds", 60)), max_response_bytes=int(gw.get("max_response_bytes", 262144)))
-            primary = gateway(settings.gateway_url or "")
+            primary = gateway(settings.gateway_url or "", forward_identity=True)
             if not settings.classical_gateway_url:
                 return primary
             from ..tools.portfolio import PortfolioMcpClient
@@ -148,6 +149,7 @@ class AgentService:
             usage_sink=sink,
             explanation_settings=load_explanation_settings(settings.repo_config, ssm, settings.ssm.explanation_limits),
             provider_loader=lambda: _load_provider(settings.environment, ssm),
+            durable_activity=True,
         )
         return cls(deps)
 
@@ -221,6 +223,7 @@ class AgentService:
             on_usage=on_usage,
             on_spend=getattr(spend, "record_local", None),
             explanations=self.deps.explanation_settings,
+            durable_activity=self.deps.durable_activity,
         )
 
     def _final(self, config: dict[str, Any], session_id: str, correlation_id: str) -> dict[str, Any]:
@@ -245,6 +248,8 @@ class AgentService:
                 "skills_used": st.get("skills_used") or [],
                 "explanation": st.get("explanation_result"),
                 "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in st.get("tool_results") or [] if r.get("ok") and r.get("result", {}).get("recommendation")),None),
+                "portfolio_decisions": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and (r["result"].get("decision_id") or r["result"].get("decision"))],
+                "activity_receipt": st.get("activity_receipt"),
                 "portfolio_analyses": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and r["result"].get("analysis_id")],
             },
             "confirmation": confirmation,

@@ -1,58 +1,171 @@
-# Separate traditional-portfolio Gateway policy. No PPO target, production promotion,
-# holdings mutation or execution capability is registered on this endpoint.
+# Both hosted and direct MCP clients use these same role grants.
 version: 1
 roles:
   viewer:
-    tools: &classical_reader
-      - recommend_classical_portfolio
-      - explain_classical_recommendation
-      - compare_classical_plans
-      - evaluate_classical_performance
-      - get_classical_analysis
-      - list_classical_analyses
-      - research_portfolio_models
-      - research_market_events
-      - submit_portfolio_feedback
-      - run_portfolio_research(dry_run=true)
-      - query_market_data
-      - get_plan
-      - get_plan_version
-      - list_plan_versions
-      - get_performance_evidence
-      - get_job_status
-      - get_experiment_result
-      - describe_capabilities
+    tools:
+    - recommend_classical_portfolio
+    - explain_classical_recommendation
+    - compare_classical_plans
+    - evaluate_classical_performance
+    - get_classical_analysis
+    - list_classical_analyses
+    - research_portfolio_models
+    - research_market_events
+    - submit_portfolio_feedback
+    - run_portfolio_research(dry_run=true)
+    - query_market_data
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - get_performance_evidence
+    - get_job_status
+    - get_experiment_result
+    - describe_capabilities
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   researcher:
     tools:
-      - recommend_classical_portfolio
-      - explain_classical_recommendation
-      - compare_classical_plans
-      - evaluate_classical_performance
-      - get_classical_analysis
-      - list_classical_analyses
-      - research_portfolio_models
-      - research_market_events
-      - submit_portfolio_feedback
-      - run_portfolio_research
-      - query_market_data
-      - get_plan
-      - get_plan_version
-      - list_plan_versions
-      - get_performance_evidence
-      - get_job_status
-      - get_experiment_result
-      - describe_capabilities
+    - recommend_classical_portfolio
+    - explain_classical_recommendation
+    - compare_classical_plans
+    - evaluate_classical_performance
+    - get_classical_analysis
+    - list_classical_analyses
+    - research_portfolio_models
+    - research_market_events
+    - submit_portfolio_feedback
+    - run_portfolio_research
+    - query_market_data
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - get_performance_evidence
+    - get_job_status
+    - get_experiment_result
+    - describe_capabilities
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   plan_editor:
-    tools: *classical_reader
+    tools:
+    - recommend_classical_portfolio
+    - explain_classical_recommendation
+    - compare_classical_plans
+    - evaluate_classical_performance
+    - get_classical_analysis
+    - list_classical_analyses
+    - research_portfolio_models
+    - research_market_events
+    - submit_portfolio_feedback
+    - run_portfolio_research(dry_run=true)
+    - query_market_data
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - get_performance_evidence
+    - get_job_status
+    - get_experiment_result
+    - describe_capabilities
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   plan_publisher:
-    tools: *classical_reader
-  # Audit artifact/feedback writes and budget dry runs are permitted. This machine
-  # scope cannot start paid sandbox jobs, mutate holdings or promote a strategy.
+    tools:
+    - recommend_classical_portfolio
+    - explain_classical_recommendation
+    - compare_classical_plans
+    - evaluate_classical_performance
+    - get_classical_analysis
+    - list_classical_analyses
+    - research_portfolio_models
+    - research_market_events
+    - submit_portfolio_feedback
+    - run_portfolio_research(dry_run=true)
+    - query_market_data
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - get_performance_evidence
+    - get_job_status
+    - get_experiment_result
+    - describe_capabilities
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - resolve_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
   ci_test:
-    tools: *classical_reader
+    tools:
+    - recommend_classical_portfolio
+    - explain_classical_recommendation
+    - compare_classical_plans
+    - evaluate_classical_performance
+    - get_classical_analysis
+    - list_classical_analyses
+    - research_portfolio_models
+    - research_market_events
+    - submit_portfolio_feedback
+    - run_portfolio_research(dry_run=true)
+    - query_market_data
+    - get_plan
+    - get_plan_version
+    - list_plan_versions
+    - get_performance_evidence
+    - get_job_status
+    - get_experiment_result
+    - describe_capabilities
+    - get_portfolio_history
+    - list_portfolio_decisions
+    - get_portfolio_decision
+    - list_market_snapshots
+    - record_agent_activity
+    - list_agent_activity
+    - explain_portfolio_decision
+    - compare_portfolio_decisions
+    - evaluate_portfolio_decision
 machine_roles:
   ci_test: ci_test
-denied_tool_words: [execute, execution, trade, trading, order, payment, wallet, live, broker, coinbase, transfer]
+denied_tool_words:
+- execute
+- execution
+- trade
+- trading
+- order
+- payment
+- wallet
+- live
+- broker
+- coinbase
+- transfer
 denied_arguments:
-  mode: [live]
-  execution_mode: [live]
+  mode:
+  - live
+  execution_mode:
+  - live

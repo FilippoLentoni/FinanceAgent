@@ -161,7 +161,7 @@ def test_plain_followup_replays_original_context_and_reads_market_evidence(recom
     assert 'original completed session' in second['answer']['narrative'] and 'Feature-level attribution' in second['answer']['narrative']
     assert second['answer']['claim_check']['passed'] and not second['answer']['claim_check']['removed_figures']
     assert second['answer']['skills_used'][0]['name']=='recommend-portfolio'
-    assert second['answer']['skills_used'][0]['version']=='0.2.0'
+    assert second['answer']['skills_used'][0]['version']=='0.3.0'
 
 
 def test_explanation_retains_explicit_original_holdings(recommendation):
@@ -216,4 +216,4 @@ def test_remote_tool_description_exports_exact_hosted_skill():
     skill=next(s for s in load_skills(root/'skills')[0] if s['name']=='recommend-portfolio')
     desc=tool_definition('recommend_portfolio').description
     assert (root/'skills/recommend-portfolio/SKILL.md').read_text() in desc
-    assert skill['instructions_checksum'] in desc and 'recommend-portfolio@0.2.0' in desc
+    assert skill['instructions_checksum'] in desc and 'recommend-portfolio@0.3.0' in desc

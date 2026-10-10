@@ -12,7 +12,7 @@
   ],
   "guard_defaults": {
     "max_tokens_invocation": 1024,
-    "max_tokens_turn": 32768,
+    "max_tokens_turn": 49152,
     "max_tokens_session": 131072,
     "max_tool_calls_turn": 6,
     "max_cost_session_usd": 0.5,

@@ -38,6 +38,7 @@ class AgentState(TypedDict, total=False):
     recommendation_reference: dict[str, Any] | None
     portfolio_workflow: dict[str, Any] | None
     skills_used: list[dict[str, Any]]
+    activity_receipt: dict[str, Any] | None
     turn_tool_calls: int
     turn_tokens: int
     turn_usage: dict[str, Any]
@@ -69,6 +70,7 @@ TURN_RESET: dict[str, Any] = {
     "recommendation_reference": None,
     "portfolio_workflow": None,
     "skills_used": [],
+    "activity_receipt": None,
     "turn_tool_calls": 0,
     "turn_tokens": 0,
     "turn_usage": {},
@@ -106,6 +108,7 @@ class AgentContext:
     #: Called with every Bedrock cost estimate (local month-to-date accounting).
     on_spend: Callable[[float], None] | None = None
     max_result_chars: int = 4000
+    durable_activity: bool = False
     #: Explanation settings (``finplan_agent.explanations.config.ExplanationSettings``).
     explanations: Any = None
     _offered: list[ToolSpec] | None = field(default=None, repr=False)

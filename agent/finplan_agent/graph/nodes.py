@@ -31,7 +31,8 @@ from .claim_check import claim_check
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
 from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
 from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
-from ..tools.portfolio import CLASSICAL_TOOLS
+from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
+from .lifecycle import lifecycle_plan
 from ..skills import provider_tool_specs
 from .state import TURN_RESET, AgentContext, AgentState
 
@@ -172,7 +173,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     )
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
-    workflow = portfolio_plan(state, ctx.session_id)
+    workflow = lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
     if workflow is not None:
         updates["portfolio_workflow"] = workflow["workflow"]
         if workflow.get("clarification"):
@@ -259,10 +260,14 @@ def confirm(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     pending = state.get("pending_calls") or []
     changing = [p for p in pending if p["state_changing"]]
     request = {"type": "confirmation_required", "calls": [{"tool": p["name"], "arguments": p["arguments"], "idempotency_key": p["arguments"].get("idempotency_key")} for p in changing]}
+    paper = next((r.get("result", {}).get("decision") for r in reversed(state.get("tool_results") or []) if r.get("tool") == "get_portfolio_decision" and r.get("ok")), None)
+    if paper and any(p["name"] == "resolve_portfolio_decision" for p in changing):
+        request["paper_decision"] = paper
     answer = interrupt(request)
     approved = isinstance(answer, dict) and answer.get("approve") is True
     if approved:
-        return {"confirmation": {"decision": "approved", "calls": request["calls"]}}
+        pending = [{**p, "arguments": {**p["arguments"], "confirmed_by_user": True}} if p["name"] == "resolve_portfolio_decision" else p for p in pending]
+        return {"pending_calls": pending, "confirmation": {"decision": "approved", "calls": request["calls"]}}
     keep = [p for p in pending if not p["state_changing"]]
     results = [{"tool_result": {"id": p["id"], "name": p["name"], "content": {"declined": True}, "status": "error"}} for p in changing]
     return {
@@ -297,7 +302,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             outcome = ctx.tools.call_tool(name, args)
             count += 1
             if outcome.ok:
-                kept, summary = compact(outcome.result, 65536 if name in CLASSICAL_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                kept, summary = compact(outcome.result, 65536 if name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
@@ -341,7 +346,7 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     if state.get("portfolio_workflow"):
         text, _ = render_portfolio_results(state)
         _emit({"type": "token", "text": text})
-        failed = next((r for r in state.get("tool_results") or [] if not r.get("ok")), None)
+        failed = next((r for r in state.get("tool_results") or [] if not r.get("ok") and not r.get("declined")), None)
         return {"narrative": text, "narrative_status": "generated", **({"status": "failed", "error": failed.get("error")} if failed else {})}
     for item in reversed(state.get("tool_results") or []):
         if item.get("tool") != "recommend_portfolio":
@@ -361,6 +366,8 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
             _emit({"type": "token", "text": text})
             return {"narrative": text, "narrative_status": "generated"}
         text = render_recommendation(rec) if rec else f"The portfolio policy could not produce a recommendation: {(item.get('error') or {}).get('code', 'DEPENDENCY_UNAVAILABLE')}. No portfolio changes were made."
+        if rec and item.get("result", {}).get("decision_id"):
+            text += "\n\nIssued decision: " + item["result"]["decision_id"] + ". You can inspect, accept or reject this paper recommendation."
         _emit({"type": "token", "text": text})
         return {"narrative": text, "narrative_status": "generated"}
     if state.get("draft_text"):
@@ -417,4 +424,12 @@ def respond(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
         ctx.on_usage(usage)
     reply = state.get("narrative") or ""
     msgs = [{"role": "assistant", "content": [{"text": reply}]}] if reply else []
-    return {"status": status, "turn_usage": usage, "messages": msgs}
+    update = {"status": status, "turn_usage": usage, "messages": msgs}
+    if ctx.durable_activity:
+        from .activity import archive_turn
+        archived = archive_turn(state, ctx, status, usage)
+        if archived.ok:
+            update["activity_receipt"] = archived.result
+        else:
+            update.update(status="failed", error=archived.error, degraded="activity_archive_unavailable")
+    return update

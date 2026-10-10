@@ -7,8 +7,9 @@ from typing import Any
 
 from ..providers.base import ToolCall, text_of
 from ..skills import CLASSICAL_SKILLS
-from ..tools.portfolio import CLASSICAL_TOOLS
-from .recommendations import _SUPPLIED_STATE, render_recommendation
+from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
+from .lifecycle import render_lifecycle
+from .recommendations import _SUPPLIED_STATE, render_recommendation, saved_portfolio_reference
 
 _CLASSICAL = re.compile(r"\b(?:traditional|classical|optimizer|optimisation|optimization|min(?:imum)?[ -]?variance|mean[ -]?variance|cvar)\b", re.I)
 _WHY = re.compile(r"\b(?:why|explain|reason|rationale)\b", re.I)
@@ -155,9 +156,10 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
         if _SUPPLIED_STATE.search(text):
             return {"workflow": {"mode": "recommend"}, "calls": [], "clarification": "Please supply your complete portfolio state and approved snapshot/date in structured tool arguments. I will not replace your stated holdings with the saved paper book."}
         algorithm = "mean_variance" if re.search(r"\bmean[ -]?variance\b", text, re.I) else "cvar" if re.search(r"\bcvar\b", text, re.I) else "min_variance"
-        calls = [_call("recommend_classical_portfolio", {"algorithm": algorithm}, turn)]
+        portfolio = saved_portfolio_reference(text)
+        calls = [_call("recommend_classical_portfolio", {"algorithm": algorithm, **portfolio}, turn)]
         if both:
-            calls.insert(0, _call("recommend_portfolio", {}, turn, 1))
+            calls.insert(0, _call("recommend_portfolio", portfolio, turn, 1))
         return {"workflow": {"mode": "both" if both else "recommend"}, "calls": calls}
     if ids:
         return {"workflow": {"mode": "retrieve"}, "calls": [_call("get_classical_analysis", {"analysis_id": ids[0]}, turn)]}
@@ -192,7 +194,11 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         parts.append(f"Target cash: {_number(target_cash,2)} USD / {rec['cash_weight']*100:.2f}%. Proposed trades; holdings are unchanged.")
         cfg = rec.get("settings") or rec.get("diagnostics", {}).get("settings", {})
         parts.append("Optimizer assumptions: " + json.dumps(cfg, sort_keys=True) + ".")
-    explanation = doc.get("explanation")
+    issued_explanation = doc.get("explanation") if doc.get("source_decision_ref") else None
+    if issued_explanation:
+        parts.append("Issued decision: " + doc["source_decision_ref"]["decision_id"] + "; status: " + doc.get("decision_status", "not_available") + ".")
+        parts.append("Frozen decision explanation:\n```json\n" + json.dumps({"explanation": issued_explanation, "resolution": doc.get("resolution")}, indent=2, sort_keys=True) + "\n```")
+    explanation = None if issued_explanation else doc.get("explanation")
     if explanation:
         parts.append("Model objective: " + explanation.get("objective_definition", "See stored evidence") + ".")
         parts.append(f"Objective at unchanged holdings: {_number(explanation.get('hold_objective'))}; optimized objective: {_number(explanation.get('optimized_objective'))}; modeled improvement: {_number(explanation.get('objective_gain'))}. Units: {explanation.get('objective_units', 'see evidence')}.")
@@ -210,14 +216,16 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         # Implementation identity remains in the raw analysis for reproducibility;
         # the recommendation narrative shows the decision's comparison context.
         alignment = doc.get("alignment", {})
-        comparison_context = {k: alignment[k] for k in ("algorithm", "previous_as_of", "current_as_of", "horizon_sessions", "instruments") if k in alignment}
+        comparison_context = {k: alignment[k] for k in ("algorithm", "previous_algorithm", "current_algorithm", "previous_as_of", "current_as_of", "horizon_sessions", "instruments", "snapshot_changed", "portfolio_revision_changed", "model_provenance_changed") if k in alignment}
         parts.append("Comparison alignment: " + json.dumps(comparison_context, sort_keys=True))
         for row in doc.get("changes", []):
-            parts.append(f"{row['instrument_id']}: {row['previous_action']} → {row['current_action']}; target weight {_number(row['previous_target_weight'])} → {_number(row['current_target_weight'])}. Grouped modeled effects: " + json.dumps(row["attribution"], sort_keys=True))
+            parts.append(f"{row['instrument_id']}: {row['previous_action']} → {row['current_action']}; target weight {_number(row['previous_target_weight'])} → {_number(row['current_target_weight'])}. Grouped modeled effects: " + json.dumps(row.get("attribution", []), sort_keys=True))
         parts.append("Exact grouped Shapley evidence: " + json.dumps(doc.get("shapley", {}), sort_keys=True))
+        if doc.get("previous_decision_ref"):
+            parts.append("Stored decision comparison evidence:\n```json\n" + json.dumps({k: doc[k] for k in ("previous_decision_ref", "current_decision_ref", "attribution", "policy_replay", "input_differences") if k in doc}, indent=2, sort_keys=True) + "\n```")
     if kind == "performance":
         parts.append(f"Trend: {doc.get('trend', 'not_available')}; observed source: {doc.get('actual_source', 'not_available')}. {doc.get('trend_definition', doc.get('reason', ''))}")
-        parts.append("Reconciled performance evidence:\n```json\n" + json.dumps({k: v for k, v in doc.items() if k in ("window", "planned_allocation_hold", "observed_paper", "gap", "forecast", "real_execution", "whys", "feedback", "limitations", "partial_horizon", "thresholds", "issued_plan_trend", "gap_trend")}, indent=2) + "\n```")
+        parts.append("Reconciled performance evidence:\n```json\n" + json.dumps({k: v for k, v in doc.items() if k in ("window", "planned_allocation_hold", "observed_paper", "gap", "forecast", "real_execution", "whys", "feedback", "limitations", "partial_horizon", "thresholds", "issued_plan_trend", "gap_trend", "source_decision_ref", "observed_snapshot_id", "observed_snapshot_checksum", "decision_status", "unchanged_holdings_benchmark", "paper_execution_evidence", "instrument_contributions")}, indent=2) + "\n```")
     if kind in ("research", "research_run", "feedback", "market_events"):
         details = {k: v for k, v in doc.items() if k not in ("analysis_ref", "analysis_id", "created_at", "summary", "contract_version", "synthetic")}
         parts.append("Stored evidence:\n```json\n" + json.dumps(details, indent=2, sort_keys=True) + "\n```")
@@ -234,13 +242,18 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
     parts, derived = [], []
     for row in state.get("tool_results") or []:
         name = row["tool"]
-        if name not in CLASSICAL_TOOLS and name != "recommend_portfolio":
+        if name not in CLASSICAL_TOOLS and name not in LIFECYCLE_TOOLS and name != "recommend_portfolio":
             continue
         if not row.get("ok"):
+            if row.get("declined"):
+                parts.append("The requested paper decision resolution was cancelled at confirmation. Saved holdings are unchanged.")
+                continue
             error = row.get("error") or {}
             parts.append(f"{name} failed: {error.get('code', 'DEPENDENCY_UNAVAILABLE')}: {error.get('message', 'Evidence unavailable')}.")
             continue
         doc = row.get("result", {})
+        if doc.get("decision_id") and doc.get("recommendation"):
+            parts.append("Issued decision: " + doc["decision_id"] + ". Review this decision before accepting it into the paper portfolio.")
         if name == "recommend_portfolio":
             parts.append(render_recommendation(doc["recommendation"]))
             value = doc["recommendation"].get("portfolio_state", {}).get("portfolio_value")
@@ -249,6 +262,8 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             text, figures = render_classical(doc)
             parts.append(text)
             derived.extend(figures)
+        elif name in LIFECYCLE_TOOLS:
+            parts.append(render_lifecycle(doc))
     if state.get("draft_text"):
         parts.append(state["draft_text"])
     if not parts:

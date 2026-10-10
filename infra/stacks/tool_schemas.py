@@ -29,13 +29,13 @@ CLASSICAL_IDENTITY_HEADER = "X-Finplan-User-Token"
 
 
 def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
-    """Paid beta research alone receives a JWT for independent producer verification.
+    """Paid beta research and human portfolio resolutions receive a verification JWT.
 
     Header propagation transports untrusted credentials, not trusted group claims. The
     target verifies the signature and pinned Cognito issuer/client before authorizing.
-    The original Gateway and every other target retain their existing metadata.
+    Paper resolutions propagate the same header through either independent Gateway.
     """
-    if env == "beta" and classical and tool == "run_portfolio_research":
+    if tool == "resolve_portfolio_decision" or env == "beta" and classical and tool == "run_portfolio_research":
         return {"allowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
     return {}
 
@@ -45,6 +45,7 @@ CLASSICAL_ONLY_TOOLS = frozenset({
     "research_portfolio_models", "research_market_events", "run_portfolio_research", "submit_portfolio_feedback",
 })
 CLASSICAL_SHARED_TOOLS = frozenset({
+    "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",
     "query_market_data", "get_plan", "get_plan_version", "list_plan_versions", "get_performance_evidence",
     "get_job_status", "get_experiment_result", "describe_capabilities",
 })
@@ -230,7 +231,7 @@ def tool_definition(tool: str, description: str | None = None, store: SchemaStor
     if tool == "recommend_portfolio":
         from finplan_agent.skills import recommendation_mcp_description
         desc = recommendation_mcp_description(desc)
-    elif tool in CLASSICAL_ONLY_TOOLS:
+    elif tool in CLASSICAL_ONLY_TOOLS or tool in CLASSICAL_SHARED_TOOLS:
         from finplan_agent.skills import classical_mcp_description
         desc = classical_mcp_description(tool, desc)
     return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)

@@ -1,0 +1,13 @@
+name: paper-portfolio-lifecycle
+version: 1.0.0
+tools:
+  - get_portfolio_history
+  - list_portfolio_decisions
+  - get_portfolio_decision
+  - resolve_portfolio_decision
+  - list_market_snapshots
+  - record_agent_activity
+  - list_agent_activity
+  - explain_portfolio_decision
+  - compare_portfolio_decisions
+  - evaluate_portfolio_decision
