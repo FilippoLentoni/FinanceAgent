@@ -14,6 +14,10 @@ Use the existing read-only MCP tool, with no new target or write permission. Def
 
 ## Risks / Trade-offs
 
+Recommendation follow-ups use the prior successful MCP result and its original tool invocation as a non-authoritative replay reference. They re-read the exact snapshot/session and saved portfolio identity (or original explicit holdings) through MCP, verify policy/configuration and portfolio-state identity, and read the same snapshot through query_market_data. A changed saved book or selected policy is reported as a failed reproduction rather than explained as the original result. Plain why/explain prompts without a prior recommendation ask for the missing context. Daily recommendation questions still resolve the latest approved data.
+
+The recommendation skill is published unchanged, with its version and instruction checksum, inside recommend_portfolio's remote MCP tool description. This uses the existing Gateway target and supports direct clients without adding targets, permissions or a contract release. Native MCP resource/prompt lists can remain empty. Hosted responses record which packaged skill governed deterministic routing; this is instruction provenance, not a model-generated claim of execution.
+
 - Paper positions may differ from actual holdings → label the state source and retain explicit supplied-state mode.
 - Recommendations could be mistaken for executions → proposals do not write holdings and the narrative states that boundary.
 - Current prices could be stale → surface the producer completed session and decision timestamp.

@@ -29,7 +29,7 @@ from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec
 from ..providers.fixture import FixtureProvider
 from .claim_check import claim_check
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
-from .recommendations import recommendation_arguments, render_recommendation, supplied_state_recommendation, target_cash_value
+from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
 from .state import TURN_RESET, AgentContext, AgentState
 
 __all__ = ["start_turn", "route", "plan", "confirm", "tool_call", "narrate", "check_claims", "respond", "compact", "NON_TERMINAL_JOB_STATES"]
@@ -168,8 +168,24 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         temperature=ctx.provider_config.temperature,
     )
     arguments = recommendation_arguments(request.messages)
+    reference = recommendation_reference(request.messages)
+    if explanation_requested(request.messages) and reference is None and arguments is None:
+        updates["draft_text"] = "I need a successful portfolio recommendation in this conversation before I can explain it. Ask for a recommendation first, or provide the complete original portfolio scenario. I will re-read its policy and market evidence rather than infer figures from conversation text."
+        return updates
     if arguments is not None and any(t.name == "recommend_portfolio" for t in offered):
-        result = GenerateResult(text="", tool_calls=(ToolCall(id=f"recommend-{state.get('turn', 1)}", name="recommend_portfolio", arguments=arguments),), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+        calls = [ToolCall(id=f"recommend-{state.get('turn', 1)}", name="recommend_portfolio", arguments=arguments)]
+        if reference:
+            if not any(t.name == "query_market_data" for t in offered):
+                updates.update(error=_err(AgentError.dependency("The market-evidence MCP tool is unavailable."), state), status="failed")
+                return updates
+            old = reference["recommendation"]
+            calls.append(ToolCall(id=f"market-{state.get('turn', 1)}", name="query_market_data", arguments={"input_snapshot_id": old["input_snapshot_id"], "start_date": old["as_of"], "end_date": old["as_of"]}))
+            updates["recommendation_reference"] = reference
+        skills = [dict(s) for s in ctx.skills if s["name"] == "recommend-portfolio"]
+        updates["skills_used"] = skills
+        for skill in skills:
+            _emit({"type": "progress", "stage": "skill_selected", "skill": skill})
+        result = GenerateResult(text="", tool_calls=tuple(calls), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
     else:
         try:
             result, usage_updates = _invoke_provider(state, ctx, request, stream_tokens=False)
@@ -260,7 +276,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             outcome = ctx.tools.call_tool(name, args)
             count += 1
             if outcome.ok:
-                kept, summary = compact(outcome.result, 65536 if name == "recommend_portfolio" else ctx.max_result_chars)
+                kept, summary = compact(outcome.result, 65536 if name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
@@ -303,6 +319,19 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
         if item.get("tool") != "recommend_portfolio":
             continue
         rec = (item.get("result") or {}).get("recommendation") if item.get("ok") else None
+        reference = state.get("recommendation_reference")
+        if reference:
+            market = next((r for r in state.get("tool_results", []) if r.get("tool") == "query_market_data"), {})
+            snapshot = (market.get("result") or {}).get("snapshot") or {}
+            if not rec or not market.get("ok") or market.get("result", {}).get("partial") or snapshot.get("status") != "approved" or snapshot.get("input_snapshot_id") != reference["recommendation"]["input_snapshot_id"]:
+                error = item.get("error") if not rec else market.get("error")
+                error = error or _err(AgentError("PRECONDITION_FAILED", "The original policy or market evidence is unavailable; the recommendation cannot be explained from fresh evidence."), state)
+                return {"status": "failed", "error": error, "narrative": "I could not re-read the original recommendation's policy and approved market evidence. No explanation or portfolio change was inferred from old conversation text.", "narrative_status": "unavailable"}
+            if not replay_matches(reference, rec):
+                return {"status": "failed", "error": _err(AgentError("PRECONDITION_FAILED", "The selected policy or portfolio state changed; the original recommendation could not be reproduced.", {"reason": "recommendation_replay_mismatch"}), state), "narrative": "The selected policy or saved portfolio state changed. I cannot present the new result as an explanation of the original recommendation. Request a new daily recommendation to use the current state.", "narrative_status": "unavailable"}
+            text = render_recommendation_explanation(rec)
+            _emit({"type": "token", "text": text})
+            return {"narrative": text, "narrative_status": "generated"}
         text = render_recommendation(rec) if rec else f"The portfolio policy could not produce a recommendation: {(item.get('error') or {}).get('code', 'DEPENDENCY_UNAVAILABLE')}. No portfolio changes were made."
         _emit({"type": "token", "text": text})
         return {"narrative": text, "narrative_status": "generated"}

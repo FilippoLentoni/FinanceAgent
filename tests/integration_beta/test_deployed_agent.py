@@ -39,3 +39,27 @@ def test_unauthenticated_invocation_is_rejected_by_the_runtime():
 def test_gateway_lists_tools_for_the_ci_principal():
     names = {t.name for t in deployed().gateway().list_tools()}
     assert "describe_capabilities" in names
+
+
+def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill():
+    import pytest
+
+    env = deployed()
+    if env.env != "beta":
+        pytest.skip("Saved paper book is initialized explicitly in beta only")
+    sid = new_session_id()
+    code, first = env.invoke_agent({"prompt": "What is your daily portfolio recommendation?", "stream": True}, sid)
+    assert code == 200 and first[-1]["status"] == "completed", first[-1]
+    rec = first[-1]["answer"]["recommendation"]
+    assert rec and first[-1]["usage"]["tool_calls"] == 1
+    code, second = env.invoke_agent({"prompt": "Why is this your recommendation?", "stream": True}, sid)
+    final = second[-1]
+    assert code == 200 and final["status"] == "completed", final
+    assert [e["tool"] for e in second if e.get("type") == "tool_call"] == ["recommend_portfolio", "query_market_data"]
+    assert final["answer"]["recommendation"] == rec
+    assert final["answer"]["claim_check"]["passed"] and not final["answer"]["claim_check"]["removed_figures"]
+    assert final["usage"]["invocations"] == 0
+    skill = next(s for s in final["answer"]["skills_used"] if s["name"] == "recommend-portfolio")
+    remote = next(t for t in env.gateway().list_tools() if t.name == "recommend_portfolio")
+    assert skill["instructions_checksum"] in remote.description
+    assert f"recommend-portfolio@{skill['version']}" in remote.description

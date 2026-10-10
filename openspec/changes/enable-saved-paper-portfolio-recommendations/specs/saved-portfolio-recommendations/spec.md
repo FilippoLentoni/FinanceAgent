@@ -26,3 +26,21 @@ The agent SHALL preserve explicit recommendation request arguments and SHALL ask
 #### Scenario: Explicit structured request
 - **WHEN** the caller supplies a complete existing explicit-state recommendation
 - **THEN** the same request reaches recommend_portfolio without replacing its holdings
+
+### Requirement: Evidence-grounded recommendation follow-up
+The agent SHALL answer a why/explain follow-up using fresh recommend_portfolio and query_market_data MCP reads of the original snapshot and original portfolio context. It SHALL verify that the policy, configuration and saved-state revision still reproduce the original recommendation, report unavailable or changed evidence explicitly, and never describe prior targets as executed holdings or invent feature-level causal attribution.
+
+#### Scenario: Plain why after a recommendation
+- **WHEN** a user asks "Why is this your recommendation?" after a successful recommendation
+- **THEN** both read-only MCP tools run, the response identifies the recommendation skill, and numerical claims use fresh evidence without removed figures
+
+#### Scenario: The saved portfolio changed
+- **WHEN** fresh reads cannot reproduce the prior saved-state revision or selected policy
+- **THEN** the agent reports that the original recommendation cannot be reproduced and does not invent its explanation
+
+### Requirement: Direct MCP skill discovery
+The Gateway SHALL expose the complete versioned recommendation skill instructions and their checksum in recommend_portfolio's MCP tool description, matching the hosted agent's packaged skill. Direct clients SHALL be able to discover and follow those instructions without invoking the hosted LangGraph runtime.
+
+#### Scenario: Direct client discovers the recipe
+- **WHEN** an authenticated direct client lists MCP tools
+- **THEN** recommend_portfolio includes the same recommendation instructions and checksum reported by the hosted agent's describe response

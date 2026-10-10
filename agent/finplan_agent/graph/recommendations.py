@@ -22,6 +22,55 @@ _SUPPLIED_STATE = re.compile(
     r"|\$\s*\d|\b\d[\d,.]*\s*%|\b\d[\d,.]*\s*(?:shares?|stocks?|dollars?|USD)\b",
     re.I,
 )
+_EXPLANATION = re.compile(
+    r"\b(?:why|explain|reasoning|rationale)\b[^.!?]{0,100}\b(?:recommend\w*|allocation|buys?|sells?|trades?|policy)\b"
+    r"|\b(?:recommend\w*|allocation|policy)\b[^.!?]{0,100}\b(?:why|reasoning|rationale)\b"
+    r"|^(?:why|why is that|tell me why)[?.!\s]*$", re.I,
+)
+
+
+def explanation_requested(messages: list[dict[str, Any]]) -> bool:
+    user = next((m for m in reversed(messages) if m.get("role") == "user" and any("text" in b for b in m.get("content", []))), {})
+    return bool(_EXPLANATION.search(text_of(user))) and not any("tool_request" in b for b in user.get("content", []))
+
+
+def recommendation_reference(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Reference a prior real tool result, never assistant prose or recommended targets.
+
+    Checkpoints are replay hints: MCP must re-read and verify the referenced state/policy.
+    An explicit scenario retains the exact original arguments. A saved-book scenario pins
+    the original snapshot/date and portfolio ID, then verifies its revision after the read.
+    """
+    if not explanation_requested(messages):
+        return None
+    boundary = next((i for i in range(len(messages)-1, -1, -1) if messages[i].get("role") == "user" and any("text" in b for b in messages[i].get("content", []))), 0)
+    history = messages[:boundary]
+    for message in reversed(history):
+        for block in reversed(message.get("content", [])):
+            result = block.get("tool_result", {})
+            if result.get("name") != "recommend_portfolio":
+                continue
+            rec = result.get("content", {}).get("recommendation") if isinstance(result.get("content"), dict) else None
+            if result.get("status") != "success" or not isinstance(rec, dict):
+                return None
+            if _SUPPLIED_STATE.search(text_of(messages[boundary])):
+                return None
+            state = rec.get("portfolio_state") or {}
+            if state.get("source") == "saved_paper" and state.get("portfolio_id"):
+                arguments = {"portfolio_id": state["portfolio_id"], "input_snapshot_id": rec["input_snapshot_id"], "as_of": rec["as_of"]}
+            else:
+                original = next((b["tool_use"].get("input") for m in reversed(history) for b in m.get("content", []) if b.get("tool_use", {}).get("id") == result.get("id")), None)
+                if not isinstance(original, dict) or not isinstance(original.get("holdings"), dict):
+                    return None
+                arguments = dict(original)
+            return {"recommendation": rec, "arguments": arguments}
+    return None
+
+
+def replay_matches(reference: dict[str, Any], rec: dict[str, Any]) -> bool:
+    old = reference["recommendation"]
+    keys = ("input_snapshot_id", "as_of", "policy_artifact_checksum", "configuration_id", "aggregation", "policy_seeds", "target_weights", "cash_weight", "portfolio_state")
+    return all(old.get(k) == rec.get(k) for k in keys)
 
 
 def recommendation_arguments(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -36,6 +85,9 @@ def recommendation_arguments(messages: list[dict[str, Any]]) -> dict[str, Any] |
         if isinstance(request, dict):
             return dict(request.get("arguments") or {}) if request.get("name") == "recommend_portfolio" else None
     text = text_of(user)
+    reference = recommendation_reference(messages)
+    if reference:
+        return reference["arguments"]
     return {} if _RECOMMENDATION.search(text) and not _SUPPLIED_STATE.search(text) else None
 
 
@@ -97,3 +149,17 @@ def render_recommendation(rec: dict[str, Any]) -> str:
     if rec.get('limitations'):
         parts.append("Policy limitations: " + ", ".join(rec['limitations']) + ".")
     return "\n\n".join(parts)
+
+
+def render_recommendation_explanation(rec: dict[str, Any]) -> str:
+    reasons = []
+    for d in rec["decisions"]:
+        relation = "above" if d["action"] == "buy" else "below" if d["action"] == "sell" else "at"
+        reasons.append(f"- {d['instrument_id']}: the policy target is {relation} the current holding; the proposed action is {d['action']}.")
+    return ("Explanation of the prior recommendation, reproduced through fresh policy and market-data MCP reads. "
+            "The original completed session and portfolio context were retained; the selected policy and portfolio state matched.\n\n"
+            + "\n".join(reasons) + "\n\n"
+            + "These are learned, state-conditioned allocation targets, rather than fixed user-specified weights. "
+            "This explains how the proposed trades follow from the policy output. Feature-level attribution and news causality are unavailable; "
+            "the output alone does not explain why the network learned these particular targets.\n\n"
+            + render_recommendation(rec))

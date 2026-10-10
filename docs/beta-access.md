@@ -169,3 +169,10 @@ For direct MCP, call `recommend_portfolio` with `{}` for the saved paper book, o
 on the tool name; use the name returned by `/mcp` tool discovery. A newer date requires an approved
 snapshot with corresponding completed-session coverage.
 Recommendations are advisory/paper outputs and do not execute orders.
+
+For a hosted follow-up, retain the session ID and ask `Why is this your recommendation?`. The
+agent re-reads the original policy/state context and approved market evidence through MCP. Its
+`skills_used` metadata records the applied recommendation recipe. Direct MCP clients discover the
+same versioned instructions and checksum in the `recommend_portfolio` tool description and can
+perform those calls themselves; invoking the hosted runtime is optional. Empty MCP resource/prompt
+lists do not prevent tool access.

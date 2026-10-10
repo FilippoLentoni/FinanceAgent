@@ -1,5 +1,5 @@
 name: recommend-portfolio
-version: 0.1.0
+version: 0.2.0
 purpose: Use the selected evaluated strategy for advisory portfolio decisions with full provenance.
 tools: [recommend_portfolio, query_market_data, get_plan, get_plan_version]
 output_contract: finance/v1/tools/recommend-portfolio-response.json

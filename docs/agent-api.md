@@ -32,6 +32,8 @@ Cognito pool (`/finplan/<env>/financeagent/agent/authorizer-metadata-ref`) and t
 
 1. `{"type": "progress", "stage": "accepted", "session_id", "correlation_id"}`, then `progress` per
    graph node (`route`, `plan`, `tool_call`, `narrate`, `claim_check`);
+   deterministic policy routing also emits `skill_selected` with the applied skill's name,
+   version, declared tools and instruction checksum;
 2. `{"type": "tool_call", "tool", "arguments", "id"}` and `{"type": "tool_result_summary", "tool",
    "id", "ok", "summary", "error_code"}` per tool call;
 3. `{"type": "token", "text"}` narrative deltas (drafts: the `final` narrative is authoritative
@@ -81,6 +83,19 @@ signed proposed fractional share and value changes, reference close/date, saved 
 strategy identity and exact policy/data provenance. The complete validated producer result is also
 returned in `answer.recommendation`. The explanation identifies movement from current holdings to
 constrained model targets; it does not invent news or feature-level causal reasons.
+
+In the same session, ask `{"prompt":"Why is this your recommendation?","stream":true}`. The
+graph re-calls `recommend_portfolio` pinned to the original snapshot/date and saved portfolio ID
+(or the exact original explicit holdings), then calls `query_market_data` for that same session.
+It verifies that the selected policy/configuration, state revision and allocation still reproduce
+the earlier result. Changed or unavailable evidence is reported explicitly, without explaining a
+new result as the old recommendation. A why question without prior tool evidence requests context.
+The response's `answer.skills_used` identifies the applied packaged recommendation skill.
+
+Direct MCP `tools/list` exposes the same complete recommendation instructions, version and checksum
+in `recommend_portfolio`'s tool description. This is an instruction recipe for clients to follow,
+not another callable model. Native MCP prompt/resource lists may be empty. Direct clients can call
+the same policy and market-data tools without invoking the hosted LangGraph agent.
 
 Existing explicit-state requests remain supported: send `recommendation` with `input_snapshot_id`,
 completed-session `as_of` and `holdings` (`weights` of `{instrument_id, weight}`, `cash_weight`,

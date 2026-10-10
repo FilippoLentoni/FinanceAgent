@@ -192,7 +192,11 @@ def tool_definition(tool: str, description: str | None = None, store: SchemaStor
     req = store.get(request_name)
     resp = store.get(f"tools/{stem}{_RESP_SUFFIX}")
     desc = description or str(req.schema.get("description") or tool)
-    return ToolDefinition(name=tool, description=_clip(desc), input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)
+    desc = _clip(desc)
+    if tool == "recommend_portfolio":
+        from finplan_agent.skills import recommendation_mcp_description
+        desc = recommendation_mcp_description(desc)
+    return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)
 
 
 _KEYS = {"type": "Type", "description": "Description", "properties": "Properties", "required": "Required", "items": "Items"}

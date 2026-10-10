@@ -35,6 +35,8 @@ class AgentState(TypedDict, total=False):
     # per-turn bookkeeping
     pending_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
+    recommendation_reference: dict[str, Any] | None
+    skills_used: list[dict[str, Any]]
     turn_tool_calls: int
     turn_tokens: int
     turn_usage: dict[str, Any]
@@ -63,6 +65,8 @@ class AgentState(TypedDict, total=False):
 TURN_RESET: dict[str, Any] = {
     "pending_calls": [],
     "tool_results": [],
+    "recommendation_reference": None,
+    "skills_used": [],
     "turn_tool_calls": 0,
     "turn_tokens": 0,
     "turn_usage": {},
@@ -94,6 +98,7 @@ class AgentContext:
     session_id: str
     #: Stable instruction blocks (skills, output contract) placed after the system prompt.
     stable_instructions: tuple[str, ...] = ()
+    skills: tuple[dict[str, Any], ...] = ()
     #: Called once per completed turn with the turn's usage record (metrics emission).
     on_usage: Callable[[dict[str, Any]], None] | None = None
     #: Called with every Bedrock cost estimate (local month-to-date accounting).

@@ -2,10 +2,11 @@ import hashlib
 import json
 from pathlib import Path
 
+from finplan_contracts.schemas import schema_id
+
 from finplan_agent.providers.bedrock import BedrockProvider
 from finplan_agent.skills import load_skills
 from finplan_agent.tools.catalog import ToolCatalog
-from finplan_contracts.schemas import schema_id
 from scripts.build_stage import PACKAGE_PATHS
 from tests.fakes.agent import FakeToolClient, StubBedrockClient, bedrock_config, catalog_document, make_service, run, text_response, tool_use_response
 from tests.unit.test_budget import Reader
@@ -72,7 +73,7 @@ def test_skill_inventory_and_image_build_include_versioned_instructions():
     sk = next(s for s in inventory if s['name'] == 'recommend-portfolio')
     text = (ROOT/'skills/recommend-portfolio/SKILL.md').read_text()
     assert sk['instructions_checksum'] == 'sha256:'+hashlib.sha256(text.encode()).hexdigest()
-    assert sk['version'] == '0.1.0' and 'recommend_portfolio' in sk['tools'] and text in instructions
+    assert sk['version'] == '0.2.0' and 'recommend_portfolio' in sk['tools'] and text in instructions
     assert 'skills' in PACKAGE_PATHS
     assert 'COPY skills/' in (ROOT/'container/Dockerfile').read_text()
 
