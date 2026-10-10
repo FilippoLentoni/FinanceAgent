@@ -5,6 +5,8 @@ is the immediate deliverable; this does not require deploying gamma or prod. The
 handoff passed authenticated MCP and hosted-agent checks on 2026-10-09; the saved-paper follow-up
 passed on 2026-10-10. See [the saved-paper verification record](beta-saved-portfolio-verification.md)
 and [the original serving record](beta-strategy-serving-verification.md) for scope and evidence.
+The [hosted-agent/direct-MCP stress record](beta-agent-stress-verification.md) covers daily
+recommendations, grounded why follow-ups, remote skill discovery and scheduled market-data ingestion.
 Human login/client onboarding and the later recurring research controller remain separate work.
 
 ## Four pipelines, one runtime system

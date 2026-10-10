@@ -94,8 +94,8 @@ environment. For example, in the client's `.mcp.json` configuration:
 
 Use `/mcp` to inspect the connection. Follow the installed client's
 [official MCP setup documentation](https://code.claude.com/docs/en/mcp) for configuration scope,
-environment expansion and call deadlines. Claude Code is not installed on the verification host;
-its application connection has not been tested here. Neither client has been configured with a
+environment expansion and call deadlines. Claude Code's application connection has not been
+tested here. Neither client has been configured with a
 human beta account by this release.
 
 ## Hosted LangGraph agent
@@ -142,7 +142,8 @@ Replace the `data` JSON above with this body to use the saved paper portfolio:
 {"prompt": "Should I buy more Google stocks or sell?", "stream": false}
 ```
 
-See [the saved-paper verification record](beta-saved-portfolio-verification.md) for tested outputs,
+See [the agent/direct-MCP stress verification](beta-agent-stress-verification.md) and
+[the saved-paper verification record](beta-saved-portfolio-verification.md) for tested outputs,
 and [agent-api.md](agent-api.md) for streaming, sessions, confirmations and response fields.
 
 For comparison, an explicit **hypothetical scenario** uses $10,000 in cash and the approved snapshot through

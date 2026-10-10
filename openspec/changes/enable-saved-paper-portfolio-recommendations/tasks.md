@@ -12,4 +12,6 @@
 ## 3. Follow-up and direct-client acceptance
 
 - [x] 3.1 Route recommendation why/explain follow-ups through fresh MCP reads pinned to the prior snapshot and original state context, verify replay identity and publish applied skill provenance. Export the same versioned recommendation instructions in remote MCP tool discovery; cover missing evidence, changed state/policy and explicit scenarios.
-- [ ] 3.2 Deploy the fix to beta, run hosted recommendation/follow-up and direct MCP stress comparisons, verify scheduled ingestion and stored-data consumption, and record costs and unchanged gamma/prod releases.
+- [x] 3.2 Deploy the fix to beta, run hosted recommendation/follow-up and direct MCP stress comparisons, verify scheduled ingestion and stored-data consumption, and record costs and unchanged gamma/prod releases.
+
+Acceptance evidence: [beta agent/direct-MCP stress verification](../../../docs/beta-agent-stress-verification.md).
