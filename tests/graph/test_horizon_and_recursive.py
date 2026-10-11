@@ -197,6 +197,47 @@ def test_explicit_benchmark_cycle_cannot_launch_another_family(recommendation):
     assert all(args.get("dry_run") is True for _, args in tools.calls)
 
 
+def test_hosted_recursive_benchmark_archives_and_retrieves_nested_http_citations_losslessly(recommendation):
+    from finplan_contracts.validate import validate
+    from finplan_agent.graph.activity import restore_archived_citations, sanitize
+
+    preview = json.loads((contracts_root()/"fixtures/tools/run-recursive-improvement-response/valid/review.json").read_text())
+    request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())
+    request.update(job_type="swarm_mode_a")
+    request["configuration"]["payload"].update(strategy="qwen_swarm", objective="llm_benchmark")
+    preview["proposed_experiment"] = {"tool_request": {"name": "submit_experiment", "arguments": request}}
+    preview["evidence"] = [{"source_type": "feedback"}, {"source_type": "performance"}, {
+        "source_type": "research_review", "sources": [
+            {"url": "http://arxiv.org/abs/2610.10768v1", "title": "Frozen-policy research"},
+            {"url": "http://arxiv.org/abs/2610.10932v1?format=abstract#summary", "title": "Portfolio research"},
+            {"url": "https://doi.org/10.1000/example", "title": "Public HTTPS citation"}]}]
+    archives = []
+    def archive(arguments):
+        valid = validate(arguments, "tools/record-agent-activity-request")
+        assert valid.valid, valid.to_dict()
+        archives.append(deepcopy(arguments))
+        return {"activity_event_id": "stored-recursive-turn"}
+    service, tools = setup(recommendation, {
+        "run_recursive_improvement": lambda _: deepcopy(preview),
+        "submit_experiment": lambda _: {"dry_run": True, "cost_estimate": {"estimated_usd_upper_bound": .25}, "tool_limit": {"within_limit": True}},
+        "record_agent_activity": archive,
+        "list_agent_activity": lambda _: {"events": [{"activity_event_id": "stored-recursive-turn", "payload": deepcopy(archives[0]["payload"])}]}})
+    service.deps.durable_activity = True
+    result = ask(service, "Estimate the Qwen swarm benchmark")
+    assert result["status"] == "completed", result
+    assert result["answer"]["activity_receipt"] == {"activity_event_id": "stored-recursive-turn"}
+    assert [name for name, _ in tools.calls] == ["run_recursive_improvement", "submit_experiment", "record_agent_activity"]
+    saved = archives[0]["payload"]["tool_results"][0]["result"]
+    url = saved["evidence"][2]["sources"][0]["url"]
+    assert url["representation"] == "public_citation_url" and url["encoding"] == "base64url_utf8"
+    assert sanitize(archives[0]["payload"]) == archives[0]["payload"]
+    retrieved = tools.call_tool("list_agent_activity", {"session_id": SESSION, "limit": 1})
+    assert retrieved.ok
+    evidence = retrieved.result["events"][0]["payload"]["tool_results"][0]["result"]
+    assert restore_archived_citations(evidence) == preview
+    assert result["answer"]["portfolio_analyses"][0]["evidence"] == preview["evidence"]
+
+
 def test_unlinked_sandbox_estimate_does_not_authorize_recursive_launch(recommendation):
     from finplan_agent.graph.improvement import _benchmark_history
     request = json.loads((contracts_root()/"fixtures/tools/submit-experiment-request/valid/research.json").read_text())

@@ -25,6 +25,10 @@ The agent SHALL expose actual Qwen/Jev readiness and validate the producer's mat
 - **WHEN** a named benchmark review supplies a valid matching sandbox request
 - **THEN** the agent invokes submit_experiment with dry_run=true, displays its estimate and approval requirements, and records no paid run.
 
+#### Scenario: Durable benchmark research evidence
+- **WHEN** nested research sources contain validated public HTTP citations
+- **THEN** the hosted turn preserves them as reversible citation URL leaves accepted by the pinned archive contract, and activity retrieval reconstructs the exact citations without decoding private locations or secrets.
+
 #### Scenario: Benchmark confirmation and approval resume
 - **WHEN** the user confirms a benchmark launch after its matching cycle preview and estimate
 - **THEN** the agent invokes run_recursive_improvement with that cycle_id, dry_run=false and confirmed_by_user=true; later requests for an existing job awaiting compute approval resume read-only without another paid call.

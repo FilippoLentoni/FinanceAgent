@@ -274,6 +274,32 @@ def test_hosted_archived_diagnostics_roundtrip_exactly_and_pass_the_pinned_contr
     assert sanitize(saved) == saved
 
 
+@pytest.mark.parametrize("url", ["http://127.0.0.1/paper", "http://127.1/paper", "http://10.0.0.1/paper", "http://[::1]/paper", "http://research.internal/paper", "http://user:password@arxiv.org/paper", "s3:" + "//private-research/paper", "http://private-research" + ".s3.amazonaws.com/paper", "http://arxiv.org/paper?X-Amz-Signature=test"])
+def test_archive_citation_encoding_cannot_conceal_private_locations_or_secrets(url):
+    from finplan_agent.graph.activity import sanitize
+
+    saved = sanitize({"evidence": [{"sources": [{"url": url, "authorization": "Bearer secret-value"}]}]})
+    source = saved["evidence"][0]["sources"][0]
+    assert not isinstance(source["url"], dict)
+    assert source["authorization"] == "<redacted>"
+    assert "secret-value" not in json.dumps(saved)
+    if "X-Amz-" in url:
+        assert "X-Amz-" not in source["url"]
+
+
+def test_archive_citation_encoding_is_narrow_and_decoder_does_not_restore_private_urls():
+    from finplan_agent.graph.activity import restore_archived_citations, sanitize
+
+    original = {"url": "http://arxiv.org/abs/2610.10768v1"}
+    assert sanitize(original) == original  # An unrelated URL field is not a citation.
+    assert not validate({"event_kind": "agent_turn", "correlation_id": "corr-narrow", "idempotency_key": "narrow", "payload": original}, "tools/record-agent-activity-request").valid
+    private = {"representation": "public_citation_url", "encoding": "base64url_utf8",
+               "value": base64.urlsafe_b64encode(b"http://127.0.0.1/private").decode().rstrip("=")}
+    assert restore_archived_citations(private) == private
+    malformed = {**private, "value": "not valid base64!"}
+    assert restore_archived_citations(malformed) == malformed
+
+
 def test_shared_lifecycle_tools_can_use_either_independent_gateway():
     results = {"get_portfolio_history": lambda _: {"history": []}}
     for primary_offers in (True, False):

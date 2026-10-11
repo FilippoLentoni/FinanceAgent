@@ -5,6 +5,8 @@ import base64
 import hashlib
 import re
 from collections.abc import Mapping
+from ipaddress import ip_address
+from urllib.parse import urlparse
 
 from .. import GRAPH_VERSION
 from ..providers.base import text_of
@@ -15,6 +17,55 @@ _PRIVATE_LOCATION = re.compile(r"s3://[^\s\"]+|arn:[a-z0-9-]*:[^\s\"]+|https?://
 _SIGNED_URL = re.compile(r"https?://[^\s\"]*(?:X-Amz-|Signature=)[^\s\"]*", re.I)
 _ACTIVITY_METADATA = ("activity_event_id", "checksum", "event_kind", "recorded_at", "portfolio_id", "decision_id", "input_snapshot_id", "session_id", "correlation_id", "caller", "contract_version", "synthetic")
 _POINTER_KEYS = frozenset({"pointer", "json_pointer", "instance_pointer", "schema_pointer", "schema_path", "instancePath", "schemaPath"})
+
+
+def _public_http_citation(url):
+    """Only public citation URLs may use the reversible archive representation."""
+    if not isinstance(url, str) or not url.startswith("http://") or len(url) > 2048 or "\\" in url or any(c.isspace() for c in url):
+        return False
+    if _PRIVATE_LOCATION.search(url) or _SIGNED_URL.search(url) or _JWT.search(url):
+        return False
+    try:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        parsed.port
+    except ValueError:
+        return False
+    if not host or parsed.username or parsed.password or host.endswith(("amazonaws.com", "amazonaws.com.cn", ".local", ".localhost", ".internal", ".lan", ".home", ".test", ".invalid")) or host == "localhost":
+        return False
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return "." in host and not host.replace(".", "").isdigit()
+    return address.is_global
+
+
+def _citation_url(url):
+    # Pinned activity requests accept public HTTPS strings, but not HTTP strings.
+    # Encoding just validated HTTP source URLs preserves the issued citation exactly.
+    return {"representation": "public_citation_url", "encoding": "base64url_utf8",
+            "value": base64.urlsafe_b64encode(url.encode()).decode().rstrip("=")}
+
+
+def restore_archived_citations(value):
+    """Reconstruct public citation URL leaves from retrieved immutable archive payloads.
+
+    Checksums refer to the stored encoded payload; this returns a decoded view.
+    Other representation objects, private URLs and invalid encodings remain unchanged.
+    """
+    if isinstance(value, Mapping):
+        if set(value) == {"representation", "encoding", "value"} and value.get("representation") == "public_citation_url" and value.get("encoding") == "base64url_utf8" and isinstance(value.get("value"), str):
+            try:
+                encoded = value["value"]
+                url = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return dict(value)
+            if _public_http_citation(url):
+                return url
+        return {key: restore_archived_citations(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [restore_archived_citations(item) for item in value]
+    return value
 
 
 def _pointer_segments(pointer):
@@ -28,7 +79,7 @@ def _pointer_segments(pointer):
             "segments": [base64.urlsafe_b64encode(part.encode()).decode().rstrip("=") for part in pointer[1:].split("/")] if pointer else []}
 
 
-def sanitize(value):
+def sanitize(value, *, _source=False):
     if isinstance(value, Mapping):
         pointer = next((v for k, v in value.items() if k in _POINTER_KEYS and isinstance(v, str) and (not v or v.startswith("/"))), None)
         result = {}
@@ -41,6 +92,10 @@ def sanitize(value):
             elif key == "message" and pointer is not None and isinstance(v, str) and v.startswith((pointer or "/") + ":"):
                 prefix = pointer or "/"
                 result[key] = {"representation": "json_pointer_diagnostic", "pointer": _pointer_segments(prefix), "suffix": sanitize(v[len(prefix):])}
+            elif _source and key == "url" and _public_http_citation(v):
+                result[key] = _citation_url(v)
+            elif key == "sources" and isinstance(v, list):
+                result[key] = [sanitize(source, _source=True) for source in v]
             else:
                 result[key] = sanitize(v)
         return result
