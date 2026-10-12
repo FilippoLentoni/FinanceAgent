@@ -121,7 +121,10 @@ def main():
                     result=driver.direct(name+'-recommendation',tool,request);progress.update(name=name,portfolio_id=pid,decision_id=result['decision_id'],before_revision=before['revision'],snapshot=result['recommendation']['input_snapshot_id'],market_date=result['recommendation']['as_of']);save(progress_path,progress)
                 did=progress['decision_id'];stored=driver.direct(name+'-acceptance-evidence','get_portfolio_decision',{'decision_id':did})['decision']
                 validate_recommendation({'recommendation':stored['recommendation'],'synthetic':stored['synthetic']},pid,progress['before_revision'])
-                driver.hosted(name+'-recommendation-hosted',{'tool_request':{'name':tool,'arguments':request}},tool=tool)
+                hosted,_=driver.hosted(name+'-recommendation-hosted',{'tool_request':{'name':tool,'arguments':request}},tool=tool)
+                issued=hosted.get('answer',{}).get('portfolio_decisions',[])
+                matched=next((x['recommendation'] for x in issued if x.get('decision_id')==did),None)
+                if matched!=stored['recommendation']:raise ValueError('hosted and direct MCP recommendation evidence differs')
                 driver.hosted(name+'-explain',{'prompt':'Why does decision '+did+' recommend this action for Google?'},tool='explain_portfolio_decision')
                 driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
                 older=next((r for r in previous if r.get('algorithm')==book['strategy']and r.get('execution',{}).get('reference_date')!=progress['market_date']),None)
