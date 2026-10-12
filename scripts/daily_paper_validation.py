@@ -115,6 +115,16 @@ def main():
                     driver.hosted(name+'-completed-deep-dive',{'prompt':'Deep dive into performance and news for '+progress['decision_id']},tool='evaluate_portfolio_decision')
                     if before['revision']!=progress['after_revision']:raise ValueError('completed test book changed unexpectedly')
                     summary['books'].append(progress);continue
+                if progress.get('decision_id') and before['revision']==progress.get('before_revision',-2)+1:
+                    committed=driver.direct(name+'-recover-accepted','get_portfolio_decision',{'decision_id':progress['decision_id']})['decision']
+                    if committed.get('status')!='accepted' or committed.get('portfolio_id')!=pid or committed.get('portfolio_revision')!=progress['before_revision']:
+                        raise ValueError('advanced revision does not belong to the reviewed accepted decision')
+                    recover_tool='recommend_portfolio' if book['strategy']=='ppo' else 'recommend_classical_portfolio'
+                    recover_args={'portfolio_id':pid}
+                    if recover_tool=='recommend_classical_portfolio':recover_args['algorithm']=book['strategy']
+                    next_result=driver.direct(name+'-recovered-next-state',recover_tool,recover_args)
+                    if next_result['recommendation']['portfolio_state']['revision']!=before['revision']:raise ValueError('recovered inference did not read accepted holdings')
+                    progress.update(complete=True,after_revision=before['revision']);save(progress_path,progress);summary['books'].append(progress);continue
                 previous=driver.direct(name+'-previous','list_portfolio_decisions',{'portfolio_id':pid,'limit':10})['decisions']
                 for old in previous[:2]:
                     if old['decision_id'] not in progress.get('evaluated_ids',[]):
