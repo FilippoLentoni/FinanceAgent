@@ -38,7 +38,7 @@ class Driver:
     def param(self,key):return self.ssm.get_parameter(Name='/finplan/beta/financeagent/agent/'+key)['Parameter']['Value']
     def record(self,label,data):
         if self.token in json.dumps(data,default=str):raise ValueError('credential in receipt')
-        save(self.output/(label+'.json'),data)
+        save(self.output/(label+'.json'),data);print(label,flush=True)
     def direct(self,label,tool,args):
         client=self.classical if tool in {'recommend_classical_portfolio','run_recursive_improvement','research_market_events','submit_portfolio_feedback'} else self.primary
         t=time.monotonic();out=client.call_tool(tool,args);self.record(label,{'tool':tool,'arguments':args,'seconds':time.monotonic()-t,**asdict(out)})
@@ -113,7 +113,9 @@ def main():
                     summary['books'].append(progress);continue
                 previous=driver.direct(name+'-previous','list_portfolio_decisions',{'portfolio_id':pid,'limit':10})['decisions']
                 for old in previous[:2]:
-                    driver.hosted(name+'-evaluate-'+old['decision_id'],{'prompt':'Evaluate the strategy horizon and observed paper performance for '+old['decision_id']},tool='evaluate_portfolio_decision')
+                    if old['decision_id'] not in progress.get('evaluated_ids',[]):
+                        driver.hosted(name+'-evaluate-'+old['decision_id'],{'prompt':'Evaluate the strategy horizon and observed paper performance for '+old['decision_id']},tool='evaluate_portfolio_decision')
+                        progress.setdefault('evaluated_ids',[]).append(old['decision_id']);save(progress_path,progress)
                 if args.report_only:continue
                 tool='recommend_portfolio'if book['strategy']=='ppo'else'recommend_classical_portfolio';request={'portfolio_id':pid}
                 if tool=='recommend_classical_portfolio':request['algorithm']=book['strategy']
@@ -130,7 +132,7 @@ def main():
                 driver.hosted(name+'-explain',{'prompt':'Why does decision '+did+' recommend this action for Google?'},tool='explain_portfolio_decision')
                 deep,_=driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
                 analyses=deep.get('answer',{}).get('portfolio_analyses',[])
-                performance=next((a for a in analyses if a.get('kind')=='performance'),None)
+                performance=next((a for a in analyses if a.get('analysis_kind')=='performance'),None)
                 if not performance:raise ValueError('deep dive did not return persisted performance evidence')
                 driver.direct(name+'-feedback','submit_portfolio_feedback',{'analysis_id':performance['analysis_id'],'idempotency_key':'daily-validation-'+name+'-'+today,'text':'Synthetic operational validation '+today+': hosted and MCP recommendation evidence, feasibility, explanation and performance checks passed. No profitability claim; no model change or paid experiment is authorized by this feedback.'})
                 older=next((r for r in previous if r.get('algorithm')==book['strategy']and r.get('execution',{}).get('reference_date')!=progress['market_date']),None)
@@ -138,6 +140,7 @@ def main():
                 if not progress.get('alternative_id'):
                     alt=driver.direct(name+'-reject-alternative','recommend_classical_portfolio',{'portfolio_id':pid,'algorithm':'min_variance','settings':{'max_weight':0.4},'idempotency_key':'test-reject-'+name+'-'+today});progress['alternative_id']=alt['decision_id'];save(progress_path,progress)
                 if progress['alternative_id']==did:raise ValueError('reject alternative must differ from accepted proposal')
+                driver.hosted(name+'-model-comparison',{'prompt':'Compare decisions '+did+' and '+progress['alternative_id']},tool='compare_portfolio_decisions')
                 driver.resolve(name+'-reject',progress['alternative_id'],pid,progress['before_revision'],'reject')
                 current=driver.book(name+'-after-reject',pid)
                 accepted=driver.direct(name+'-accept-status','get_portfolio_decision',{'decision_id':did})['decision']['status']=='accepted'
