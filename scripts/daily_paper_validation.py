@@ -40,7 +40,7 @@ class Driver:
         if self.token in json.dumps(data,default=str):raise ValueError('credential in receipt')
         save(self.output/(label+'.json'),data)
     def direct(self,label,tool,args):
-        client=self.classical if tool in {'recommend_classical_portfolio','run_recursive_improvement','research_market_events'} else self.primary
+        client=self.classical if tool in {'recommend_classical_portfolio','run_recursive_improvement','research_market_events','submit_portfolio_feedback'} else self.primary
         t=time.monotonic();out=client.call_tool(tool,args);self.record(label,{'tool':tool,'arguments':args,'seconds':time.monotonic()-t,**asdict(out)})
         if not out.ok:raise RuntimeError(tool+': '+str((out.error or {}).get('code')))
         return out.result
@@ -119,6 +119,8 @@ def main():
                 if tool=='recommend_classical_portfolio':request['algorithm']=book['strategy']
                 if not progress.get('decision_id'):
                     result=driver.direct(name+'-recommendation',tool,request);progress.update(name=name,portfolio_id=pid,decision_id=result['decision_id'],before_revision=before['revision'],snapshot=result['recommendation']['input_snapshot_id'],market_date=result['recommendation']['as_of']);save(progress_path,progress)
+                if any(row.get('decision_id')!=progress['decision_id'] and row.get('status')=='accepted' and row.get('execution',{}).get('reference_date','')>=progress['market_date'] for row in previous):
+                    raise ValueError('no newer completed market session; check ingestion or exchange holiday before another acceptance')
                 did=progress['decision_id'];stored=driver.direct(name+'-acceptance-evidence','get_portfolio_decision',{'decision_id':did})['decision']
                 validate_recommendation({'recommendation':stored['recommendation'],'synthetic':stored['synthetic']},pid,progress['before_revision'])
                 hosted,_=driver.hosted(name+'-recommendation-hosted',{'tool_request':{'name':tool,'arguments':request}},tool=tool)
@@ -126,7 +128,11 @@ def main():
                 matched=next((x['recommendation'] for x in issued if x.get('decision_id')==did),None)
                 if matched!=stored['recommendation']:raise ValueError('hosted and direct MCP recommendation evidence differs')
                 driver.hosted(name+'-explain',{'prompt':'Why does decision '+did+' recommend this action for Google?'},tool='explain_portfolio_decision')
-                driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
+                deep,_=driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
+                analyses=deep.get('answer',{}).get('portfolio_analyses',[])
+                performance=next((a for a in analyses if a.get('kind')=='performance'),None)
+                if not performance:raise ValueError('deep dive did not return persisted performance evidence')
+                driver.direct(name+'-feedback','submit_portfolio_feedback',{'analysis_id':performance['analysis_id'],'idempotency_key':'daily-validation-'+name+'-'+today,'text':'Synthetic operational validation '+today+': hosted and MCP recommendation evidence, feasibility, explanation and performance checks passed. No profitability claim; no model change or paid experiment is authorized by this feedback.'})
                 older=next((r for r in previous if r.get('algorithm')==book['strategy']and r.get('execution',{}).get('reference_date')!=progress['market_date']),None)
                 if older:driver.hosted(name+'-comparison',{'prompt':'Compare decisions '+older['decision_id']+' and '+did},tool='compare_portfolio_decisions')
                 if not progress.get('alternative_id'):
