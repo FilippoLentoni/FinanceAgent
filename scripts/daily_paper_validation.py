@@ -165,7 +165,7 @@ def main():
                 if next_result['recommendation']['portfolio_state']['revision']!=after['revision']:raise ValueError('next inference did not read accepted holdings')
                 progress.update(complete=True,after_revision=after['revision']);save(progress_path,progress);summary['books'].append(progress)
             except Exception as error:summary['failures'].append({'book':name,'error':str(error)})
-        summary['checks']=driver.checks;summary['passed']=not summary['failures']and(args.report_only or len(summary['books'])==len(config['books']));save(output/'summary.json',summary)
+        summary['checks']=driver.checks;summary['passed']=not summary['failures']and(args.report_only or len(summary['books'])==len(config['books']));save(driver.output/'summary.json',summary);save(output/'summary.json',summary)
         print(json.dumps({'date':today,'passed':summary['passed'],'completed_books':len(summary['books']),'failures':summary['failures']}),flush=True);return 0 if summary['passed']else 1
 
 
