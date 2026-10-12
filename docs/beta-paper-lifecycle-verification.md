@@ -56,8 +56,9 @@ refresh token; the runner does not store a password.
 
 Only allowlisted synthetic paper books are eligible. The runner generates a stored
 proposal, checks its portfolio/revision, feasible status, constraint outcome, finite
-normalized weights and frozen market provenance, then requests hosted explanation
-and performance/news evidence. A failed check stops that book before acceptance.
+normalized weights and frozen market provenance, then requires identical hosted/direct recommendation evidence and requests hosted
+explanation and performance/news evidence. It stores synthetic validation feedback
+and compares the candidate with a traditional optimizer alternative. A failed check stops that book before acceptance.
 It rejects a separate minimum-variance alternative and verifies that rejection does
 not advance the holdings revision. Acceptance simulates the authorized test user's
 confirmation and must create exactly one revision; subsequent inference must read
@@ -68,7 +69,8 @@ Dated progress, per-attempt receipts, hosted semantic checks and `summary.json` 
 written under the configured output directory. Repeated invocations resume an
 interrupted day and recheck completed books without repeating acceptance. A local
 scheduler must run after approved morning ingestion, use New York time, and retain
-logs and a retry. An expired authorization window fails closed. `--report-only`
+logs and a retry. An expired authorization window fails closed. A repeated completed market date
+blocks a new acceptance until ingestion or the exchange calendar is checked. `--report-only`
 inspects prior decisions without generating or resolving proposals.
 
 These runs establish functional evidence. Stored reference-price paper fills are

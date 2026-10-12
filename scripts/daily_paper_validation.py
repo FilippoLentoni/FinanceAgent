@@ -1,6 +1,6 @@
 """Expiring beta-only synthetic-book acceptance test; never an investor approval policy."""
 from __future__ import annotations
-import argparse,fcntl,json,math,sys,time,urllib.parse,urllib.request,uuid
+import argparse,fcntl,json,math,sys,time,urllib.error,urllib.parse,urllib.request,uuid
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -49,7 +49,11 @@ class Driver:
         url='https://bedrock-agentcore.us-east-2.amazonaws.com/runtimes/'+urllib.parse.quote(self.param('runtime-ref'),safe='')+'/invocations?qualifier=DEFAULT'
         req=urllib.request.Request(url,data=json.dumps({**payload,'stream':False}).encode(),headers={'Authorization':'Bearer '+self.token,'Content-Type':'application/json','X-Amzn-Bedrock-AgentCore-Runtime-Session-Id':sid})
         t=time.monotonic()
-        with urllib.request.urlopen(req,timeout=420) as r:final=json.load(r)
+        try:
+            with urllib.request.urlopen(req,timeout=420) as r:final=json.load(r)
+        except urllib.error.HTTPError as error:
+            self.record(label,{'payload':payload,'session_id':sid,'seconds':time.monotonic()-t,'http_status':error.code,'error_body':error.read(65536).decode(errors='replace')})
+            raise RuntimeError(label+': hosted HTTP '+str(error.code)) from None
         self.record(label,{'payload':payload,'session_id':sid,'seconds':time.monotonic()-t,'final':final})
         answer=final.get('answer') or {};evidence=answer.get('evidence') or []
         ok=final.get('status')==status
