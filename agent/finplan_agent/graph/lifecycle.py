@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 
+from .sensitivity import sensitivity_plan
+
 from ..providers.base import ToolCall, text_of
 from ..tools.portfolio import LIFECYCLE_TOOLS
 
@@ -62,6 +64,8 @@ def _date(row):
 
 def _run(workflow, results, turn):
     mode = workflow["mode"]
+    if mode == "lifecycle_sensitivity":
+        return sensitivity_plan(workflow, results, turn)
     if any(not r.get("ok") for r in results):
         return {"workflow": workflow, "calls": []}
     if mode == "lifecycle_compare_read" and results:
@@ -142,9 +146,21 @@ def lifecycle_plan(state, session_id):
         return {"workflow":{"mode":"lifecycle_complete"},"calls":calls}
     if not ids and re.search(r"\b(?:traditional|classical|optimizer|optimization)\b",text,re.I) and re.search(r"\b(?:ppo|reinforcement|rl)\b",text,re.I):
         return None
-    rejection = _REJECT.search(text) or ids and re.search(r"\b(?:reject|decline)\b", text, re.I)
-    acceptance = _ACCEPT.search(text) or ids and re.search(r"\b(?:accept|approve|apply)\b", text, re.I)
-    intent = "reject" if rejection else "accept" if acceptance else "performance" if _PERFORMANCE.search(text) else "compare" if _COMPARE.search(text) else "why" if _WHY.search(text) else None
+    # Resolution intent must survive explicit negation; mentions in analysis are not consent.
+    action_text = re.sub(r"\b(?:do\s+not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}(?:accept|approve|apply|reject|decline)\b", "", text, flags=re.I)
+    rejection = _REJECT.search(action_text) or ids and re.search(r"\b(?:reject|decline)\b", action_text, re.I)
+    acceptance = _ACCEPT.search(action_text) or ids and re.search(r"\b(?:accept|approve|apply)\b", action_text, re.I)
+    if ids and re.search(r"\b(?:sensitivity|risk aversion|maximum (?:instrument |position )?weight|max(?:imum)? weight)\b", text, re.I) and not (acceptance or rejection):
+        variants = []
+        for parameter, pattern in (("risk_aversion", r"risk aversion(?: increased)?(?: from)?\s+([0-9.]+)\s+(?:to|versus|vs\.?)\s+([0-9.]+)"), ("max_weight", r"(?:maximum (?:instrument |position )?weight|max weight)(?: fell)?(?: from)?\s+([0-9.]+)\s+(?:to|versus|vs\.?)\s+([0-9.]+)")):
+            match = re.search(pattern, text, re.I)
+            if match:
+                variants.append({"parameter": parameter, "base": float(match[1]), "value": float(match[2])})
+        if not variants:
+            return {"workflow": {"mode": "lifecycle_complete"}, "calls": [], "clarification": "Specify risk aversion or maximum instrument weight with numeric base and alternative values. I have not computed a sensitivity analysis."}
+        return {"workflow": {"mode": "lifecycle_sensitivity", "variants": variants}, "calls": [_call("get_portfolio_decision", {"decision_id": ids[0]}, turn)]}
+    value_request = bool(re.search(r"\b(?:current|portfolio|expected) value\b|\b(?:evaluate|assess)\b.{0,40}\b(?:portfolio|decision)\b", text, re.I))
+    intent = "reject" if rejection else "accept" if acceptance else "performance" if _PERFORMANCE.search(text) or value_request else "compare" if _COMPARE.search(text) else "why" if _WHY.search(text) else None
     issued = _issued(messages)
     if portfolios:
         issued = [row for row in issued if (row.get("portfolio_id") or row.get("recommendation", {}).get("portfolio_state", {}).get("portfolio_id")) == portfolios[0]]
@@ -216,4 +232,15 @@ def render_lifecycle(doc):
         else:
             text+=" Saved holdings are unchanged."
         return text+"\n\n```json\n"+json.dumps(doc,indent=2,sort_keys=True)+"\n```"
+    for collection, label in (("history", "Holdings revisions"), ("decisions", "Issued decisions"), ("snapshots", "Market snapshots")):
+        if collection in doc:
+            rows = doc[collection]
+            parts = [label + ": " + str(len(rows)) + " available in this page."]
+            for row in rows:
+                fields = {key: row[key] for key in ("portfolio_id", "revision", "decision_id", "algorithm", "status", "recorded_at", "created_at", "input_snapshot_id", "checksum", "coverage") if key in row}
+                parts.append(json.dumps(fields, sort_keys=True))
+            if doc.get("next_token"):
+                parts.append("More history is available using the continuation token in the structured response.")
+            parts.append("Full immutable records and quantities remain in the structured response.")
+            return "\n\n".join(parts)
     return "Stored historical evidence:\n```json\n"+json.dumps(doc,indent=2,sort_keys=True)+"\n```"

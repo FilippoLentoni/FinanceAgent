@@ -197,7 +197,20 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
     issued_explanation = doc.get("explanation") if doc.get("source_decision_ref") else None
     if issued_explanation:
         parts.append("Issued decision: " + doc["source_decision_ref"]["decision_id"] + "; status: " + doc.get("decision_status", "not_available") + ".")
-        parts.append("Frozen decision explanation:\n```json\n" + json.dumps({"explanation": issued_explanation, "resolution": doc.get("resolution")}, indent=2, sort_keys=True) + "\n```")
+        for trade in issued_explanation.get("trade_logic", []):
+            parts.append(f"{trade['instrument_id']}: {trade['action']}; {trade.get('reason', 'See frozen trade evidence')}.")
+        replay = issued_explanation.get("policy_replay") or {}
+        if replay:
+            parts.append("Frozen policy replay: " + replay.get("status", "not_available") + ". " + (issued_explanation.get("attribution") or {}).get("reason", ""))
+        optimizer = issued_explanation.get("optimizer") or {}
+        if optimizer:
+            parts.append("Objective: " + optimizer.get("objective_definition", "See stored evidence") + ".")
+            parts.append(f"Unchanged-holdings objective: {_number(optimizer.get('hold_objective'))}; optimized: {_number(optimizer.get('optimized_objective'))}; modeled improvement: {_number(optimizer.get('objective_gain'))}. Units: {optimizer.get('objective_units', 'see evidence')}.")
+            shapley = optimizer.get("shapley") or {}
+            parts.extend(f"{c['group']}: {_number(c['value'])} modeled objective contribution." for c in shapley.get("contributions", []))
+            parts.append("Binding constraints: " + ", ".join(optimizer.get("binding_constraints", [])) + ".")
+        forecast = issued_explanation.get("forecast") or {}
+        parts.append("Forecast: " + forecast.get("status", "not_available") + ". " + forecast.get("reason", ""))
     explanation = None if issued_explanation else doc.get("explanation")
     if explanation:
         parts.append("Model objective: " + explanation.get("objective_definition", "See stored evidence") + ".")
@@ -220,12 +233,30 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         parts.append("Comparison alignment: " + json.dumps(comparison_context, sort_keys=True))
         for row in doc.get("changes", []):
             parts.append(f"{row['instrument_id']}: {row['previous_action']} → {row['current_action']}; target weight {_number(row['previous_target_weight'])} → {_number(row['current_target_weight'])}. Grouped modeled effects: " + json.dumps(row.get("attribution", []), sort_keys=True))
-        parts.append("Exact grouped Shapley evidence: " + json.dumps(doc.get("shapley", {}), sort_keys=True))
-        if doc.get("previous_decision_ref"):
-            parts.append("Stored decision comparison evidence:\n```json\n" + json.dumps({k: doc[k] for k in ("previous_decision_ref", "current_decision_ref", "attribution", "policy_replay", "input_differences") if k in doc}, indent=2, sort_keys=True) + "\n```")
+        shapley = doc.get("shapley") or {}
+        if shapley:
+            parts.append("Grouped attribution method: " + shapley.get("method", "not_available") + "; full reconciliation retained in the structured analysis.")
+        attribution = doc.get("attribution") or {}
+        if attribution:
+            parts.append("Change attribution: " + str(attribution.get("status", "not_available")) + ". " + str(attribution.get("reason", "")))
     if kind == "performance":
         parts.append(f"Daily/accounting outcome: {doc.get('trend', 'not_available')}; observed source: {doc.get('actual_source', 'not_available')}. {doc.get('trend_definition', doc.get('reason', ''))}")
-        parts.append("Reconciled performance evidence:\n```json\n" + json.dumps({k: v for k, v in doc.items() if k in ("window", "planned_allocation_hold", "observed_paper", "gap", "forecast", "real_execution", "whys", "feedback", "limitations", "partial_horizon", "thresholds", "issued_plan_trend", "gap_trend", "source_decision_ref", "observed_snapshot_id", "observed_snapshot_checksum", "decision_status", "unchanged_holdings_benchmark", "paper_execution_evidence", "instrument_contributions")}, indent=2) + "\n```")
+        window = doc.get("window") or {}
+        parts.append("Observed window: " + str(window.get("start", "not_available")) + " to " + str(window.get("end", "not_available")) + ".")
+        planned = doc.get("planned_allocation_hold") or {}
+        if planned:
+            parts.append(f"Hypothetical allocation hold: starting value {_number(planned.get('start_value'),2)}; ending value {_number(planned.get('end_value'),2)}; PnL {_number(planned.get('pnl'),2)}. This is not a forecast or an executed portfolio.")
+        observed = doc.get("observed_paper") or {}
+        parts.append("Observed paper accounting: " + str(observed.get("status", "not_available")) + ". " + str(observed.get("reason", "")))
+        if observed.get("status") == "available" or "pnl" in observed:
+            for key in ("start_value", "end_value", "pnl", "return", "transaction_cost"):
+                if key in observed:
+                    parts.append("Observed " + key.replace("_", " ") + ": " + _number(observed[key]) + ".")
+        forecast = doc.get("forecast") or {}
+        parts.append("Forecast uncertainty: " + str(forecast.get("status", "not_available")) + ". " + str(forecast.get("reason", "")))
+        gap = doc.get("gap") or {}
+        if gap:
+            parts.append("Implementation gap evidence: " + json.dumps(gap, sort_keys=True) + ".")
         horizon = doc.get("horizon_evaluation")
         if isinstance(horizon, dict):
             protocol = horizon.get("protocol") or {}
@@ -240,11 +271,14 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
             assessment = horizon.get("evidence_assessment") or {}
             if assessment:
                 parts.append("Evidence assessment: " + str(assessment.get("status", "not_available")) + ". " + str(assessment.get("recommendation", "")))
-            parts.append("Strategy objective and horizon evaluation (separate from the daily outcome):\n```json\n" + json.dumps(horizon, indent=2, sort_keys=True) + "\n```")
+            parts.append("Strategy objective and horizon evaluation: full replay windows, controls and limitations remain in the structured analysis. " + str(horizon.get("reason", "")))
             parts.append("A short-term loss alone does not establish policy failure. Frozen sequential-policy replay is a hypothetical experiment on observed prices, independent of accepted paper accounting. It evaluates subsequent decisions; holding the first allocation is a different counterfactual. A single observed path cannot establish optimality.")
         else:
             parts.append("Strategy-horizon evidence is unavailable in this analysis. Daily accounting and a frozen first-allocation hold do not establish the performance of the ongoing policy.")
-    if kind in ("research", "research_run", "feedback", "market_events", "recursive_cycle", "recursive_iteration"):
+    if kind == "market_events":
+        parts.append("Market context: " + str(doc.get("status", doc.get("source_status", "not_available"))) + ". " + str(doc.get("reason", "")))
+        parts.append("News metadata provides dated context, not causal attribution. Full query and source records remain in the structured analysis.")
+    if kind in ("research", "research_run", "feedback", "recursive_cycle", "recursive_iteration"):
         details = {k: v for k, v in doc.items() if k not in ("analysis_ref", "analysis_id", "created_at", "summary", "contract_version", "synthetic")}
         parts.append("Stored evidence:\n```json\n" + json.dumps(details, indent=2, sort_keys=True) + "\n```")
         if kind in ("recursive_cycle", "recursive_iteration"):
@@ -288,6 +322,10 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             derived.extend(figures)
         elif name in LIFECYCLE_TOOLS:
             parts.append(render_lifecycle(doc))
+    workflow = state.get("portfolio_workflow") or {}
+    if workflow.get("mode") == "lifecycle_sensitivity":
+        parts.insert(0, "Controlled hypothetical sensitivity using the original snapshot, date and frozen holdings. Each alternative changes only its named setting; no holdings update or paid experiment is requested.")
+        parts.append("Original-policy eligibility is not established by these optimizer alternatives: a complete investor risk policy is not recorded. Tighter weight bounds can be checked against the original cap; changed objective parameters require separate review.")
     if state.get("draft_text"):
         parts.append(state["draft_text"])
     if not parts:
