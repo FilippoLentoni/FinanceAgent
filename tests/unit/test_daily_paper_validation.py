@@ -48,5 +48,7 @@ def test_recommendation_gate_rejects_infeasible_and_nonfinite_weights():
         validate_recommendation(result,'isolated-book',1)
     rec['target_weights'][0]['weight']=1.0
     validate_recommendation(result,'isolated-book',1)
+    rec['solution_status']='optimal'
+    validate_recommendation(result,'isolated-book',1)
     with pytest.raises(ValueError,match='revision'):
         validate_recommendation(result,'isolated-book',2)

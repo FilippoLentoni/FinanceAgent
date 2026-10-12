@@ -82,7 +82,7 @@ def validate_recommendation(result,pid,revision):
     if result.get('synthetic') is not True or state.get('portfolio_id')!=pid or state.get('revision')!=revision:
         raise ValueError('recommendation does not match isolated book revision')
     outcome=rec.get('constraint_outcome',{})
-    if rec.get('solution_status')!='feasible' or outcome.get('violations') or outcome.get('action') not in {'accepted','projected'}:
+    if rec.get('solution_status') not in {'feasible','optimal'} or outcome.get('violations') or outcome.get('action') not in {'accepted','projected'}:
         raise ValueError('recommendation failed feasibility or constraint checks')
     weights=[x['weight'] for x in rec['target_weights']]+[rec['cash_weight']]
     if any(not isinstance(w,(int,float)) or not math.isfinite(w) or w<0 or w>1 for w in weights) or abs(sum(weights)-1)>1e-6:
