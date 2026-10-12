@@ -43,3 +43,34 @@ Live tests also uncovered a malformed PPO explanation response, a failed audit a
 The last receipt failure came from private AWS caller identity metadata embedded in an otherwise valid committed resolution. A common public-response projection now exposes stable caller hashes consistently in resolution, decision, explanation and history responses. The original audit identity remains in immutable storage, financial fields and producer checksums remain unchanged, and the public privacy check remains enabled. Focused dispatcher/lifecycle tests cover deterministic projection and retries in addition to the live recovery checks above.
 
 The final next-state test found that a provider-planned PPO recommendation returned the correct saved holdings and passed its numerical claim check but omitted skill-version evidence. Skill selection now follows actual planned tools across both planning paths, and common investment-recommendation wording uses the deterministic route. Focused runtime/archive and deployed regressions cover this path. The live run resumed from its verified revision 2, preserving every earlier receipt; hosted explanations, comparison and confirmation retry were repeated against the final agent release before completing the remaining lifecycle checks.
+
+## Expiring daily validation runner
+
+`scripts/daily_paper_validation.py --config <private-config.json>` exercises the hosted
+AgentCore runtime and both MCP gateways using a dedicated PKCE test identity. The
+configuration selects `environment: beta`, an explicit `isolated_test_authorization`,
+ISO `start_date`/`end_date`, a private `token_file`, an `output_dir`, and a `books` list
+with `name`, `strategy` (`ppo` or `mean_variance`) and `portfolio_id`. Keep these
+account-specific values outside the repository. Token refresh requires a valid
+refresh token; the runner does not store a password.
+
+Only allowlisted synthetic paper books are eligible. The runner generates a stored
+proposal, checks its portfolio/revision, feasible status, constraint outcome, finite
+normalized weights and frozen market provenance, then requests hosted explanation
+and performance/news evidence. A failed check stops that book before acceptance.
+It rejects a separate minimum-variance alternative and verifies that rejection does
+not advance the holdings revision. Acceptance simulates the authorized test user's
+confirmation and must create exactly one revision; subsequent inference must read
+that revision. This does not change the application's confirmation requirements or
+permit resolution on a customer book.
+
+Dated progress, per-attempt receipts, hosted semantic checks and `summary.json` are
+written under the configured output directory. Repeated invocations resume an
+interrupted day and recheck completed books without repeating acceptance. A local
+scheduler must run after approved morning ingestion, use New York time, and retain
+logs and a retry. An expired authorization window fails closed. `--report-only`
+inspects prior decisions without generating or resolving proposals.
+
+These runs establish functional evidence. Stored reference-price paper fills are
+not broker execution. Historical replay is not observed account performance, and a
+short validation window does not prove investment value or calibrated forecasts.
