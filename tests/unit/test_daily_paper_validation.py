@@ -35,3 +35,18 @@ def test_resolution_retry_does_not_confirm_an_already_committed_decision():
     value.direct=lambda *args:{'decision':{'portfolio_id':'isolated-book','portfolio_revision':1,'synthetic':True,'status':'accepted'}}
     value.hosted=lambda *args,**kwargs:pytest.fail('no duplicate confirmation')
     value.resolve('test','decision','isolated-book',1,'accept')
+
+
+def test_recommendation_gate_rejects_infeasible_and_nonfinite_weights():
+    from scripts.daily_paper_validation import validate_recommendation
+    rec={'portfolio_state':{'portfolio_id':'isolated-book','revision':1},'solution_status':'infeasible','constraint_outcome':{'action':'accepted','violations':[]},'target_weights':[{'weight':1.0}],'cash_weight':0,'input_snapshot_id':'snapshot','snapshot_checksum':'checksum','as_of':'2026-10-09','decisions':[]}
+    result={'recommendation':rec,'synthetic':True}
+    with pytest.raises(ValueError,match='feasibility'):
+        validate_recommendation(result,'isolated-book',1)
+    rec['solution_status']='feasible';rec['target_weights'][0]['weight']=float('nan')
+    with pytest.raises(ValueError,match='weights'):
+        validate_recommendation(result,'isolated-book',1)
+    rec['target_weights'][0]['weight']=1.0
+    validate_recommendation(result,'isolated-book',1)
+    with pytest.raises(ValueError,match='revision'):
+        validate_recommendation(result,'isolated-book',2)

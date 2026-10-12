@@ -1,6 +1,6 @@
 """Expiring beta-only synthetic-book acceptance test; never an investor approval policy."""
 from __future__ import annotations
-import argparse,fcntl,json,sys,time,urllib.parse,urllib.request,uuid
+import argparse,fcntl,json,math,sys,time,urllib.parse,urllib.request,uuid
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -77,6 +77,22 @@ class Driver:
         self.hosted(label+'-confirm',{'action':'confirm','approve':True},tool='resolve_portfolio_decision',sid=sid)
 
 
+def validate_recommendation(result,pid,revision):
+    rec=result['recommendation'];state=rec['portfolio_state']
+    if result.get('synthetic') is not True or state.get('portfolio_id')!=pid or state.get('revision')!=revision:
+        raise ValueError('recommendation does not match isolated book revision')
+    outcome=rec.get('constraint_outcome',{})
+    if rec.get('solution_status')!='feasible' or outcome.get('violations') or outcome.get('action') not in {'accepted','projected'}:
+        raise ValueError('recommendation failed feasibility or constraint checks')
+    weights=[x['weight'] for x in rec['target_weights']]+[rec['cash_weight']]
+    if any(not isinstance(w,(int,float)) or not math.isfinite(w) or w<0 or w>1 for w in weights) or abs(sum(weights)-1)>1e-6:
+        raise ValueError('invalid portfolio weights')
+    if not rec.get('input_snapshot_id') or not rec.get('as_of') or not rec.get('snapshot_checksum'):
+        raise ValueError('missing frozen market evidence')
+    if any(x.get('price_as_of')!=rec['as_of'] or x.get('reference_price',0)<=0 for x in rec.get('decisions',[])):
+        raise ValueError('inconsistent reference prices')
+
+
 def main():
     import boto3
     parser=argparse.ArgumentParser();parser.add_argument('--config',type=Path,required=True);parser.add_argument('--report-only',action='store_true');args=parser.parse_args()
@@ -103,10 +119,11 @@ def main():
                 if tool=='recommend_classical_portfolio':request['algorithm']=book['strategy']
                 if not progress.get('decision_id'):
                     result=driver.direct(name+'-recommendation',tool,request);progress.update(name=name,portfolio_id=pid,decision_id=result['decision_id'],before_revision=before['revision'],snapshot=result['recommendation']['input_snapshot_id'],market_date=result['recommendation']['as_of']);save(progress_path,progress)
-                did=progress['decision_id'];driver.hosted(name+'-recommendation-hosted',{'tool_request':{'name':tool,'arguments':request}},tool=tool)
+                did=progress['decision_id'];stored=driver.direct(name+'-acceptance-evidence','get_portfolio_decision',{'decision_id':did})['decision']
+                validate_recommendation({'recommendation':stored['recommendation'],'synthetic':stored['synthetic']},pid,progress['before_revision'])
+                driver.hosted(name+'-recommendation-hosted',{'tool_request':{'name':tool,'arguments':request}},tool=tool)
                 driver.hosted(name+'-explain',{'prompt':'Why does decision '+did+' recommend this action for Google?'},tool='explain_portfolio_decision')
-                try:driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
-                except Exception as error:summary['failures'].append({'case':name+'-deep-dive','error':str(error)})
+                driver.hosted(name+'-deep-dive',{'prompt':'Deep dive into performance and news for '+did},tool='evaluate_portfolio_decision')
                 older=next((r for r in previous if r.get('algorithm')==book['strategy']and r.get('execution',{}).get('reference_date')!=progress['market_date']),None)
                 if older:driver.hosted(name+'-comparison',{'prompt':'Compare decisions '+older['decision_id']+' and '+did},tool='compare_portfolio_decisions')
                 if not progress.get('alternative_id'):
