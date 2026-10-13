@@ -46,7 +46,7 @@ def cycle(**changes):
 
 @pytest.mark.parametrize("prompt", ["Enrich the PPO state with correlations", "Compare PPO state features", "Review PPO state with news"])
 def test_state_research_uses_producer_preview_without_paid_launch(recommendation, prompt):
-    service, tools = setup(recommendation, {"run_recursive_improvement": cycle()})
+    service, tools = setup(recommendation, {"run_recursive_improvement": lambda _: cycle()})
     response = ask(service, prompt)
     calls = [arguments for name, arguments in tools.calls if name == "run_recursive_improvement"]
     assert calls and all(c.get("dry_run", True) for c in calls)
