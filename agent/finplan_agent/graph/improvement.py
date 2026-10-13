@@ -10,6 +10,7 @@ from .recommendations import saved_portfolio_reference
 _CYCLE = re.compile(r"\bca_[0-9a-f]{32}\b")
 _RECURSIVE = re.compile(r"\b(?:recursive|self[ -]?improv\w*|improvement cycle|research cycle|improvement agent)\b", re.I)
 _BENCHMARK = re.compile(r"\b(?:qwen|swarm|jev|typesafe)\b", re.I)
+_STATE_RESEARCH = re.compile(r"\b(?:ppo|reinforcement)\b[^.!?]{0,100}\b(?:state|features|ablation|correlation|regime|sequence)\b|\b(?:state|features)\b[^.!?]{0,100}\bppo\b", re.I)
 _LAUNCH = re.compile(r"\b(?:run|launch|start|trigger)\b[^.!?]{0,80}\b(?:experiment|benchmark|iteration|job)\b", re.I)
 
 
@@ -84,7 +85,7 @@ def improvement_plan(state, session_id):
             result = block.get("tool_result", {})
             if result.get("name") == "run_recursive_improvement" and result.get("status") == "success" and isinstance(result.get("content"), dict):
                 history.append(result["content"])
-    explicit = bool(_RECURSIVE.search(text) or _BENCHMARK.search(text))
+    explicit = bool(_RECURSIVE.search(text) or _BENCHMARK.search(text) or _STATE_RESEARCH.search(text))
     benchmark_history = _benchmark_history(messages)
     followup = bool(history and re.search(r"\b(?:cycle|iteration|next experiment|resume|continue|lineage)\b", text, re.I)) or bool(benchmark_history and _LAUNCH.search(text) and re.search(r"\bbenchmark\b", text, re.I))
     if not explicit and not followup:

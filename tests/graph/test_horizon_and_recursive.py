@@ -44,6 +44,15 @@ def cycle(**changes):
             "activation": {"status": "proposal_only"}, "lineage": {"source_analysis_ids": [ANALYSIS]}, **changes}
 
 
+@pytest.mark.parametrize("prompt", ["Enrich the PPO state with correlations", "Compare PPO state features", "Review PPO state with news"])
+def test_state_research_uses_producer_preview_without_paid_launch(recommendation, prompt):
+    service, tools = setup(recommendation, {"run_recursive_improvement": cycle()})
+    response = ask(service, prompt)
+    calls = [arguments for name, arguments in tools.calls if name == "run_recursive_improvement"]
+    assert calls and all(c.get("dry_run", True) for c in calls)
+    assert response["status"] == "completed", response
+
+
 @pytest.mark.parametrize("protocol_status", ["predeclared_at_issuance", "retrospective_historical_request"])
 def test_partial_horizon_is_visible_separately_from_daily_loss(recommendation, protocol_status):
     horizon = {"status": "available", "available_forward_sessions": 2, "full_policy_replay": True,

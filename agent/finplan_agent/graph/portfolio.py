@@ -278,6 +278,8 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
     if kind == "market_events":
         parts.append("Market context: " + str(doc.get("status", doc.get("source_status", "not_available"))) + ". " + str(doc.get("reason", "")))
         parts.append("News metadata provides dated context, not causal attribution. Full query and source records remain in the structured analysis.")
+        if doc.get("news_training_evidence"):
+            parts.append("Collected news is available for research only from its actual collection time. Historical training coverage is unavailable; the headline extractor is an uncalibrated research hypothesis.")
     if kind in ("research", "research_run", "feedback", "recursive_cycle", "recursive_iteration"):
         details = {k: v for k, v in doc.items() if k not in ("analysis_ref", "analysis_id", "created_at", "summary", "contract_version", "synthetic")}
         parts.append("Stored evidence:\n```json\n" + json.dumps(details, indent=2, sort_keys=True) + "\n```")
