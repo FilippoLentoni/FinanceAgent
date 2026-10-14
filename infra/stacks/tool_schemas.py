@@ -257,6 +257,20 @@ def project(schema_key: str, store: SchemaStore | None = None) -> dict[str, Any]
     return out
 
 
+def _output_shape(schema: dict[str, Any]) -> dict[str, Any]:
+    """Keep output types and members; omit verbose prose from the inline catalog.
+
+    The pinned response contracts remain authoritative in the Lambda adapters.
+    Input descriptions stay intact for callers and policy schema validation.
+    """
+    result = {key: value for key, value in schema.items() if key != "description"}
+    if "properties" in result:
+        result["properties"] = {key: _output_shape(value) for key, value in result["properties"].items()}
+    if "items" in result:
+        result["items"] = _output_shape(result["items"])
+    return result
+
+
 def tool_definition(tool: str, description: str | None = None, store: SchemaStore | None = None) -> ToolDefinition:
     store = store or load_store()
     stem = tool.replace("_", "-")
@@ -271,7 +285,7 @@ def tool_definition(tool: str, description: str | None = None, store: SchemaStor
     elif tool in CLASSICAL_ONLY_TOOLS or tool in CLASSICAL_SHARED_TOOLS:
         from finplan_agent.skills import classical_mcp_description
         desc = classical_mcp_description(tool, desc)
-    return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)
+    return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=_output_shape(project(resp.name, store)), input_schema_id=req.id, output_schema_id=resp.id)
 
 
 _KEYS = {"type": "Type", "description": "Description", "properties": "Properties", "required": "Required", "items": "Items"}

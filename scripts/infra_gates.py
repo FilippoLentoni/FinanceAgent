@@ -393,7 +393,7 @@ def gate_template_leaks(ctx: GateContext) -> list[str]:
 
 
 def gate_template_size(ctx: GateContext) -> list[str]:
-    return [f"{p.name}: {p.stat().st_size} bytes exceeds CloudFormation's 1 MB S3 template limit" for p in templates_of(ctx.assembly) if p.stat().st_size > 1024 * 1024]
+    return [f"{p.name}: {p.stat().st_size} bytes exceeds CloudFormation's 1 MB S3 template limit" for p in templates_of(ctx.assembly) if p.stat().st_size > 1_000_000]
 
 
 Gate = tuple[str, Callable[[GateContext], list[str]]]
