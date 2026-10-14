@@ -10,7 +10,9 @@ def crypto_plan(state, session_id):
     messages=state.get("messages", [])
     user=next((m for m in reversed(messages) if m.get("role")=="user" and any('text' in b for b in m.get('content',[]))),{})
     text=text_of(user)
-    if not re.search(r"\b(?:crypto|bitcoin|ethereum|btc|eth)\b",text,re.I):return None
+    crypto=re.search(r"\b(?:crypto|bitcoin|ethereum|btc|eth)\b",text,re.I)
+    coinbase_paper=re.search(r"\bcoinbase\b",text,re.I) and re.search(r"\b(?:paper|synthetic|simulat\w*)\b",text,re.I) and not re.search(r"\b(?:stocks?|equities|equity)\b",text,re.I)
+    if not (crypto or coinbase_paper):return None
     if any(r.get("tool") in TOOLS for r in state.get("tool_results",[])):
         return {"workflow":{"kind":"crypto_paper","mode":"crypto_paper"},"calls":[]}
     name="get_crypto_experiment";args={}

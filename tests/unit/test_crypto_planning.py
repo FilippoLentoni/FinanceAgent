@@ -18,3 +18,11 @@ def test_crypto_eligibility_history_discovery_and_live_denial():
     assert crypto_plan(state('crypto portfolio evolution'),'s')['calls'][0].name=='list_crypto_history'
     assert crypto_plan(state('discover crypto news'),'s')['calls'][0].name=='discover_research_data'
     assert classify_request('Buy $100 of bitcoin in my Coinbase account')['kind']=='live_financial_action'
+
+
+def test_coinbase_simulation_is_a_paper_read_but_live_orders_remain_denied():
+    prompt='Simulate a $100 Coinbase portfolio'
+    assert classify_request(prompt) is None
+    assert crypto_plan(state(prompt),'s')['calls'][0].name=='get_crypto_experiment'
+    assert classify_request('Please buy $100 of bitcoin in my Coinbase account')['kind']=='live_financial_action'
+    assert classify_request('Simulate a portfolio then execute a live order')['kind']=='live_financial_action'

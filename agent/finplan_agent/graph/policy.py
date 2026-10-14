@@ -66,7 +66,7 @@ class Refusal(dict):
 
 def classify_request(text: str) -> Refusal | None:
     checked_text = text
-    if re.search(r"\b(?:market data|research data|news|bazaar|x402|synthetic|paper|simulation)\b", text, re.I):
+    if re.search(r"\b(?:market data|research data|news|bazaar|x402|synthetic|paper|simulat\w*)\b", text, re.I):
         checked_text = re.sub(r"\bcoinbase\b", "", text, flags=re.I)
     if _LIVE.search(checked_text):
         return Refusal(code="OPERATION_NOT_PERMITTED", kind="live_financial_action", message="Live trading, brokerage, exchange, payment and wallet actions are not available; only paper or simulated execution exists.")
