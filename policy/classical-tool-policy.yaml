@@ -3,6 +3,10 @@ version: 1
 roles:
   viewer:
     tools:
+    - get_crypto_experiment
+    - recommend_crypto_portfolio
+    - list_crypto_history
+    - discover_research_data
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -35,6 +39,10 @@ roles:
     - evaluate_portfolio_decision
   researcher:
     tools:
+    - get_crypto_experiment
+    - recommend_crypto_portfolio
+    - list_crypto_history
+    - discover_research_data
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -67,6 +75,10 @@ roles:
     - evaluate_portfolio_decision
   plan_editor:
     tools:
+    - get_crypto_experiment
+    - recommend_crypto_portfolio
+    - list_crypto_history
+    - discover_research_data
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -99,6 +111,10 @@ roles:
     - evaluate_portfolio_decision
   plan_publisher:
     tools:
+    - get_crypto_experiment
+    - recommend_crypto_portfolio
+    - list_crypto_history
+    - discover_research_data
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -131,6 +147,10 @@ roles:
     - evaluate_portfolio_decision
   ci_test:
     tools:
+    - get_crypto_experiment
+    - recommend_crypto_portfolio
+    - list_crypto_history
+    - discover_research_data
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans

@@ -22,6 +22,11 @@ def recommendation_mcp_description(description: str, root=None) -> str:
 
 
 CLASSICAL_SKILLS = {
+    'get_crypto_experiment': 'crypto-paper-research',
+    'recommend_crypto_portfolio': 'crypto-paper-research',
+    'list_crypto_history': 'crypto-paper-research',
+    'discover_research_data': 'crypto-paper-research',
+
     'get_portfolio_history': 'paper-portfolio-lifecycle',
     'list_portfolio_decisions': 'paper-portfolio-lifecycle',
     'get_portfolio_decision': 'paper-portfolio-lifecycle',

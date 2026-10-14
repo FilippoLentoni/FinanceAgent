@@ -28,6 +28,7 @@ from ..core.ids import idempotency_key
 from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec, Usage, text_of
 from ..providers.fixture import FixtureProvider
 from .claim_check import claim_check
+from .crypto import crypto_plan, render_crypto, TOOLS as CRYPTO_TOOLS
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
 from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
 from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
@@ -174,7 +175,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     )
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
-    workflow = improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
+    workflow = crypto_plan(state, ctx.session_id) or improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
     if workflow is not None:
         updates["portfolio_workflow"] = workflow["workflow"]
         if workflow.get("clarification"):
@@ -308,7 +309,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
                 if name == "list_agent_activity":
                     from .activity import activity_history_references
                     result = activity_history_references(result)
-                kept, summary = compact(result, 65536 if name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                kept, summary = compact(result, 65536 if name in CRYPTO_TOOLS or name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
@@ -350,7 +351,7 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     ctx = runtime.context
     _progress("narrate")
     if state.get("portfolio_workflow"):
-        text, _ = render_portfolio_results(state)
+        text = render_crypto(state) if state["portfolio_workflow"].get("kind") == "crypto_paper" else render_portfolio_results(state)[0]
         _emit({"type": "token", "text": text})
         failed = next((r for r in state.get("tool_results") or [] if not r.get("ok") and not r.get("declined")), None)
         return {"narrative": text, "narrative_status": "generated", **({"status": "failed", "error": failed.get("error")} if failed else {})}
@@ -402,7 +403,8 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
         return {"claim_check": {"passed": True, "checked_figures": 0, "removed_figures": []}}
     values = [r.get("result", r.get("summary")) for r in state.get("tool_results") or [] if r.get("ok")]
     if state.get("portfolio_workflow"):
-        values.extend(render_portfolio_results(state)[1])
+        if state["portfolio_workflow"].get("kind") != "crypto_paper":
+            values.extend(render_portfolio_results(state)[1])
     # The cash dollar target is the one derived figure in the deterministic recommendation
     # renderer: verify the same exact multiplication of fresh producer value and target weight.
     for item in state.get("tool_results") or []:

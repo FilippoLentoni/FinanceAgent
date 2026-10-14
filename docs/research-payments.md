@@ -106,3 +106,22 @@ Primary references:
 - [Coinbase Marketplace prerequisite](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/payments-marketplace-subscription.html)
 - [AWS Bazaar integration](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/payments-connect-bazaar.html)
 - [Circle USDC contract addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses)
+
+## Hourly crypto paper study
+
+The add-hourly-crypto-paper-research change exposes public Bazaar discovery and
+crypto paper evidence to the hosted LangGraph agent through the classical MCP
+Gateway. The crypto-paper-research skill separates daily equity advice from
+hourly BTC/ETH recommendations and forwards numerical claims through the normal
+claim checker. Hosted payment signing and live Coinbase trading remain disabled.
+
+The authorized Coinbase payment auth was linked through a separate manual-config
+connector, because AWS does not let an existing Quick Create connector switch
+credential providers. The original pending connector is not an active payment
+route. Wallet creation required exact per-connector service-role grants for
+GetResourcePaymentToken and the credential provider's backing secrets, as described
+in the AWS service-role documentation; these grants are retained privately with
+the account-specific setup evidence. Management and execution roles receive no
+secret access. Wallet activation and a bounded session succeeded; authenticated
+payment and merchant delivery still need verification before the payment change
+can be archived.
