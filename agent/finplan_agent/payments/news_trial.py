@@ -114,7 +114,7 @@ class NewsTrial:
         self.ledger.write(identifier, record)
         return identifier, record
 
-    def collect(self, asset, *, management, execution, state, project_preflight, now=None, transport=fetch):
+    def collect(self, asset, *, management, execution, state, project_preflight, now=None, transport=fetch, resume_id=None):
         now = now or datetime.now(UTC)
         body = {'query': f'{asset} cryptocurrency market news', 'category': 'news', 'numResults': 5}
         with self.ledger.lock():
@@ -134,11 +134,26 @@ class NewsTrial:
             amount = Decimal(str(token['amount'])) / 1_000_000
             if not amount.is_finite() or amount < Decimal('0.03'):
                 raise ValueError('funded Base USDC wallet required')
-            status, headers, _ = transport(body)
-            if status != 402:
-                raise ValueError('expected an explicit unpaid payment quote')
-            challenge = challenge_from(headers)
-            identifier, record = self.reserve(asset, challenge, body, now=now)
+            if resume_id is None:
+                status, headers, _ = transport(body)
+                if status != 402:
+                    raise ValueError('expected an explicit unpaid payment quote')
+                challenge = challenge_from(headers)
+                identifier, record = self.reserve(asset, challenge, body, now=now)
+            else:
+                identifier = resume_id
+                record = self.ledger.read(identifier)
+                config = self.ledger.read(CONFIG)
+                if not datetime.fromisoformat(config['started_at']) <= now < datetime.fromisoformat(config['expires_at']):
+                    raise ValueError('trial is outside its authorized seven-day window')
+                challenge = record['challenge']
+                if (record['status'] not in ('reserved', 'signing_unknown')
+                        or record['request'] != body or record['request_checksum'] != digest(body)
+                        or record['challenge_checksum'] != digest(challenge)
+                        or validate(challenge) != record['reserved_atomic']):
+                    raise ValueError('receipt cannot be resumed with changed inputs or after delivery')
+                if now >= datetime.fromisoformat(record['reserved_at']) + timedelta(minutes=15):
+                    raise ValueError('original session window expired; investigate without a replacement purchase')
             try:
                 session = management.create_payment_session(**common, limits={'maxSpendAmount': {'value': '0.03', 'currency': 'USD'}},
                     expiryTimeInMinutes=15, clientToken=record['client_token'])['paymentSession']

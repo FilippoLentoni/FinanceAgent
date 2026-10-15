@@ -75,3 +75,16 @@ def test_no_funding_never_activates_trial_or_creates_session(tmp_path):
     t=trial(tmp_path);c=Client(balance='0')
     with pytest.raises(ValueError,match='funded'):t.collect('BTC',management=c,execution=c,state=STATE,project_preflight=lambda:None,now=NOW,transport=transport)
     assert c.calls==[] and t.ledger.read(CONFIG)['started_at'] is None
+
+
+def test_explicit_signing_resume_reuses_original_reservation_and_rejects_completed_delivery(tmp_path):
+    t=trial(tmp_path);c=Client(fail=True)
+    with pytest.raises(TimeoutError):t.collect('BTC',management=c,execution=c,state=STATE,project_preflight=lambda:None,now=NOW,transport=transport)
+    records=[p for p in t.ledger.directory.glob('*.json') if p.stem!=CONFIG]
+    identifier=records[0].stem;before=t.ledger.read(identifier);c.fail=False
+    result=t.collect('BTC',management=c,execution=c,state=STATE,project_preflight=lambda:None,now=NOW+timedelta(minutes=1),transport=transport,resume_id=identifier)
+    after=t.ledger.read(identifier)
+    assert result['results']==1 and before['client_token']==after['client_token']
+    assert len(list(t.ledger.directory.glob('*.json')))==2 and after['reserved_atomic']==11000
+    with pytest.raises(ValueError,match='after delivery'):
+        t.collect('BTC',management=c,execution=c,state=STATE,project_preflight=lambda:None,now=NOW+timedelta(minutes=2),transport=transport,resume_id=identifier)

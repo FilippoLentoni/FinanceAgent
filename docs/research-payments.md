@@ -164,3 +164,19 @@ policy training or optimization input is changed until quality, licensing and
 point-in-time checks pass. A successful signed proof is not settlement evidence;
 a received search result is not proof of improved investment performance. The
 existing testnet adapter and hosted chat permission denials remain unchanged.
+
+### First funded purchase verification
+
+On October 14, 2026 (America/New_York), the research wallet received 1 USDC on
+Base. The first signing request was refused because delegated signing permission
+was inactive. After the owner enabled that permission, the operator explicitly
+resumed the same receipt, session and idempotency token; no second reservation
+was created. The provider returned HTTP 200 with five BTC news-search results
+for a reserved USD 0.011. Evidence remains private and quarantined; research
+rights and quality checks have not been completed. Hourly paid collection remains
+uninstalled until the collection activation step is completed.
+
+An interrupted signing request can be explicitly reconciled within the original
+15-minute session window using `collect --asset BTC --resume-receipt <receipt-id>`.
+This never buys a replacement for an unknown or already delivered response. It
+reuses the original challenge, request, session token and payment token.

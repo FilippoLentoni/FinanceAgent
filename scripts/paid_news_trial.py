@@ -17,6 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'preflight', 'collect'])
     parser.add_argument('--asset', choices=['BTC', 'ETH'])
+    parser.add_argument('--resume-receipt', help='Explicitly retry signing with the original reservation and idempotency token')
     args = parser.parse_args()
     trial = NewsTrial(DIRECTORY)
     if args.action == 'prepare':
@@ -40,7 +41,7 @@ def main():
         print(json.dumps({'status':'balance_observed','chain':token['chain'],'token':token['token'],'amount_atomic':token['amount'],'decimals':token['decimals']})); return
     if not args.asset:
         parser.error('collect requires --asset')
-    print(json.dumps(trial.collect(args.asset, management=management, execution=client('Execution'), state=state, project_preflight=lambda: budget_preflight(s))))
+    print(json.dumps(trial.collect(args.asset, management=management, execution=client('Execution'), state=state, project_preflight=lambda: budget_preflight(s), resume_id=args.resume_receipt)))
 
 
 if __name__ == '__main__':
