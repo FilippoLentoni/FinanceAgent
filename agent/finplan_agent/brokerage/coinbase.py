@@ -158,7 +158,9 @@ def readiness(client=None):
     if client is None:
         return {'status':'setup_required','authenticated':False,'live_execution_enabled':False,
                 'etf_eligibility_verified':False,
-                'message':'Coinbase ETF brokerage is not connected. The AgentCore Payments research wallet cannot read brokerage holdings or submit ETF orders. A separately approved Coinbase client and brokerage consent are required; no holdings or ETF eligibility have been verified.'}
+                'message':'Coinbase ETF brokerage is not connected. The AgentCore Payments research wallet cannot read brokerage holdings or submit ETF orders. A separately scoped Coinbase brokerage credential and verified account access are required; no holdings or ETF eligibility have been verified.'}
     result = client.capabilities()
+    if result.get('status') == 'scope_confirmation_required':
+        return {**result, 'message':'The View-only brokerage key is valid. Confirm its portfolio UUID in deployment configuration before account reads; ETF eligibility remains unverified.'}
     return {**result, 'authenticated':True,
             'message':'Brokerage authentication succeeded; eligible ETF products and account scopes must still be verified. This is capability discovery, not an order or execution quote.'}

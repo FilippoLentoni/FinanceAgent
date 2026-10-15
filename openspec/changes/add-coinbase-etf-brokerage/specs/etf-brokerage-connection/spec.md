@@ -3,7 +3,7 @@ Prepare eligible ETF brokerage portfolio integration through an authenticated Co
 
 ## ADDED Requirements
 ### Requirement: Authenticated read-only discovery
-The integration SHALL discover current account, portfolio, product and order-read capabilities using independently authenticated Coinbase brokerage access. Research-wallet credentials MUST NOT substitute for brokerage authorization.
+The integration SHALL discover current account, portfolio, product and order-read capabilities using independently authenticated Coinbase brokerage access. Direct API keys MUST be View-only and bound to an explicitly confirmed portfolio. Research-wallet credentials MUST NOT substitute for brokerage authorization.
 #### Scenario: Credentials unavailable
 - **WHEN** no independently authenticated brokerage client is configured
 - **THEN** readiness reports setup required and does not fabricate account holdings or eligibility.

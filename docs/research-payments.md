@@ -180,3 +180,31 @@ An interrupted signing request can be explicitly reconciled within the original
 15-minute session window using `collect --asset BTC --resume-receipt <receipt-id>`.
 This never buys a replacement for an unknown or already delivered response. It
 reuses the original challenge, request, session token and payment token.
+
+## ETF-focused central research collection
+
+`add-etf-news-model-inputs` adds the fixed `ETF_MARKET` search profile to the same
+canonical USD 10 ledger. Existing BTC/ETH receipts and the original seven-day
+expiry remain authoritative. One shared query covers market-wide context for
+SPY/VOO; it is not a claim that each headline describes each fund specifically.
+
+The first ETF-focused purchase returned five dated search results for USD 0.011.
+Only title/URL/publication metadata is imported, with settlement and delivery
+checksums. A retained operator assessment scopes API metadata to internal research
+only under the reviewed provider terms; it grants no article redistribution or
+model-training rights. Article bodies are not fetched. Publication timestamps are
+provider-reported and may have only day precision; actual central availability is
+stamped at import and never backdated. Freshness filtering may exclude older rows.
+
+`publish_paid_news.py --receipt <id>` assumes the dedicated platform publisher role
+and signs POST /v1/research-news. Its role can invoke only that route and the news
+readback route. A frozen request can be republished without buying again. Private
+payment proofs, wallet state and credentials stay in the local ledger.
+
+The checked-in `operator/systemd/finplan-etf-news.*` units run the single-host
+collector at 09:35 through 15:35 America/New_York on weekdays. The XNYS calendar
+also excludes holidays and early-close hours. The script stops the timer after
+trial expiry, stops purchases on low funds/cap failure, and repairs pending
+central publications before buying more news. It uses the platform environment's
+pinned exchange calendar. This is an operator-host trial, not a distributed or
+production payment service. Activation must be verified and retained separately.

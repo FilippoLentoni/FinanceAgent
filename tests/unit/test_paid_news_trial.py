@@ -52,7 +52,7 @@ class Client:
         return {'status':'PROOF_GENERATED','paymentOutput':{'cryptoX402':{'payload':{'signature':'synthetic-proof'}}}}
 
 
-STATE={'manager_arn':'arn:aws:bedrock-agentcore:us-east-2:111111111111:payment-manager/finplanbetaresearch-abcdefghij','user_id':'test-user','instrument_id':'payment-instrument-'+'i'*20,'connector_id':'connector-test'}
+STATE={'manager_arn':'arn:aws:bedrock-agentcore:us-east-2:'+'1'*12+':payment-manager/finplanbetaresearch-abcdefghij','user_id':'test-user','instrument_id':'payment-instrument-'+'i'*20,'connector_id':'connector-test'}
 
 
 def transport(body,headers=None):

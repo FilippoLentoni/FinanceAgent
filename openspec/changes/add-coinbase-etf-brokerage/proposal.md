@@ -4,7 +4,7 @@
 The research wallet can pay for data but cannot manage Coinbase brokerage ETF positions. The LangGraph agent needs a distinct authenticated brokerage boundary, verified product eligibility, and reviewable order planning before future execution.
 
 ## What Changes
-- Add an authenticated read-only Coinbase MCP adapter and capability discovery.
+- Add independently authenticated read-only Coinbase MCP and Advanced Trade REST adapters with capability and permission discovery.
 - Add deterministic ETF-only order drafts, portfolio constraints, and fill reconciliation; reject execution by default.
 - Add LangGraph connection-readiness conversation and documented setup requirements without inventing holdings.
 - Record authenticated deployment and ETF eligibility as explicit external gates; no orders, account funding, or brokerage account creation is authorized by this change.

@@ -19,6 +19,8 @@ dependencies = [
     # AgentCore Runtime HTTP service contract (/invocations, /ping on 0.0.0.0:8080).
     "bedrock-agentcore>=1.0,<2",
     "boto3>=1.40",
+    # Direct own-account Coinbase View-only request JWTs (ECDSA P-256).
+    "cryptography>=46,<51",
 ]
 
 [dependency-groups]
