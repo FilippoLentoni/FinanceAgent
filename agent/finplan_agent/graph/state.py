@@ -111,6 +111,8 @@ class AgentContext:
     durable_activity: bool = False
     #: Explanation settings (``finplan_agent.explanations.config.ExplanationSettings``).
     explanations: Any = None
+    #: Optional independently authenticated brokerage reader; never checkpointed.
+    brokerage: Any = None
     _offered: list[ToolSpec] | None = field(default=None, repr=False)
 
     def offered_tools(self) -> list[ToolSpec]:

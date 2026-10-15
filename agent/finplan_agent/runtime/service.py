@@ -79,6 +79,8 @@ class Deps:
     provider_loader: Callable[[], tuple[ProviderConfig, ExplanationProvider]] | None = None
     provider_refresh_seconds: float = 60.0
     durable_activity: bool = False
+    #: Approved per-caller brokerage reader; absent until separate OAuth activation.
+    brokerage_client_factory: Callable[[Caller], Any] | None = None
 
 
 class AgentService:
@@ -224,6 +226,7 @@ class AgentService:
             on_spend=getattr(spend, "record_local", None),
             explanations=self.deps.explanation_settings,
             durable_activity=self.deps.durable_activity,
+            brokerage=self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None,
         )
 
     def _final(self, config: dict[str, Any], session_id: str, correlation_id: str) -> dict[str, Any]:
@@ -250,6 +253,8 @@ class AgentService:
                 "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in st.get("tool_results") or [] if r.get("ok") and r.get("result", {}).get("recommendation")),None),
                 "portfolio_decisions": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and (r["result"].get("decision_id") or r["result"].get("decision"))],
                 "activity_receipt": st.get("activity_receipt"),
+                "etf_research_inputs": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_research_inputs" and isinstance(r.get("result"), dict)],
+                "brokerage_connection_status": next((r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_connection_status"), None),
                 "portfolio_analyses": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and r["result"].get("analysis_id")],
             },
             "confirmation": confirmation,

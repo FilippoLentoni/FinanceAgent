@@ -16,7 +16,7 @@ STATE = ROOT.parent / '.worktmp/agentcore-payments-20261013/state.json'
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'preflight', 'collect'])
-    parser.add_argument('--asset', choices=['BTC', 'ETH'])
+    parser.add_argument('--asset', choices=['BTC', 'ETH', 'ETF_MARKET'])
     parser.add_argument('--resume-receipt', help='Explicitly retry signing with the original reservation and idempotency token')
     args = parser.parse_args()
     trial = NewsTrial(DIRECTORY)

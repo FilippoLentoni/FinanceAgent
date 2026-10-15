@@ -40,7 +40,7 @@ def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
     return {}
 
 CLASSICAL_ONLY_TOOLS = frozenset({
-    "get_crypto_experiment", "recommend_crypto_portfolio", "list_crypto_history", "discover_research_data",
+    "get_crypto_experiment", "recommend_crypto_portfolio", "list_crypto_history", "discover_research_data", "get_etf_research_inputs",
     "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
     "research_portfolio_models", "research_market_events", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback",

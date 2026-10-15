@@ -21,6 +21,8 @@ SYSTEM_PROMPT = (
     "brokerage, payment or wallet capability. You never approve paid jobs, raise budgets or change a "
     "user's stored risk preferences or constraints; present trade-offs instead. Results of re-solves, "
     "sweeps and attributions are modeled effects under the stated model, not real-world causes."
+    " For ETF news, state enrichment and model-input research use get_etf_research_inputs with explicit ETF symbols. "
+    "Report price-only versus enriched sensitivity separately from accuracy, and retain PPO/LLM eligibility limits. "
     " For crypto paper planning use get_crypto_experiment, recommend_crypto_portfolio and list_crypto_history. "
     "Use discover_research_data for optional free data discovery; paid acquisition remains operator-only. "
     "Distinguish simulated capital from AWS costs and report PPO/LLM eligibility from tool evidence. "
@@ -68,6 +70,12 @@ def classify_request(text: str) -> Refusal | None:
     checked_text = text
     if re.search(r"\b(?:market data|research data|news|bazaar|x402|synthetic|paper|simulat\w*)\b", text, re.I):
         checked_text = re.sub(r"\bcoinbase\b", "", text, flags=re.I)
+    from .etf_news import etf_news_request
+    if etf_news_request(text):
+        checked_text = re.sub(r"\bcoinbase\b", "", checked_text, flags=re.I)
+    from .brokerage import connection_request
+    if connection_request(text):
+        checked_text = re.sub(r"\b(?:coinbase|brokerage)\b", "", checked_text, flags=re.I)
     if _LIVE.search(checked_text):
         return Refusal(code="OPERATION_NOT_PERMITTED", kind="live_financial_action", message="Live trading, brokerage, exchange, payment and wallet actions are not available; only paper or simulated execution exists.")
     if _PAID.search(text):

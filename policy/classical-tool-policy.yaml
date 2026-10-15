@@ -7,6 +7,7 @@ roles:
     - recommend_crypto_portfolio
     - list_crypto_history
     - discover_research_data
+    - get_etf_research_inputs
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -43,6 +44,7 @@ roles:
     - recommend_crypto_portfolio
     - list_crypto_history
     - discover_research_data
+    - get_etf_research_inputs
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -79,6 +81,7 @@ roles:
     - recommend_crypto_portfolio
     - list_crypto_history
     - discover_research_data
+    - get_etf_research_inputs
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -115,6 +118,7 @@ roles:
     - recommend_crypto_portfolio
     - list_crypto_history
     - discover_research_data
+    - get_etf_research_inputs
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans
@@ -151,6 +155,7 @@ roles:
     - recommend_crypto_portfolio
     - list_crypto_history
     - discover_research_data
+    - get_etf_research_inputs
     - recommend_classical_portfolio
     - explain_classical_recommendation
     - compare_classical_plans

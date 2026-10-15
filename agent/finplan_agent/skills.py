@@ -22,6 +22,7 @@ def recommendation_mcp_description(description: str, root=None) -> str:
 
 
 CLASSICAL_SKILLS = {
+    'get_etf_research_inputs': 'etf-news-research',
     'get_crypto_experiment': 'crypto-paper-research',
     'recommend_crypto_portfolio': 'crypto-paper-research',
     'list_crypto_history': 'crypto-paper-research',

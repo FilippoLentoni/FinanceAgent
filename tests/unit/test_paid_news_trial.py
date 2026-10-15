@@ -88,3 +88,16 @@ def test_explicit_signing_resume_reuses_original_reservation_and_rejects_complet
     assert len(list(t.ledger.directory.glob('*.json')))==2 and after['reserved_atomic']==11000
     with pytest.raises(ValueError,match='after delivery'):
         t.collect('BTC',management=c,execution=c,state=STATE,project_preflight=lambda:None,now=NOW+timedelta(minutes=2),transport=transport,resume_id=identifier)
+
+
+def test_etf_profile_uses_original_cap_and_trial_expiry(tmp_path):
+    from finplan_agent.payments.news_trial import query_body
+    t=trial(tmp_path)
+    with t.ledger.lock():
+        first,_=t.reserve('BTC',challenge(),query_body('BTC'),now=NOW)
+        original=t.ledger.read(CONFIG)
+        etf,_=t.reserve('ETF_MARKET',challenge(),query_body('ETF_MARKET'),now=NOW+timedelta(hours=1))
+        assert t.ledger.read(CONFIG)==original
+        assert t.ledger.read(etf)['profile']=='ETF_MARKET'
+        assert 'ETF market news' in t.ledger.read(etf)['request']['query']
+        assert sum(json.loads(p.read_text()).get('reserved_atomic',0) for p in t.ledger.directory.glob('*.json'))==22000

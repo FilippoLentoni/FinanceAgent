@@ -1,0 +1,4 @@
+name: etf-brokerage-readiness
+version: 0.1.0
+purpose: Explain independently authenticated ETF brokerage connection readiness and external account eligibility gates.
+tools: []

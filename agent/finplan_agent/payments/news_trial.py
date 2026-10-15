@@ -20,6 +20,18 @@ CAP = 10_000_000
 PER_CALL = 30_000
 CONFIG = '0' * 32
 MAX_BYTES = 1_048_576
+PROFILES = {
+    'BTC': 'BTC cryptocurrency market news',
+    'ETH': 'ETH cryptocurrency market news',
+    'ETF_MARKET': 'Latest US ETF market news S&P 500 bond yields Federal Reserve inflation international equities',
+}
+
+
+def query_body(profile):
+    if profile not in PROFILES:
+        raise ValueError('unsupported research profile')
+    return {'query': PROFILES[profile], 'category': 'news', 'numResults': 5}
+
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -90,7 +102,7 @@ class NewsTrial:
 
     def reserve(self, asset, challenge, body, *, now):
         """Caller holds the lock across funding, reservation, signing and delivery."""
-        if asset not in ('BTC', 'ETH'):
+        if asset not in PROFILES:
             raise ValueError('unsupported research asset')
         config = self.ledger.read(CONFIG)
         if config.get('cap_atomic') != CAP or config.get('endpoint') != ENDPOINT or config.get('recipient') != RECIPIENT:
@@ -110,13 +122,13 @@ class NewsTrial:
             raise ValueError('USD 10 cumulative trial cap exhausted')
         record = {'slot': slot, 'reserved_atomic': amount, 'request': body, 'request_checksum': digest(body),
                   'challenge': challenge, 'challenge_checksum': digest(challenge), 'status': 'reserved',
-                  'client_token': str(uuid.UUID(hex=identifier)), 'reserved_at': now.isoformat()}
+                  'client_token': str(uuid.UUID(hex=identifier)), 'reserved_at': now.isoformat(), 'profile': asset}
         self.ledger.write(identifier, record)
         return identifier, record
 
     def collect(self, asset, *, management, execution, state, project_preflight, now=None, transport=fetch, resume_id=None):
         now = now or datetime.now(UTC)
-        body = {'query': f'{asset} cryptocurrency market news', 'category': 'news', 'numResults': 5}
+        body = query_body(asset)
         with self.ledger.lock():
             # Fail before activating, reserving or creating any paid session.
             project_preflight()

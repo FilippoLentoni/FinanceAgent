@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly ETF news during New York regular sessions, bounded by trial expiry
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09..15:35:00 America/New_York
+Persistent=false
+Unit=finplan-etf-news.service
+
+[Install]
+WantedBy=timers.target
