@@ -23,7 +23,8 @@ def etf_news_plan(state, session_id):
     if any(r.get('tool')==TOOL for r in state.get('tool_results',[])):
         return {'workflow':workflow,'calls':[]}
     if explicit is not None:
-        return {'workflow':workflow,'calls':[ToolCall(id=f'etf-news-{state.get("turn",1)}',name=TOOL,arguments=dict(explicit.get('arguments') or {}))]}
+        if 'algorithm' not in args and re.search(r'\brecommend\w*\b',text,re.I):args['algorithm']='mean_variance'
+    return {'workflow':workflow,'calls':[ToolCall(id=f'etf-news-{state.get("turn",1)}',name=TOOL,arguments=dict(explicit.get('arguments') or {}))]}
     args={'symbols':symbols or ['SPY','VOO']}
     baseline=re.search(r'\bca_[0-9a-f]{32}\b',text)
     if baseline:args['baseline_analysis_id']=baseline.group()
@@ -34,6 +35,7 @@ def etf_news_plan(state, session_id):
     if re.search(r'\bcvar\b',text,re.I):args['algorithm']='cvar'
     elif re.search(r'\bmin(?:imum)?[ -]?variance\b',text,re.I):args['algorithm']='min_variance'
     elif re.search(r'\bmean[ -]?variance\b',text,re.I):args['algorithm']='mean_variance'
+    if 'algorithm' not in args and re.search(r'\brecommend\w*\b',text,re.I):args['algorithm']='mean_variance'
     return {'workflow':workflow,'calls':[ToolCall(id=f'etf-news-{state.get("turn",1)}',name=TOOL,arguments=args)]}
 
 
