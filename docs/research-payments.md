@@ -125,3 +125,42 @@ the account-specific setup evidence. Management and execution roles receive no
 secret access. Wallet activation and a bounded session succeeded; authenticated
 payment and merchant delivery still need verification before the payment change
 can be archived.
+
+## Authorized USD 10 paid news trial
+
+The user authorized a separate total USD 10 data-procurement budget on October 14,
+2026 (America/New_York), with USD 100 remaining the AWS ceiling. The separate
+operator script `scripts/paid_news_trial.py` prepares one canonical private ledger
+at `../.worktmp/paid-news-trial-v1`. Never delete, duplicate or reset that ledger to
+restart the budget. This is single-host accounting; it is not a distributed service.
+
+The runner binds `https://blockrun.ai/api/v1/exa/search`, the reviewed merchant
+recipient, exact Base mainnet Circle USDC and at most USD 0.03 per request. The
+live unpaid challenge quoted USD 0.011 per search: two searches per hour for seven
+days would cost USD 3.696 in merchant charges at that price. AWS/Marketplace
+operations remain separate from this data budget. Price increases beyond the
+per-request cap are rejected. The cumulative ledger reserves the full quoted
+amount before creating a session or signing; unknown outcomes retain their
+reservation and duplicate hourly asset slots are refused. Each session is limited
+to USD 0.03 and 15 minutes. Seven-day expiry begins only after funding preflight.
+
+```bash
+FinanceAgent/.venv/bin/python FinanceAgent/scripts/paid_news_trial.py prepare
+FinanceAgent/.venv/bin/python FinanceAgent/scripts/paid_news_trial.py preflight
+FinanceAgent/.venv/bin/python FinanceAgent/scripts/paid_news_trial.py collect --asset BTC
+FinanceAgent/.venv/bin/python FinanceAgent/scripts/paid_news_trial.py collect --asset ETH
+```
+
+Prepare is idempotent and never starts collection. The first live preflight found
+no Base USDC balance for the active research instrument. No signing or paid
+request was made, and the seven-day clock has not started. Wallet funding must
+be completed by its owner using USDC on Base mainnet, not Ethereum mainnet or
+Base Sepolia. The operator must verify a first paid delivery before activating
+any hourly runner. No hourly paid collector has been installed yet.
+
+Responses, source challenges and private payment proofs are retained with
+checksums and actual receipt timestamps. Raw content remains quarantined: no
+policy training or optimization input is changed until quality, licensing and
+point-in-time checks pass. A successful signed proof is not settlement evidence;
+a received search result is not proof of improved investment performance. The
+existing testnet adapter and hosted chat permission denials remain unchanged.
