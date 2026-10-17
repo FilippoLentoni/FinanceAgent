@@ -197,6 +197,7 @@ def test_catalog_updates_are_serial_and_policies_wait_for_all_enabled_targets(te
     t = templates[f"agent:{env}"]
     targets = resources(t, "AWS::BedrockAgentCore::GatewayTarget")
     policies = resources(t, "AWS::BedrockAgentCore::Policy")
+    targets = {lid:r for lid,r in targets.items() if "Condition" in r}  # Optional planning catalog only; brokerage target is verified separately.
     conditions = sorted({r["Condition"] for r in targets.values()})
     enabled = set(conditions if catalog == "all" else conditions[::2] if catalog == "alternating" else ["RegisterGetPortfolioHistory"] if catalog == "single" else [])
     active_targets = {lid: r for lid, r in targets.items() if r["Condition"] in enabled}
@@ -247,7 +248,7 @@ def test_runtime_contract_wiring(templates):
     rt = next(iter(resources(t, "AWS::BedrockAgentCore::Runtime").values()))["Properties"]
     assert rt["NetworkConfiguration"] == {"NetworkMode": "PUBLIC"} and rt["ProtocolConfiguration"] == "HTTP"
     assert rt["RequestHeaderConfiguration"]["RequestHeaderAllowlist"] == ["Authorization"]
-    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL"}
+    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL", "FINPLAN_BROKERAGE_GATEWAY_URL"}
     assert rt["AgentRuntimeName"] == "finplan_beta_financeagent"
     pat = t["Parameters"]["ImageUri"]["AllowedPattern"]
     good = FAKE_ACCOUNT + ".dkr.ecr.us-east-2.amazonaws.com/finplan-shared-financeagent-runtime-images@sha256:" + "a" * 64
@@ -274,7 +275,7 @@ def test_runtime_role_gate_rejects_a_lambda_grant(templates):
 
 def test_runtime_log_group_keeps_30_days_and_role_cannot_create_log_groups(templates):
     t = templates["agent:beta"]
-    lg = next(iter(resources(t, "AWS::Logs::LogGroup").values()))["Properties"]
+    lg = t["Resources"]["RuntimeLogGroup"]["Properties"]
     assert lg["RetentionInDays"] == 30 and "AgentRuntimeId" in json.dumps(lg["LogGroupName"]) and "-DEFAULT" in json.dumps(lg["LogGroupName"])
     role = next(r for r in resources(t, "AWS::IAM::Role").values() if r["Properties"]["RoleName"].endswith("-runtime-role"))
     assert "logs:CreateLogGroup" not in json.dumps(role)
@@ -304,13 +305,16 @@ def test_classical_catalog_and_policy_are_separate_from_the_existing_ppo_gateway
 
     t = templates["agent:beta"]
     gateways = resources(t, "AWS::BedrockAgentCore::Gateway")
-    assert set(gateways) == {"Gateway", "ClassicalGateway"}
+    assert set(gateways) == {"Gateway", "ClassicalGateway", "BrokerageGateway"}
     assert gateways["Gateway"]["Properties"]["AuthorizerConfiguration"] == gateways["ClassicalGateway"]["Properties"]["AuthorizerConfiguration"]
     assert gateways["Gateway"]["Properties"]["PolicyEngineConfiguration"] != gateways["ClassicalGateway"]["Properties"]["PolicyEngineConfiguration"]
     actual = {"Gateway": set(), "ClassicalGateway": set()}
     for target in resources(t, "AWS::BedrockAgentCore::GatewayTarget").values():
         props = target["Properties"]
         gateway_id = props["GatewayIdentifier"]["Fn::GetAtt"][0]
+        if gateway_id == "BrokerageGateway":
+            assert props["TargetConfiguration"]["Mcp"]["Lambda"]["ToolSchema"]["InlinePayload"][0]["Name"] == "get_etf_connection_status"
+            continue
         actual[gateway_id].add(props["TargetConfiguration"]["Mcp"]["Lambda"]["ToolSchema"]["InlinePayload"][0]["Name"])
     assert actual["Gateway"] == set(primary_tools())
     assert actual["ClassicalGateway"] == set(classical_tools())
@@ -338,7 +342,7 @@ def test_only_human_resolution_and_beta_paid_research_receive_identity_token_hea
     for env in ENVS:
         for logical, target in resources(templates[f"agent:{env}"], "AWS::BedrockAgentCore::GatewayTarget").items():
             metadata = target["Properties"].get("MetadataConfiguration")
-            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical in {"ClassicalTargetRunPortfolioResearch", "ClassicalTargetRunRecursiveImprovement"}:
+            if logical in {"TargetResolvePortfolioDecision", "ClassicalTargetResolvePortfolioDecision"} or env == "beta" and logical in {"ClassicalTargetRunPortfolioResearch", "ClassicalTargetRunRecursiveImprovement", "BrokerageReadTarget"}:
                 assert metadata == {"AllowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
             else:
                 assert metadata is None
@@ -411,3 +415,26 @@ def test_no_budget_and_30_day_logs_everywhere(assembly):
     res = run_gates(ctx, ["no-budget", "log-retention", "no-cdk-bootstrap", "budget-roles"])
     assert all(not v for v in res.values()), res
     assert n.budget_enforced_role_names("gamma")[0] == "finplan-gamma-financeagent-runtime-role"
+
+
+def test_brokerage_gateway_is_beta_only_scoped_and_readonly(templates):
+    beta=templates['agent:beta']
+    for env in ('gamma','prod'):
+        assert 'BrokerageGateway' not in templates['agent:'+env]['Resources']
+    function=beta['Resources']['BrokerageReadFunction']['Properties']
+    assert function['Runtime']=='nodejs22.x'
+    assert 'SECRET_ARN' in function['Environment']['Variables']
+    assert function['Environment']['Variables']['SECRET_ARN']=='finplan/beta/financeagent/coinbase-brokerage-readonly'
+    assert function['Environment']['Variables']['BETA_OPERATOR_CLIENT_ID']
+    assert '/orders' not in function['Code']['ZipFile']
+    roles=resources(beta,'AWS::IAM::Role')
+    role=next(r['Properties'] for r in roles.values() if r['Properties'].get('RoleName')=='finplan-beta-financeagent-brokerage-read-role')
+    statements=role['Policies'][0]['PolicyDocument']['Statement']
+    assert statements[0]['Action']=='secretsmanager:GetSecretValue'
+    assert 'coinbase-brokerage-readonly-??????' in json.dumps(statements[0]['Resource'])
+    assert not any('secretsmanager:' in json.dumps(s['Action']) for s in statements[1:])
+    target=beta['Resources']['BrokerageReadTarget']['Properties']
+    assert target['MetadataConfiguration']=={'AllowedRequestHeaders':['X-Finplan-User-Token']}
+    payload=target['TargetConfiguration']['Mcp']['Lambda']['ToolSchema']['InlinePayload']
+    assert len(payload)==1 and payload[0]['Name']=='get_etf_connection_status'
+    assert beta['Resources']['Runtime']['Properties']['EnvironmentVariables']['FINPLAN_BROKERAGE_GATEWAY_URL']=={'Fn::GetAtt':['BrokerageGateway','GatewayUrl']}

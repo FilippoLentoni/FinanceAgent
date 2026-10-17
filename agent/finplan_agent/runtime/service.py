@@ -136,6 +136,9 @@ class AgentService:
 
         from ..skills import load_skills
         skills, skill_instructions = load_skills()
+        import os
+        from ..brokerage.gateway import BrokerageGatewayReader
+        brokerage_url=os.environ.get("FINPLAN_BROKERAGE_GATEWAY_URL")
         deps = Deps(
             skills=skills,
             stable_instructions=skill_instructions,
@@ -152,6 +155,7 @@ class AgentService:
             explanation_settings=load_explanation_settings(settings.repo_config, ssm, settings.ssm.explanation_limits),
             provider_loader=lambda: _load_provider(settings.environment, ssm),
             durable_activity=True,
+            brokerage_client_factory=(lambda caller: BrokerageGatewayReader(brokerage_url,lambda:caller.bearer)) if brokerage_url else None,
         )
         return cls(deps)
 

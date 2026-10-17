@@ -300,7 +300,8 @@ def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
     out = []
     gws = _resources(t, "AWS::BedrockAgentCore::Gateway")
     rts = _resources(t, "AWS::BedrockAgentCore::Runtime")
-    if set(gws) != {"Gateway", "ClassicalGateway"} or len(rts) != 1:
+    expected_gateways = {"Gateway", "ClassicalGateway", "BrokerageGateway"} if env == "beta" else {"Gateway", "ClassicalGateway"}
+    if set(gws) != expected_gateways or len(rts) != 1:
         out.append(f"{name}: expected the primary and classical Gateways and one Runtime, found {list(gws)} and {len(rts)} Runtime(s)")
     engines = _resources(t, "AWS::BedrockAgentCore::PolicyEngine")
     if set(engines) != {"ToolPolicyEngine", "ClassicalToolPolicyEngine"}:
@@ -344,6 +345,10 @@ def environment_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
         tool_name = tool[0].get("Name") if len(tool) == 1 else None
         metadata = target_metadata(env, tool_name, classical=props.get("GatewayIdentifier") == {"Fn::GetAtt": ["ClassicalGateway", "GatewayIdentifier"]})
         expected = {"AllowedRequestHeaders": metadata["allowedRequestHeaders"]} if metadata else {}
+        if lid == "BrokerageReadTarget" and env == "beta":
+            expected = {"AllowedRequestHeaders": ["X-Finplan-User-Token"]}
+            if tool_name != "get_etf_connection_status" or props.get("GatewayIdentifier") != {"Fn::GetAtt": ["BrokerageGateway", "GatewayIdentifier"]}:
+                out.append(f"{name}: brokerage target must expose only the isolated read-only status capability")
         if (props.get("MetadataConfiguration") or {}) != expected:
             out.append(f"{name}: {lid} identity header propagation must be restricted to the beta classical research target")
     return out

@@ -238,6 +238,9 @@ class AgentStack(EnvStack):
                     cp.node.add_dependency(target)
                     cp.add_metadata("logical-role", "gateway-policy-engine")
 
+        from .brokerage import build_brokerage
+        self.brokerage_gateway = build_brokerage(self, identity, env, cfg)
+
         # ------------------------------------------------------------- runtime role
         memory_arn = self.memory.attr_memory_arn
         self.runtime_role = iam.Role(
@@ -283,6 +286,7 @@ class AgentStack(EnvStack):
                 "FINPLAN_MEMORY_ID": self.memory.attr_memory_id,
                 "FINPLAN_GATEWAY_URL": self.gateway.attr_gateway_url,
                 "FINPLAN_CLASSICAL_GATEWAY_URL": self.classical_gateway.attr_gateway_url,
+                **({"FINPLAN_BROKERAGE_GATEWAY_URL": self.brokerage_gateway.attr_gateway_url} if self.brokerage_gateway else {}),
             },
             tags=cfn_tags(env, "agent-runtime"),
         )
@@ -302,6 +306,7 @@ class AgentStack(EnvStack):
             "PolicyEngineArn": self.policy_engine.attr_policy_engine_arn,
             "PolicyDigest": self.policy_digest,
             "ClassicalGatewayUrl": self.classical_gateway.attr_gateway_url,
+            **({"BrokerageGatewayUrl": self.brokerage_gateway.attr_gateway_url} if self.brokerage_gateway else {}),
             "ClassicalGatewayId": self.classical_gateway.attr_gateway_identifier,
             "ClassicalGatewayArn": self.classical_gateway.attr_gateway_arn,
             "ClassicalPolicyEngineArn": self.classical_policy_engine.attr_policy_engine_arn,

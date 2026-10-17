@@ -160,6 +160,8 @@ def readiness(client=None):
                 'etf_eligibility_verified':False,
                 'message':'Coinbase ETF brokerage is not connected. The AgentCore Payments research wallet cannot read brokerage holdings or submit ETF orders. A separately scoped Coinbase brokerage credential and verified account access are required; no holdings or ETF eligibility have been verified.'}
     result = client.capabilities()
+    if result.get('interface') == 'agentcore_gateway_advanced_trade_rest':
+        return result
     if result.get('status') == 'scope_confirmation_required':
         return {**result, 'message':'The View-only brokerage key is valid. Confirm its portfolio UUID in deployment configuration before account reads; ETF eligibility remains unverified.'}
     return {**result, 'authenticated':True,

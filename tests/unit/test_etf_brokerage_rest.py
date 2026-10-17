@@ -46,7 +46,7 @@ def test_only_view_keys_and_expected_portfolio_scope():
     _,data=credential();fake=Fake();client=CoinbaseRestReader(lambda:data,expected_portfolio_uuid=PORTFOLIO,transport_fn=fake,clock=lambda:100)
     assert client.capabilities()['status']=='authenticated'
     assert client.read('coinbase_products_list',{})=={'products':[]}
-    assert fake.calls[-1][0].endswith('/products?product_type=EQUITY')
+    assert fake.calls[-1][0].endswith('/products?product_type=EQUITY&limit=1')
     jwt=fake.calls[-1][1]['Authorization'].split()[1]
     assert json.loads(decode(jwt.split('.')[1]))['uri'].endswith('/products')
     for field,value in (('can_trade',True),('can_transfer',True),('can_view',False),('portfolio_uuid',OTHER)):
@@ -82,3 +82,19 @@ def test_secret_loading_and_opt_in_owner_factory():
     factory=configured_reader_factory(config,secretsmanager=sm)
     assert isinstance(factory(SimpleNamespace(actor_id='owner')),CoinbaseRestReader)
     with pytest.raises(PermissionError):factory(SimpleNamespace(actor_id='other'))
+
+
+def test_exact_hash_product_ids_and_bounded_catalog_pagination():
+    _,data=credential();fake=Fake()
+    ident='a'*64
+    client=CoinbaseRestReader(lambda:data,expected_portfolio_uuid=PORTFOLIO,transport_fn=fake)
+    fake.payload={'product_id':ident,'product_type':'EQUITY'}
+    assert client.read('coinbase_products_get',{'product_id':ident})['product_id']==ident
+    for invalid in ('a'*63,'../accounts','a'*64+'/orders','abc-def'):
+        with pytest.raises(ValueError):client.read('coinbase_products_get',{'product_id':invalid})
+    fake.payload={'products':[{'product_id':ident,'product_type':'EQUITY','equity_product_details':{'ticker':'SPY','equity_subtype':'EQUITY_PRODUCT_SUBTYPE_ETF','equity_trading_flags':{'tradable':True}}}],'pagination':{'has_next':True,'next_cursor':'cursor1'}}
+    found=client.scan_etfs(tickers=['SPY'],max_pages=2)
+    assert found['all_requested_found'] and found['pages']==1 and not found['order_permission_verified']
+    missing=client.scan_etfs(tickers=['VOO'],max_pages=1)
+    assert not missing['all_requested_found'] and not missing['catalog_exhausted']
+    with pytest.raises(ValueError):client.scan_etfs(max_pages=65)

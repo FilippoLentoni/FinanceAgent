@@ -62,5 +62,11 @@
     "narration_max_tokens_invocation": 600,
     "status_polls": 1,
     "default_tolerance": 1e-06
+  },
+  "brokerage_read": {
+    "enabled": true,
+    "secret_name": "finplan/beta/financeagent/coinbase-brokerage-readonly",
+    "portfolio_uuid": "888cf3e7-0644-5f51-9901-c3bfb871c5d8",
+    "owner_sub": "817b3580-a0b1-70c2-9bbe-5015d0fe89ec"
   }
 }

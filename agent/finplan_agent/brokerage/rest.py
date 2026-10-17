@@ -20,7 +20,7 @@ HOST='api.coinbase.com'
 PREFIX='/api/v3/brokerage'
 SECRET_NAME='finplan/beta/financeagent/coinbase-brokerage-readonly'
 _UUID=re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-_PRODUCT=re.compile(r'^[A-Z0-9][A-Z0-9.-]{0,79}$')
+_PRODUCT=re.compile(r'^(?:[A-Z0-9][A-Z0-9.-]{0,79}|[0-9a-f]{64})$')
 _EXACT={PREFIX+s for s in ('/key_permissions','/accounts','/products','/orders/historical/batch','/orders/historical/fills','/portfolios')}
 
 
@@ -114,6 +114,37 @@ class CoinbaseRestReader:
                 'live_execution_enabled':False,'etf_eligibility_verified':False,
                 'portfolio_isolation':'Scope is verified against key_permissions; ETF eligibility is still account-specific.'}
 
+    def scan_etfs(self, *, tickers=(), max_pages=16, page_size=3):
+        """Bounded discovery; an unfinished scan is never evidence of absence."""
+        if isinstance(max_pages,bool) or not isinstance(max_pages,int) or not 1<=max_pages<=64:
+            raise ValueError('max_pages must be between 1 and 64')
+        if isinstance(page_size,bool) or not isinstance(page_size,int) or not 1<=page_size<=3:
+            raise ValueError('page_size must be between 1 and 3')
+        if len(tickers)>5 or any(not isinstance(t,str) or not re.fullmatch(r'[A-Z][A-Z0-9.-]{0,9}',t) for t in tickers):
+            raise ValueError('up to five explicit ETF tickers are supported')
+        found={};cursor=None;seen=set();exhausted=False
+        for page in range(max_pages):
+            args={'limit':page_size}
+            if cursor:args['cursor']=cursor
+            result=self.read('coinbase_products_list',args)
+            for product in result.get('products',[]):
+                details=product.get('equity_product_details') or {}
+                if product.get('product_type')!='EQUITY' or details.get('equity_subtype')!='EQUITY_PRODUCT_SUBTYPE_ETF':continue
+                if tickers and details.get('ticker') not in tickers:continue
+                ident=product.get('product_id')
+                if not isinstance(ident,str) or not _PRODUCT.fullmatch(ident):continue
+                found[ident]={'product_id':ident,'ticker':details.get('ticker'),'equity_subtype':details['equity_subtype'],
+                    'trading_flags':details.get('equity_trading_flags') or {},'trading_disabled':product.get('trading_disabled'),
+                    'trading_halted':details.get('trading_halted'),'view_only':product.get('view_only')}
+            paging=result.get('pagination') or {};cursor=paging.get('next_cursor')
+            if not paging.get('has_next') or not cursor:exhausted=True;break
+            if set(tickers) and set(tickers).issubset({p['ticker'] for p in found.values()}):break
+            if cursor in seen:break
+            seen.add(cursor)
+        return {'products':list(found.values()),'pages':page+1,'catalog_exhausted':exhausted,
+                'all_requested_found':bool(tickers) and set(tickers).issubset({p['ticker'] for p in found.values()}),
+                'live_execution_enabled':False,'order_permission_verified':False}
+
     def read(self,name,arguments):
         if name not in {'coinbase_accounts_list','coinbase_balance','coinbase_products_list','coinbase_products_get','coinbase_portfolios_list','coinbase_portfolios_get','coinbase_orders_get','coinbase_orders_list','coinbase_orders_fills'}:
             raise PermissionError('unapproved REST read operation')
@@ -122,7 +153,7 @@ class CoinbaseRestReader:
         args=dict(arguments)
         if name=='coinbase_balance':name='coinbase_accounts_list'
         if name=='coinbase_accounts_list':path=PREFIX+'/accounts';allowed={'limit','cursor'}
-        elif name=='coinbase_products_list':path=PREFIX+'/products';allowed={'limit','cursor','product_type','product_ids'};args.setdefault('product_type','EQUITY')
+        elif name=='coinbase_products_list':path=PREFIX+'/products';allowed={'limit','cursor','product_type','product_ids'};args.setdefault('product_type','EQUITY');args.setdefault('limit',1)
         elif name=='coinbase_products_get':
             ident=args.pop('product_id',None)
             if not isinstance(ident,str) or not _PRODUCT.fullmatch(ident):raise ValueError('invalid product identifier')

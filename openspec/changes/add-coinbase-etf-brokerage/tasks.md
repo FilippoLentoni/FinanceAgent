@@ -5,11 +5,22 @@
 ## 2. LangGraph integration
 - [x] 2.1 Add connection-readiness conversation and versioned skill; verify setup-required evidence and unchanged live-order refusals through graph tests.
 ## 3. Authenticated release gates
-- [ ] 3.1 Obtain approved custom MCP client or supported scoped alternative, user brokerage consent, and verify actual eligible ETF products and account holdings; retain sanitized evidence.
+- [x] 3.1 Obtain approved custom MCP client or supported scoped alternative, user brokerage consent, and verify actual eligible ETF products and account holdings; retain sanitized evidence.
 - [ ] 3.2 Deploy the authenticated read-only brokerage target through AgentCore Gateway and verify hosted discovery, draft and reconciliation with no live order.
 
 ## Verification and external blockers
 
 - 2026-10-14 America/New_York: 86 focused brokerage, hosted graph, crypto routing, skill and infrastructure tests passed (`pytest tests/unit/test_etf_brokerage.py tests/graph/test_etf_brokerage.py tests/graph/test_graph.py tests/graph/test_crypto_research.py tests/unit/test_explanation_skills.py tests/unit/infra/test_tool_policy_and_schemas.py -q`). The unauthenticated Coinbase endpoint returns HTTP 401 and advertises separate brokerage OAuth scopes. Existing secrets metadata identifies research-payment credentials only.
-- 3.1 remains blocked on approved custom-client credentials and user brokerage consent; no live authenticated holdings or ETF eligibility are fabricated.
-- 3.2 remains pending that authentication and a dedicated Gateway target release. No ETF trade, account funding, or portfolio creation was performed.
+- At proposal time, 3.1 was blocked on brokerage credentials; the later authenticated verification below supersedes that initial blocker. No holdings or ETF eligibility are fabricated.
+- 3.2 remains pending its full hosted discovery, draft and reconciliation scope. No ETF trade, account funding, or portfolio creation was performed.
+
+## Authenticated read-only verification
+
+- The separately supplied ECDSA credential was stored in the dedicated Ohio secret and used only in adapter memory. Actual key permissions verified View=true, Trade=false, Transfer=false and the configured portfolio UUID. Accounts and portfolio reads succeeded.
+- Actual SPY product GET by the catalog-provided 64-character lowercase hex ID succeeded: EQUITY_PRODUCT_SUBTYPE_ETF, quote currency USDC, with catalog buy/sell/tradable flags. This establishes catalog access and ETF classification, not order execution permission.
+- A bounded 64-page scan at three products per page found 95 ETF products including SPY and IWM; VOO was not found within that scan, which is not evidence that it is unavailable. Sanitized private receipts are retained under `.worktmp/etf-news/live/brokerage-{readonly-verification,etf-catalog,spy-product}.json` outside the repository.
+- Task 3.2 remains open for authenticated Gateway/runtime release and hosted verification. No write, fund transfer, portfolio creation or live order occurred.
+
+## Coordinated readiness Gateway
+
+The later `complete-etf-news-and-paper-beta` change implements a separate authenticated status Gateway with owner and exact beta operator authorization. Its source tests verify narrow secret access and fixed read routes. This does not complete this older task 3.2's additional hosted order-draft and reconciliation scope; those remain local operator primitives and must not be described as deployed hosted tools.
