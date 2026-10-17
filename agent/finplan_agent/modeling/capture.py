@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from dataclasses import asdict
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +18,13 @@ from ..core.errors import AgentError
 
 _KEYS = re.compile(r"^(authorization|access_token|refresh_token|id_token|client_secret|api_key|secret_access_key|session_token|password)$", re.I)
 _VALUE = re.compile(r"Bearer\s+[A-Za-z0-9._~-]{16,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16}|X-Amz-(?:Credential|Signature)=", re.I)
+_WIRE_CAPTURE = ContextVar("modeling_provider_wire_capture", default=None)
+
+
+def capture_provider_wire(body):
+    """Called by the actual adapter after transformation, before transport."""
+    callback = _WIRE_CAPTURE.get()
+    return callback(body) if callback is not None else None
 
 
 def canonical(value: Any) -> bytes:
@@ -78,11 +86,14 @@ class InputCapture:
 
             def generate(self, request, on_token=None):
                 item = capture.before("provider.generate", asdict(request))
+                token = _WIRE_CAPTURE.set(lambda body: capture.before("bedrock.converse", body))
                 try:
                     result = provider.generate(request, on_token=on_token)
                 except Exception as exc:
                     item.update(status="failed", error_code=getattr(exc, "code", type(exc).__name__))
                     raise
+                finally:
+                    _WIRE_CAPTURE.reset(token)
                 # GenerateResult.text is the adapter's visible final text. Never raw provider reasoning.
                 output = {"text": result.text, "tool_calls": [asdict(c) for c in result.tool_calls],
                           "usage": result.usage_record(), "stop_reason": result.stop_reason}

@@ -61,6 +61,26 @@ def test_capture_cannot_be_enabled_by_regular_user_or_higher_environment():
     svc, tools = make_service()
     result = svc.handle({"prompt": "show capabilities", "stream": False, "capture_inputs": True}, auth(), SESSION)
     assert result["error"]["code"] == "FORBIDDEN" and not tools.calls
+
+
+def test_capture_preserves_exact_transformed_bedrock_wire_before_transport():
+    from finplan_agent.providers.bedrock import BedrockProvider
+    from tests.fakes.agent import bedrock_config, StubBedrockClient, text_response
+    client = StubBedrockClient(responses=[text_response("public final")])
+    provider = BedrockProvider(bedrock_config(), client)
+    cap = InputCapture()
+    request = GenerateRequest(purpose="narrate", system="public system", messages=[{"role": "user", "content": [{"text": "actual context"}]}],
+                              max_tokens=32, evidence=({"value": 123},))
+    result = cap.provider(provider).generate(request)
+    wire = next(item for item in cap.entries if item["boundary"] == "bedrock.converse")
+    assert wire["supplied"] == client.requests[0]
+    assert "Evidence summary" in json.dumps(wire["supplied"])
+    assert wire["status"] == "completed" and result.text == "public final"
+    # A subsequent unrelated request does not inherit this invocation's callback.
+    before = len(cap.entries)
+    client.responses.append(text_response("another final"))
+    provider.generate(request)
+    assert len(cap.entries) == before
     svc, tools = make_service(environment="gamma")
     result = svc.handle({"prompt": "show capabilities", "stream": False, "capture_inputs": True}, auth("machine", groups=(), extra={"client_id": "machine"}), SESSION)
     assert result["error"]["code"] == "FORBIDDEN" and not tools.calls

@@ -93,7 +93,10 @@ def run_job(cfg, job, slot, directory, *, execute_fn=execute):
         return {"snapshot": str(target), "bytes": 0, "invocation": "real_headless_codex", "final_sha256": hashlib.sha256(final.read_bytes()).hexdigest()}
     if job == "research":
         prompt_path = Path(cfg["research_prompt"])
-        prompt = prompt_path.read_text().replace("{{slot}}", slot).replace("{{experiment}}", cfg["experiment_id"]).replace("{{output}}", str(directory))
+        prompt = prompt_path.read_text()
+        for name, value in {"slot": slot, "experiment": cfg["experiment_id"], "output": str(directory),
+                            "runtime_python": cfg["runtime_python"], "platform_root": cfg["platform_root"]}.items():
+            prompt = prompt.replace("{{" + name + "}}", value)
         final = directory / "codex-final.txt"
         execute_fn([cfg["codex"], "exec", "--skip-git-repo-check", "--ephemeral", "--output-last-message", str(final), "-"],
                    cwd=cfg["runtime_root"], timeout=1500, stdin=prompt)
@@ -138,6 +141,7 @@ def main(argv=None):
     state = Path(cfg["state_dir"])
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     slot = args.slot or slot_for(args.job, datetime.now(UTC))
+    os.environ["FINPLAN_EXPERIMENT_TRIGGER"] = "manual_validation" if args.slot else "systemd_scheduled"
     lock = state / (args.job + ".lock")
     with lock.open("a") as handle:
         try:

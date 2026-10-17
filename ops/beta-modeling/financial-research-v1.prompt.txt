@@ -4,8 +4,14 @@ Slot: {{slot}}
 Experiment: {{experiment}}
 Output directory: {{output}}
 
-Invoke the installed versioned research workflow now with your shell tool:
-python -m finplan_model.forward.research cycle --slot '{{slot}}' --experiment '{{experiment}}' --output '{{output}}'
+Invoke these installed versioned workflows sequentially with your shell tool:
+{{runtime_python}} {{platform_root}}/scripts/collect_modeling_sources.py --kind research --slot '{{slot}}' --experiment '{{experiment}}' --output '{{output}}'
+{{runtime_python}} -m finplan_model.forward.research cycle --slot '{{slot}}' --experiment '{{experiment}}' --output '{{output}}'
+
+FinancialPlanning owns the bounded internet retrieval workers and persists their
+original source content before inference. FinanceModel reads this immutable evidence
+and invokes the tool-disabled Codex reviewer. Run the review command even when the
+collector publishes an explicit failure, so that the permanent run records that failure.
 
 This workflow must actually invoke its bounded internet research workers, retrieve
 the dated S&P 500 constituent universe and financial/macro/sector evidence, capture

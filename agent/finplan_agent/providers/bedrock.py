@@ -154,12 +154,23 @@ class BedrockProvider:
 
     def _invoke(self, request: GenerateRequest, on_token: Callable[[str], None] | None, cache: bool) -> GenerateResult:
         body = self.build_request(request, cache=cache)
+        from ..modeling.capture import capture_provider_wire
+        captured = capture_provider_wire(body)
         self.calls += 1
-        if on_token is None:
-            resp = self._client.converse(**body)
-            return self._from_converse(resp)
-        resp = self._client.converse_stream(**body)
-        return self._from_stream(resp.get("stream", []), on_token)
+        try:
+            if on_token is None:
+                resp = self._client.converse(**body)
+                result = self._from_converse(resp)
+            else:
+                resp = self._client.converse_stream(**body)
+                result = self._from_stream(resp.get("stream", []), on_token)
+        except Exception as exc:
+            if captured is not None:
+                captured.update(status="failed", error_code=type(exc).__name__)
+            raise
+        if captured is not None:
+            captured["status"] = "completed"
+        return result
 
     def _usage(self, u: dict[str, Any] | None) -> Usage:
         u = u or {}

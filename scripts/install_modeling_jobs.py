@@ -27,6 +27,10 @@ def units(job, cfg, config_path, python):
     paths = [cfg["runtime_pythonpath"], cfg["storage_pythonpath"], str(Path(__file__).resolve().parents[1] / "agent")]
     root = Path(__file__).resolve().parents[1]
     command = shlex.join([str(python), "-m", "finplan_agent.modeling.jobs", job, "--config", str(config_path)])
+    versions = cfg["source_commits"]
+    if any(len(versions[name]) != 40 or any(c not in "0123456789abcdef" for c in versions[name])
+           for name in ("financemodel", "financialplanning", "financeagent")):
+        raise ValueError("immutable source revisions must be exact commit IDs")
     service = f"""[Unit]
 Description=Beta modeling {job} workflow (isolated paper only)
 After=network-online.target
@@ -42,6 +46,9 @@ Environment=HOME=/home/ec2-user
 Environment=AWS_REGION=us-east-2
 Environment=AWS_DEFAULT_REGION=us-east-2
 Environment=PYTHONUNBUFFERED=1
+Environment=FINPLAN_MODEL_SOURCE_COMMIT={versions['financemodel']}
+Environment=FINPLAN_PLATFORM_SOURCE_COMMIT={versions['financialplanning']}
+Environment=FINPLAN_AGENT_SOURCE_COMMIT={versions['financeagent']}
 Environment=TMPDIR={cfg['scratch_dir']}
 Environment=PYTHONPATH={':'.join(paths)}
 Environment=PATH={Path(cfg['runtime_python']).parent}:/home/ec2-user/.local/bin:/usr/local/bin:/usr/bin:/bin
