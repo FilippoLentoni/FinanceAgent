@@ -217,3 +217,10 @@ def test_remote_tool_description_exports_exact_hosted_skill():
     desc=tool_definition('recommend_portfolio').description
     assert (root/'skills/recommend-portfolio/SKILL.md').read_text() in desc
     assert skill['instructions_checksum'] in desc and 'recommend-portfolio@0.3.2' in desc
+
+
+@pytest.mark.parametrize('instrument', ['Amazon', 'AMZN', 'Microsoft', 'MSFT', 'Meta', 'META', 'Tesla', 'TSLA'])
+def test_eight_asset_buy_queries_preserve_explicit_saved_portfolio(instrument):
+    pid = 'pf_01KDVDNAZ83BAMMYCEGWF33DPM'
+    messages = [{'role': 'user', 'content': [{'text': f'Should I buy {instrument} for {pid}?'}]}]
+    assert recommendation_arguments(messages) == {'portfolio_id': pid}

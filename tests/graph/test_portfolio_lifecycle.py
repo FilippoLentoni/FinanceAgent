@@ -1,8 +1,8 @@
 """Exercise complete hosted MCP orchestration, approval interrupts and durable evidence."""
-from copy import deepcopy
 import base64
 import hashlib
 import json
+from copy import deepcopy
 
 import pytest
 from finplan_contracts.validate import validate
@@ -402,3 +402,19 @@ def test_hosted_decision_history_preserves_raw_dates_ids_and_pagination(recommen
     assert result['answer']['claim_check']['passed']
     assert result['answer']['portfolio_decisions'] == [document]
     assert tools.calls == [('list_portfolio_decisions', {'limit': 100})]
+
+
+@pytest.mark.parametrize('company,ticker', [('Amazon', 'AMZN'), ('Microsoft', 'MSFT'), ('Meta', 'META'), ('Tesla', 'TSLA')])
+def test_eight_asset_company_why_routes_exact_instrument_on_frozen_decision(recommendation, company, ticker):
+    svc, tools, _ = setup(recommendation)
+    tools.results['explain_portfolio_decision'] = lambda _: {
+        'analysis_id': ANALYSIS, 'analysis_kind': 'explanation', 'summary': 'Frozen policy explanation',
+        'source_decision_ref': {'decision_id': PD}, 'decision_status': 'issued',
+        'explanation': {'policy_replay': {'status': 'verified'},
+                        'attribution': {'status': 'not_available', 'reason': 'No causal feature attribution'}}}
+    result = ask(svc, f'Why does decision {PD} recommend this action for {company}?')
+    assert result['status'] == 'completed'
+    assert result['answer']['claim_check']['passed']
+    assert tools.calls == [('get_portfolio_decision', {'decision_id': PD}),
+                           ('explain_portfolio_decision', {'portfolio_id': recommendation['portfolio_state']['portfolio_id'],
+                                                          'decision_id': PD, 'instrument_id': ticker})]

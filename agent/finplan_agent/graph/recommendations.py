@@ -14,7 +14,7 @@ _RECOMMENDATION = re.compile(
     r"|\b(?:recommend\w*|rebalanc\w*|allocat\w*)\b[^.!?]{0,70}\b(?:portfolio|invest\w*|today|stocks?|shares?)\b"
     r"|\bpolicy\b[^.!?]{0,70}\b(?:recommend\w*|today|buy|sell)\b"
     r"|\b(?:ppo|reinforcement|invest\w*)\b[^.!?]{0,70}\brecommend\w*\b"
-    r"|\b(?:buy|sell)\b[^.!?]{0,70}\b(?:google|googl?|nvidia|nvda|apple|aapl|netflix|nflx|voo)\b",
+    r"|\b(?:buy|sell)\b[^.!?]{0,70}\b(?:google|googl?|nvidia|nvda|apple|aapl|netflix|nflx|amazon|amzn|microsoft|msft|meta|facebook|tesla|tsla|voo)\b",
     re.I,
 )
 _SUPPLIED_STATE = re.compile(
@@ -30,6 +30,13 @@ _EXPLANATION = re.compile(
     r"|^(?:why|why is that|tell me why)[?.!\s]*$", re.I,
 )
 _PORTFOLIO_ID = re.compile(r"\bpf_[0-7][0-9A-HJKMNP-TV-Z]{25}\b")
+
+INSTRUMENT_ALIASES = {
+    'GOOGL': r'\b(?:google|googl)\b', 'NVDA': r'\b(?:nvidia|nvda)\b',
+    'AAPL': r'\b(?:apple|aapl)\b', 'NFLX': r'\b(?:netflix|nflx)\b', 'VOO': r'\bvoo\b',
+    'AMZN': r'\b(?:amazon|amzn)\b', 'MSFT': r'\b(?:microsoft|msft)\b',
+    'META': r'\b(?:meta|facebook)\b', 'TSLA': r'\b(?:tesla|tsla)\b',
+}
 
 
 def saved_portfolio_reference(text: str) -> dict[str, str]:

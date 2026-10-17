@@ -17,6 +17,10 @@ def _time(value: Any) -> datetime | None:
         return None
 
 
+def is_gdelt(news: dict) -> bool:
+    return isinstance(news.get('feature_protocol'), str) and news['feature_protocol'].startswith('gdelt-')
+
+
 def summarize(news: dict) -> dict:
     protocol = news.get('feature_protocol')
     proof = news.get('provenance') if isinstance(news.get('provenance'), dict) else {}
@@ -25,10 +29,16 @@ def summarize(news: dict) -> dict:
     result = {'consumed': news.get('consumed') is True, 'feature_protocol': protocol,
               'decision_cutoff': cutoff, 'training_corpus_checksum': news.get('training_corpus_checksum') or news.get('training_news_corpus_checksum'),
               'corpus_checksum': news.get('corpus_checksum')}
-    if protocol != GDELT_PROTOCOL:
+    if not is_gdelt(news):
         result['source_kind'] = 'declared_research_features' if news.get('consumed') else 'not_consumed'
         return result
-    result.update(source_kind='GDELT_released_numeric_machine_metadata', source_day=proof.get('source_day'),
+    result.update(source_kind='GDELT_released_numeric_machine_metadata', source_day=proof.get('source_day') or lineage.get('source_day'),
+                  source_name=lineage.get('source') or proof.get('source_name') or news.get('source_name'),
+                  feature_version=news.get('feature_version') or proof.get('feature_version') or protocol,
+                  source_window_start=proof.get('window_start') or lineage.get('window_start') or lineage.get('source_window_start'),
+                  source_window_end=proof.get('window_end') or lineage.get('window_end') or lineage.get('source_window_end'),
+                  max_source_age_hours=news.get('max_source_age_hours') or proof.get('max_source_age_hours') or (48 if protocol == GDELT_PROTOCOL else None),
+                  max_window_age_hours=news.get('max_window_age_hours') or proof.get('max_window_age_hours'),
                   source_available_at=lineage.get('source_available_at'), central_available_at=lineage.get('central_available_at'),
                   retrieved_at=lineage.get('retrieved_at'), availability_mode=proof.get('availability_mode'),
                   availability_basis=lineage.get('availability_basis'), document_checksum=proof.get('document_checksum'),
@@ -40,6 +50,9 @@ def summarize(news: dict) -> dict:
     formed, released = _time(cutoff), _time(lineage.get('source_available_at'))
     if formed and released:
         result['source_availability_lag_hours'] = round((formed - released).total_seconds() / 3600, 3)
+    window_end = _time(result.get('source_window_end'))
+    if formed and window_end:
+        result['source_window_lag_hours'] = round((formed - window_end).total_seconds() / 3600, 3)
     if formed and isinstance(proof.get('source_day'), str):
         try:
             result['archive_day_lag_days'] = (formed.astimezone(UTC).date() - date.fromisoformat(proof['source_day'])).days
@@ -52,15 +65,18 @@ def render(news: dict) -> str:
     """Runtime prose uses only original producer figures, leaving derived lag to reports."""
     if not news.get('consumed'):
         return 'Approved news feature consumption is not established by this recommendation.'
-    if news.get('feature_protocol') != GDELT_PROTOCOL:
+    if not is_gdelt(news):
         cutoff = news.get('formation_time') or news.get('decision_time') or 'unavailable'
         return ('This recommendation consumes the declared centrally stored news features at cutoff ' + str(cutoff)
                 + '. Source and feature identities remain in the frozen evidence; this establishes neither improved returns nor news causality.')
     details = summarize(news)
-    return ('This recommendation consumes released GDELT numeric machine metadata under feature protocol ' + GDELT_PROTOCOL
+    interval = ('; source window: ' + str(details.get('source_window_start')) + ' through ' + str(details.get('source_window_end'))) if details.get('source_window_start') or details.get('source_window_end') else ''
+    return ('This recommendation consumes released GDELT numeric machine metadata under feature protocol ' + str(details['feature_protocol'])
+            + '; source: ' + str(details.get('source_name') or 'unavailable')
+            + interval
             + '. Archive source day: ' + str(details.get('source_day') or 'unavailable')
             + '; source available at: ' + str(details.get('source_available_at') or 'unavailable')
             + '; centrally available at: ' + str(details.get('central_available_at') or 'unavailable')
             + '; decision cutoff: ' + str(details.get('decision_cutoff') or 'unavailable')
-            + '. This is a daily UTC archive, with publication and ingestion lag; it does not establish consumption of separately collected same-morning paid research headlines. '
+            + '. Source windows and availability reflect actual publication and ingestion lag; these inputs do not establish consumption of separately collected same-morning paid research headlines. '
             + details['sentiment_interpretation'] + ' Numerical feature consumption does not establish improved returns or causal attribution.')

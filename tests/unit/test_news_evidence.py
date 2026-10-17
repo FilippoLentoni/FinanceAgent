@@ -62,3 +62,20 @@ def test_declared_paid_research_features_keep_their_own_cutoff():
     text = render({'consumed': True, 'formation_time': '2026-10-08T13:45:00Z'})
     assert '2026-10-08T13:45:00Z' in text
     assert 'GDELT' not in text
+
+
+def test_intraday_source_protocol_and_actual_window_are_not_rewritten_as_daily_archive():
+    proof = news()
+    proof['feature_protocol'] = 'gdelt-gkg-v2-intraday-organization-tone-v1'
+    proof['provenance']['lineage'].update(source='gdelt-gkg-v2', window_start='2026-10-08T12:45:00Z',
+                                        window_end='2026-10-08T13:30:00Z')
+    proof['max_window_age_hours'] = 1.5
+    result = summarize(proof)
+    assert result['feature_version'] == proof['feature_protocol']
+    assert result['source_name'] == 'gdelt-gkg-v2'
+    assert result['source_window_start'] == '2026-10-08T12:45:00Z'
+    assert result['source_window_end'] == '2026-10-08T13:30:00Z'
+    text = render(proof)
+    assert proof['feature_protocol'] in text
+    assert '2026-10-08T12:45:00Z through 2026-10-08T13:30:00Z' in text
+    assert 'daily UTC archive' not in text

@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 import re
 
-from .sensitivity import sensitivity_plan
-
 from ..providers.base import ToolCall, text_of
 from ..tools.portfolio import LIFECYCLE_TOOLS
+from .recommendations import INSTRUMENT_ALIASES
+from .sensitivity import sensitivity_plan
 
 _PD = re.compile(r"\bpd_[0-7][0-9A-HJKMNP-TV-Z]{25}\b")
 _PF = re.compile(r"\bpf_[0-7][0-9A-HJKMNP-TV-Z]{25}\b")
@@ -189,8 +189,8 @@ def lifecycle_plan(state, session_id):
     previous_date = intent != "compare" and bool(re.search(r"\b(?:yesterday|previous day)\b", text, re.I))
     did = ids[0] if ids else latest.get("decision_id") if latest and not previous_date and intent != "compare" else None
     workflow={"mode":"lifecycle_read" if did else "lifecycle_lookup","intent":intent,"deep_dive":bool(_WHY.search(text) or re.search(r"deep dive|news|world",text,re.I)), "family":family,"previous_date":previous_date}
-    for instrument,pattern in {"GOOGL":r"google|googl","NVDA":r"nvidia|nvda","AAPL":r"apple|aapl","NFLX":r"netflix|nflx","VOO":r"voo"}.items():
-        if re.search(r"\b(?:"+pattern+r")\b",text,re.I):
+    for instrument, pattern in INSTRUMENT_ALIASES.items():
+        if re.search(pattern, text, re.I):
             workflow["instrument_id"]=instrument
             break
     if did:

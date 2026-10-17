@@ -10,7 +10,7 @@ from ..providers.base import ToolCall, text_of
 from ..skills import CLASSICAL_SKILLS
 from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
 from .lifecycle import render_lifecycle
-from .recommendations import _SUPPLIED_STATE, render_recommendation, saved_portfolio_reference
+from .recommendations import _SUPPLIED_STATE, INSTRUMENT_ALIASES, render_recommendation, saved_portfolio_reference
 
 _CLASSICAL = re.compile(r"\b(?:traditional|classical|optimizer|optimisation|optimization|min(?:imum)?[ -]?variance|mean[ -]?variance|cvar)\b", re.I)
 _WHY = re.compile(r"\b(?:why|explain|reason|rationale)\b", re.I)
@@ -19,7 +19,7 @@ _PERFORMANCE = re.compile(r"\b(?:green|red|perform\w*|actuals?|realized|realised
 _RESEARCH = re.compile(r"\b(?:literature|research|retraining|retrain|improve|improvement|modeling approach|modelling approach)\b", re.I)
 _PPO = re.compile(r"\b(?:ppo|reinforcement|rl)\b", re.I)
 _ID = re.compile(r"\bca_[0-9a-f]{32}\b")
-_INSTRUMENTS = {"GOOGL": r"\b(?:google|googl)\b", "NVDA": r"\b(?:nvidia|nvda)\b", "AAPL": r"\b(?:apple|aapl)\b", "NFLX": r"\b(?:netflix|nflx)\b", "VOO": r"\bvoo\b"}
+_INSTRUMENTS = INSTRUMENT_ALIASES
 
 
 def _history(messages: list[dict]) -> list[dict]:

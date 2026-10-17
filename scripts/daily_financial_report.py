@@ -392,8 +392,12 @@ def pipeline_readiness(config: dict, now: datetime, market_date: str | None, new
         except (KeyError, TypeError, ValueError):
             issues.append('numeric_news_timestamps_not_verified')
         lag = row.get('source_availability_lag_hours')
-        if lag is None or lag < 0 or lag > 48:
+        limit = row.get('max_source_age_hours')
+        if lag is None or lag < 0 or (limit is not None and lag > limit):
             issues.append('numeric_news_source_lag_outside_declared_limit')
+        window_lag, window_limit = row.get('source_window_lag_hours'), row.get('max_window_age_hours')
+        if window_lag is not None and (window_lag < 0 or (window_limit is not None and window_lag > window_limit)):
+            issues.append('numeric_news_window_lag_outside_declared_limit')
     if calendar.get('is_trading_session') and not numeric:
         if not marker or marker.get('decision_session') != day:
             issues.append('today_news_collector_marker_missing')
