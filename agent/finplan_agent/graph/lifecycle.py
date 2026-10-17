@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 
+from ..core.decision_history import previous_decision
 from ..providers.base import ToolCall, text_of
 from ..tools.portfolio import LIFECYCLE_TOOLS
 from .recommendations import INSTRUMENT_ALIASES
@@ -81,15 +82,15 @@ def _run(workflow, results, turn):
         action = workflow["intent"]
         if action == "compare":
             current = rows[0] if rows else None
-            previous = next((row for row in rows[1:] if _date(row) and _date(row) != _date(current) and _strategy(row) == _strategy(current)), None) if current else None
+            previous = previous_decision(rows[1:], _strategy(current), current) if current else None
             if previous:
                 return {"workflow": {"mode": "lifecycle_complete"}, "calls": [_call("compare_portfolio_decisions", {"portfolio_id":current["portfolio_id"], "previous_decision_id":previous["decision_id"], "current_decision_id":current["decision_id"]}, turn, 1)]}
-            return {"workflow": workflow, "calls": [], "clarification": "I could not find two issued decisions from distinct market dates. I will not invent yesterday's recommendation; provide both decision IDs or generate the missing dated decision."}
+            return {"workflow": workflow, "calls": [], "clarification": "I could not find two issued decisions from distinct market dates or independently retained eligible news formations. A repeated call is not yesterday's recommendation; provide both real decision IDs or wait for another eligible formation."}
         if not rows:
             return {"workflow": workflow, "calls": [], "clarification": "No stored recommendation was found. Ask for a PPO or traditional recommendation first."}
         selected = rows[0]
         if workflow.get("previous_date"):
-            selected = next((row for row in rows[1:] if _date(row) and _date(row) != _date(rows[0])), None)
+            selected = previous_decision(rows[1:], _strategy(rows[0]), rows[0])
             if selected is None:
                 return {"workflow": workflow, "calls": [], "clarification": "No issued recommendation from a previous market date was found. I will not substitute today's recommendation for yesterday's."}
         workflow = {**workflow, "mode":"lifecycle_read", "decision_id":selected["decision_id"]}

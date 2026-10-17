@@ -3,8 +3,9 @@
 `scripts/daily_financial_report.py` asks the deployed beta LangGraph runtime for
 PPO, minimum-variance, mean-variance and scenario-CVaR advice, then retains each
 method's immutable decision and the three existing explanation families: issued
-recommendation rationale, distinct-date plan changes, and observed outcomes with
-dated market context. It also invokes real cross-method comparisons. No decision
+recommendation rationale, genuine prior-decision changes (including distinct
+eligible news formations sharing a price close), and observed outcomes with dated
+market context. It also invokes real cross-method comparisons. No decision
 is accepted and no holdings are changed.
 
 Run with the FinanceAgent environment:
@@ -74,3 +75,21 @@ validation, cost and seed evidence supports a modeling choice or cannot support 
 The runtime preserves a reviewed validation excerpt within its existing result
 budget; it retains source checksums, splits, test reuse and promotion status. An
 incomplete or failed run never supplies deployable performance evidence.
+
+Each attempt now freezes its exact `report.md` and `report.json` alongside raw
+receipts. Dated views update atomically; `output_dir/latest.md` is the stable
+private user entry point and `latest.json` identifies the date, status and frozen
+attempt paths. Directories remain private and files use mode 0600.
+
+Temporal news comparisons can use the same completed price date when two actual
+issued decisions have distinct, centrally eligible formations and source checksums
+under the same news protocol and reported actor/settings. Receipt or serving time
+alone never creates history. The producer separately reports full model, holdings
+and source alignment; a zero-difference replay remains distinguishable from a new
+news formation. Missing actual prior states remain unavailable.
+
+Historical validation rankings belong to the frozen tuned experiment configurations.
+They do not transfer to daily optimizers with different cash constraints, covariance
+or scenario estimators, objective horizon, turnover penalty, execution assumptions
+or book size. These differences remain explicit; no constraints change during a
+comparison to manufacture matching results.

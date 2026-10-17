@@ -14,8 +14,6 @@ Without decision_id, replay the last successful original holdings/snapshot/date/
 
 Daily reports show the actual completed market session, decision/news cutoff and diagnostics.news_evidence consumption. Regular US equity open is 09:30 America/New_York; 09:00 collection is premarket. Closed-day reports label last-session prices. Collection/publication does not establish training eligibility or model consumption. Disclose missing/stale inputs, price-only policies and requested8 versus legacy5 incompatibility.
 
-Use three explanation families: frozen decision rationale; actual distinct-date compare_portfolio_decisions; observed evaluate_portfolio_decision then dated research_market_events. Missing history/forward outcomes remain unavailable. Explicit backfill/training requests follow research-portfolio-models; ordinary advice authorizes no jobs. PPO requires chronological transitions and one long-history snapshot can contain them. First-seen news is never backdated.
-
-Hosted identity/version/checksum and direct MCP descriptions expose this recipe.
+Use three explanation families: frozen decision rationale; actual distinct price-date or eligible news-formation compare_portfolio_decisions; observed evaluate_portfolio_decision then dated research_market_events. Missing history/forward outcomes remain unavailable. Explicit backfill/training requests follow research-portfolio-models; ordinary advice authorizes no jobs. PPO requires chronological transitions and one long-history snapshot can contain them. First-seen news is never backdated.
 
 GDELT numeric inputs retain protocol, UTC source_day, release/central availability and cutoff/lag. Archive organization tone is neither calibrated stock sentiment nor proof of same-morning paid-headline consumption; VOO uses Vanguard mentions.

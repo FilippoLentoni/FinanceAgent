@@ -24,7 +24,7 @@ def selection_evidence(result: dict, max_chars: int) -> dict | None:
         return None
     summary = {key: result[key] for key in ('run_id', 'completion_status', 'solution_status', 'artifacts_complete',
                'input_snapshot_id', 'configuration_id', 'dataset_checksum', 'evaluator_version') if key in result}
-    summary['evidence_scope'] = 'Historical validation comparison; reused test/development history is not independent forward evidence.'
+    summary['evidence_scope'] = 'Scores cover frozen configurations, not differently configured daily optimizers. Selected-seed scores do not certify an ensemble. Reused history is not independent forward evidence. Structured split dates/session counts override conflicting prose.'
     summary['evidence_representation'] = 'bounded_validation_excerpt'
     summary['model_selection'] = {}
     if len(json.dumps(summary, sort_keys=True, default=str)) > max_chars:
@@ -58,6 +58,7 @@ def selection_evidence(result: dict, max_chars: int) -> dict | None:
             values = seed.get('validation') or {}
             seeds.append([algorithm, _number(seed.get('seed')), *[_number(values.get(key)) for key in seed_columns[1:]]])
     add('validation_seeds', {'columns': ['algorithm', *seed_columns], 'rows': seeds})
+    add('validation_parameters', {row['strategy']: row['params'] for row in rows[:12] if isinstance(row, dict) and isinstance(row.get('strategy'), str) and isinstance(row.get('params'), dict) and row['params']})
     add('promotion_check', selection.get('promotion_check'))
     caveats = selection.get('caveats') or []
     add('caveats', [{key: row[key][:160] for key in ('kind', 'text') if isinstance(row.get(key), str)} for row in caveats[:2] if isinstance(row, dict)])

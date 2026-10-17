@@ -72,7 +72,7 @@ def test_all_methods_pin_snapshot_holdings_and_settings_and_explain_three_levels
     for item in report['methods']:
         levels = item['explainability']
         assert levels['1_recommendation']['status'] == 'available'
-        assert levels['2_plan_change']['reason'] == 'no_prior_compatible_market_date'
+        assert levels['2_plan_change']['reason'] == 'no_prior_compatible_market_date_or_news_formation'
         assert levels['3_realization_and_context']['evaluated_decision_id'] == item['decision_id']
         assert levels['3_realization_and_context']['dated_context']['status'] == 'available'
     assert 'No holdings were changed.' in markdown(report)

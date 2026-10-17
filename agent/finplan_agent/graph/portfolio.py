@@ -234,8 +234,12 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         # Implementation identity remains in the raw analysis for reproducibility;
         # the recommendation narrative shows the decision's comparison context.
         alignment = doc.get("alignment", {})
-        comparison_context = {k: alignment[k] for k in ("algorithm", "previous_algorithm", "current_algorithm", "previous_as_of", "current_as_of", "horizon_sessions", "instruments", "snapshot_changed", "portfolio_revision_changed", "model_provenance_changed") if k in alignment}
+        comparison_context = {k: alignment[k] for k in ("algorithm", "previous_algorithm", "current_algorithm", "previous_as_of", "current_as_of", "horizon_sessions", "instruments", "snapshot_changed", "portfolio_revision_changed", "model_provenance_changed", "previous_decision_at", "current_decision_at", "previous_news_protocol", "current_news_protocol", "previous_news_source_checksum", "current_news_source_checksum", "previous_news_window", "current_news_window", "news_state_changed", "news_protocol_changed", "formation_changed", "holdings_state_changed", "same_price_as_of", "same_universe", "temporal_news_change", "identical_state_replay") if k in alignment}
         parts.append("Comparison alignment: " + json.dumps(comparison_context, sort_keys=True))
+        if alignment.get('identical_state_replay'):
+            parts.append('These decisions replay the same frozen state; they are not two daily news formations.')
+        elif alignment.get('same_price_as_of') and alignment.get('temporal_news_change'):
+            parts.append('Completed prices are unchanged; the retained eligible news formations differ. Model and holdings alignment remain explicit above; this is not causal market attribution.')
         for row in doc.get("changes", []):
             parts.append(f"{row['instrument_id']}: {row['previous_action']} → {row['current_action']}; target weight {_number(row['previous_target_weight'])} → {_number(row['current_target_weight'])}. Grouped modeled effects: " + json.dumps(row.get("attribution", []), sort_keys=True))
         shapley = doc.get("shapley") or {}

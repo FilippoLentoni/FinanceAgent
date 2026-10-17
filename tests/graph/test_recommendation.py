@@ -73,7 +73,7 @@ def test_skill_inventory_and_image_build_include_versioned_instructions():
     sk = next(s for s in inventory if s['name'] == 'recommend-portfolio')
     text = (ROOT/'skills/recommend-portfolio/SKILL.md').read_text()
     assert sk['instructions_checksum'] == 'sha256:'+hashlib.sha256(text.encode()).hexdigest()
-    assert sk['version'] == '0.3.2' and 'recommend_portfolio' in sk['tools'] and text in instructions
+    assert sk['version'] == '0.3.3' and 'recommend_portfolio' in sk['tools'] and text in instructions
     assert 'skills' in PACKAGE_PATHS
     assert 'COPY skills/' in (ROOT/'container/Dockerfile').read_text()
 
@@ -88,9 +88,9 @@ def test_beta_mcp_deadline_covers_tool_and_backend_deadlines():
 def test_hosted_beta_token_cap_fits_the_real_catalog_and_skills():
     from finplan_agent.graph.policy import SYSTEM_PROMPT
     from finplan_agent.providers.base import GenerateRequest, ToolSpec, estimate_tokens
+    from finplan_agent.skills import provider_tool_specs
     from infra.stacks.tool_policy import decide
     from infra.stacks.tool_schemas import contract_tools, tool_definition
-    from finplan_agent.skills import provider_tool_specs
     cfg = json.loads((ROOT/'config/beta.json').read_text())
     _, instructions = load_skills(ROOT/'skills')
     definitions = [tool_definition(t) for t in contract_tools() if decide(t, groups=['researcher'])]

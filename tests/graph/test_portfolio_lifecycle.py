@@ -333,6 +333,42 @@ def test_dated_comparison_discovers_only_compatible_stored_dates(recommendation)
     assert result['status']=='completed'
 
 
+def test_daily_news_comparison_uses_actual_distinct_formations_on_same_price_close(recommendation):
+    from tests.unit.test_decision_history import issued
+    svc, tools, _ = setup(recommendation)
+    pid = recommendation['portfolio_state']['portfolio_id']
+    previous, current = issued('17', 'a', OLD), issued('18', 'b', PD)
+    for row in (previous, current):
+        row['portfolio_id'] = pid
+        row['recommendation']['portfolio_state']['portfolio_id'] = pid
+    tools.results['list_portfolio_decisions'] = lambda _: {'decisions': [current, previous]}
+    tools.results['compare_portfolio_decisions'] = lambda _: {'analysis_id': ANALYSIS, 'analysis_kind': 'comparison', 'summary': 'Actual distinct news formations with the same completed close', 'changes': [], 'alignment': {
+        'previous_decision_at': previous['recommendation']['decision_at'], 'current_decision_at': current['recommendation']['decision_at'],
+        'same_price_as_of': True, 'temporal_news_change': True,
+        'previous_news_source_checksum': previous['recommendation']['diagnostics']['news_evidence']['provenance']['document_checksum'],
+        'current_news_source_checksum': current['recommendation']['diagnostics']['news_evidence']['provenance']['document_checksum']}}
+    result = ask(svc, 'Compare stored PPO recommendations yesterday and today')
+    assert result['status'] == 'completed'
+    assert tools.calls[-1] == ('compare_portfolio_decisions', {'portfolio_id': pid, 'previous_decision_id': OLD, 'current_decision_id': PD})
+    assert result['answer']['claim_check']['passed']
+    assert 'Completed prices are unchanged' in result['answer']['narrative']
+    assert previous['recommendation']['decision_at'] in result['answer']['narrative']
+    assert current['recommendation']['decision_at'] in result['answer']['narrative']
+
+
+def test_daily_news_comparison_does_not_invent_history_from_repeated_state_receipts(recommendation):
+    from tests.unit.test_decision_history import issued
+    svc, tools, _ = setup(recommendation)
+    current = issued('18', 'b', PD)
+    repeated = deepcopy(current)
+    repeated['decision_id'] = OLD
+    tools.results['list_portfolio_decisions'] = lambda _: {'decisions': [current, repeated]}
+    result = ask(svc, 'Compare stored PPO recommendations yesterday and today')
+    assert result['status'] == 'completed'
+    assert all(tool != 'compare_portfolio_decisions' for tool, _ in tools.calls)
+    assert 'repeated call is not yesterday' in result['answer']['narrative']
+
+
 def test_performance_for_previous_date_reads_previous_issued_decision_then_dated_context(recommendation):
     svc,tools,_=setup(recommendation)
     pid=recommendation['portfolio_state']['portfolio_id']

@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'agent')]
 from finplan_agent.config.settings import SsmNames  # noqa: E402
+from finplan_agent.core.decision_history import previous_decision  # noqa: E402
 from finplan_agent.core.news_evidence import summarize as summarize_news  # noqa: E402
 from finplan_agent.graph.activity import sanitize  # noqa: E402
 from scripts.beta_login import NoRedirect, validate_metadata  # noqa: E402
@@ -42,6 +43,15 @@ def private_json(path: Path, value: dict | list) -> None:
     with os.fdopen(fd, 'w') as stream:
         json.dump(value, stream, indent=2, default=str, allow_nan=False)
         stream.write('\n')
+    temporary.replace(path)
+
+
+def private_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(value)
     temporary.replace(path)
 
 
@@ -98,6 +108,8 @@ class HostedReader:
             payload['prompt'] = ('Explain why the recorded validation evidence favors one modeling approach over the others, or why it does not support a choice. '
                 'Compare PPO, minimum variance, mean variance, CVaR and available controls using only this run\'s actual common windows, costs, constraints and seed metrics. '
                 'Distinguish frozen selection from deployment readiness, failed runs, reused development/test history and independent forward evidence; never infer superiority from one allocation.')
+            payload['prompt'] += (' Historical scores apply only to the frozen experiment configurations and do not establish performance for differently configured daily optimizers. '
+                                  'Quote settings only when present in the tool evidence; otherwise disclose that the configuration is unavailable. Use structured split dates and session counts over conflicting calendar-year prose.')
         sid = 'daily_financial_report_' + uuid.uuid4().hex
         request = urllib.request.Request(self.url, data=json.dumps(payload).encode(), headers={
             'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json',
@@ -182,17 +194,6 @@ def check_recommendation(record: dict, method: str, portfolio_id: str, reference
     return problems
 
 
-def previous_decision(rows: list[dict], method: str, rec: dict) -> dict | None:
-    # A same-day retry is not yesterday. Compare exact universe/portfolio/method only.
-    for row in rows:
-        old = row.get('recommendation') or {}
-        strategy = row.get('algorithm') or row.get('strategy') or old.get('strategy')
-        day = row.get('reference_date') or old.get('as_of')
-        if strategy == method and day and day < rec['as_of']:
-            return row
-    return None
-
-
 def generate(reader, config: dict, now: datetime) -> dict:
     pid = config['portfolio_id']
     history = reader.call('history', 'list_portfolio_decisions', {'portfolio_id': pid, 'limit': 100})
@@ -203,7 +204,7 @@ def generate(reader, config: dict, now: datetime) -> dict:
               'method_selection': 'No statistically validated winner is inferred from one allocation. PPO optimizes its frozen sequential training objective; minimum variance minimizes modeled risk; mean variance balances modeled return and risk; CVaR penalizes modeled tail loss. Compare out-of-sample net-of-cost evidence, constraints and data readiness before choosing. Retrospective tests of the currently requested eight assets carry asset-selection and survivorship bias; provider prices are revised history downloaded today, not original point-in-time price vintages. Reused 2026 development/evaluation history is not fresh forward validation. Whole-document GDELT organization tone is neither calibrated stock sentiment nor a calibrated asset-return forecast.',
               'history_status': history['status'], 'classical_settings': config.get('classical_settings', {}),
               'decision_cutoff_comparison': 'Each producer reads approved latest data at its current decision cutoff; snapshot identity, completed date, returned holdings and actual news features/provenance are checked after each call. Calls are sequential rather than atomic; a change invalidates controlled comparison.',
-              'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment.'}
+              'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment. Historical rankings and scores belong only to their frozen tuned experiment configurations; they do not establish those scores for the current daily optimizer settings or paper-book size. Cash constraints, covariance/scenario methods, horizon, turnover penalties and execution costs must be matched before transferring performance claims.'}
     reference = None
     for method in config.get('methods', METHODS):
         if method not in METHODS:
@@ -240,12 +241,13 @@ def generate(reader, config: dict, now: datetime) -> dict:
             reference = rec
         did = record['decision_id']
         news = (rec.get('diagnostics') or {}).get('news_evidence') or {}
-        item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
+        item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features', 'observation_dimension', 'observation_checksum', 'observed_drawdown', 'interpretation')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
         item['news_evidence'] = news
         item['news_input_summary'] = summarize_news(news)
         provenance = news.get('provenance') or {}
         item['news_input_summary'].update({key: provenance.get(key) for key in (
-            'quality_status', 'captured_batches', 'expected_batches', 'missing_batches', 'missingness_basis')})
+            'quality_status', 'captured_batches', 'expected_batches', 'missing_batches', 'missingness_basis',
+            'row_count', 'rejected_rows', 'archive_coverage_fraction', 'row_acceptance_fraction', 'source_coverage_fraction')})
         item['news_input_summary']['freshness_basis'] = news.get('freshness_basis')
         item['news_input_summary']['serving_time'] = rec.get('serving_time')
         item['news_status'] = 'consumed_under_declared_cutoff' if news.get('consumed') else 'not_consumed'
@@ -257,7 +259,7 @@ def generate(reader, config: dict, now: datetime) -> dict:
         old = previous_decision(rows, method, rec)
         item['explainability']['2_plan_change'] = (reader.call(method + '-change', 'compare_portfolio_decisions', {
             'portfolio_id': pid, 'previous_decision_id': old['decision_id'], 'current_decision_id': did}) if old else
-            {'status': 'not_available', 'reason': 'no_prior_compatible_market_date', 'history_status': history['status']})
+            {'status': 'not_available', 'reason': 'no_prior_compatible_market_date_or_news_formation', 'history_status': history['status']})
         evaluated = old['decision_id'] if old else did
         outcome = reader.call(method + '-outcome', 'evaluate_portfolio_decision', {'portfolio_id': pid, 'decision_id': evaluated})
         outcome['evaluated_decision_id'] = evaluated
@@ -490,9 +492,14 @@ def main() -> int:
     except (OSError, ValueError, subprocess.SubprocessError):
         config['_calendar_context'] = {}
     day = now.astimezone(ZoneInfo('America/New_York')).date().isoformat()
-    output = Path(config['output_dir']).expanduser() / day
+    report_root = Path(config['output_dir']).expanduser()
+    report_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    report_root.chmod(0o700)
+    output = report_root / day
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output.chmod(0o700)
     with (output / 'run.lock').open('w') as lock:
+        os.fchmod(lock.fileno(), 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         attempt = output / 'attempts' / uuid.uuid4().hex
         try:
@@ -511,8 +518,16 @@ def main() -> int:
             report['method_selection_evidence'].append({'run_id': run_id, **result})
         report['market_timing'] = market_timing(report, datetime.now(UTC))
         report['receipts_directory'] = str(attempt)
-        private_json(output / 'report.json', sanitize(report))
-        (output / 'report.md').write_text(markdown(report))
+        frozen = sanitize(report)
+        rendered = markdown(report)
+        private_json(attempt / 'report.json', frozen)
+        private_text(attempt / 'report.md', rendered)
+        private_json(output / 'report.json', frozen)
+        private_text(output / 'report.md', rendered)
+        private_text(output.parent / 'latest.md', rendered)
+        private_json(output.parent / 'latest.json', {'date': day, 'status': report['status'],
+            'report': str(output / 'report.md'), 'frozen_report': str(attempt / 'report.md'),
+            'frozen_json': str(attempt / 'report.json'), 'generated_at': report['generated_at']})
         print(json.dumps({'status': report['status'], 'report': str(output / 'report.md'), 'methods': {row['method']: row['status'] for row in report['methods']}}))
     return 0
 

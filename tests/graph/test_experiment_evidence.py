@@ -11,7 +11,7 @@ from tests.fakes.agent import CHECKSUM, RUN, FakeToolClient, make_service, run
 
 
 def experiment():
-    rows = [{'strategy': strategy, 'total_return': value, 'sharpe': value + .5, 'max_drawdown': -.1,
+    rows = [{'strategy': strategy, 'total_return': value, 'sharpe': value + .5, 'max_drawdown': -.1, 'params': {'lookback': 60},
              'transaction_cost_fraction': .001} for strategy, value in (
         ('cash', 0), ('equal_weight', .06), ('min_variance', .07), ('mean_variance', .08), ('scenario_cvar', .09), ('ppo', .31))]
     selection = {'universe': ['SYN_A', 'SYN_B'],
@@ -57,6 +57,9 @@ def test_large_result_keeps_common_method_metrics_seeds_and_source_evidence_thro
     assert selection['evaluation']['same_evaluator_for_all_families'] is True
     assert selection['source_artifact']['checksum'] == CHECKSUM
     assert selection['test_access']['test_reuse'] is True
+    assert selection['validation_parameters']['min_variance'] == {'lookback': 60}
+    assert 'not differently configured daily optimizers' in evidence['evidence_scope']
+    assert 'Structured split dates/session counts override conflicting prose' in evidence['evidence_scope']
     assert selection['splits']['validation']['sessions'] == 250
     rows = selection['validation_comparison']['rows']
     assert {row[0] for row in rows} >= {'ppo', 'min_variance', 'mean_variance', 'scenario_cvar'}
