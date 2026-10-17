@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["ClaimCheckResult", "claim_check", "collect_values", "REMOVED"]
+__all__ = ["ClaimCheckResult", "claim_check", "collect_values", "metric_label_check", "REMOVED"]
 
 REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
@@ -140,5 +140,79 @@ def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
             result.unsupported.append(token)
         pos = end
     out.append(text[pos:])
+    result.text = "".join(out)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Metric-label check for tabular strategy evidence.
+#
+# The general check above proves a figure exists somewhere in this turn's tool results;
+# it cannot tell that a drawdown was relabelled as a Sharpe ratio. Where the evidence is a
+# reviewed strategy x metric table, a figure written in a clause that names exactly one
+# strategy and is preceded by a metric label must not be a value recorded for a DIFFERENT
+# strategy or metric unless it is also a recorded value of that strategy and metric.
+# Unattributable figures are left to the general check, so this never invents failures for
+# prose it cannot parse.
+
+_METRIC_ALIASES = {
+    "sharpe": r"\bsharpe\b",
+    "max_drawdown": r"\bdrawdowns?\b",
+    "transaction_cost_fraction": r"\b(?:transaction|trading)?\s*costs?\b",
+    "total_return": r"(?<!adjusted )(?<!excess )\breturn(?:s|ed)?\b",
+}
+_STRATEGY_EXTRA = {
+    "scenario_cvar": [r"\bc\s*-?\s*va\s*r\b"],
+    "min_variance": [r"\bmin(?:imum)?[\s_-]+variance\b"],
+    "mean_variance": [r"\bmean[\s_-]+variance\b"],
+    "equal_weight": [r"\bequal[\s_-]+weight(?:ed)?\b"],
+    "buy_and_hold": [r"\bbuy[\s_-]+and[\s_-]+hold\b"],
+}
+_CLAUSE = re.compile(r"(?<=[.!?;])\s+|\n+")
+
+
+def _strategy_pattern(name: str) -> re.Pattern[str]:
+    words = [re.escape(name), re.escape(name).replace("_", r"[\s_-]+")] + _STRATEGY_EXTRA.get(name, [])
+    return re.compile("|".join(f"(?:{w})" if w.startswith(r"\b") else rf"(?<![\w]){w}(?![\w])" for w in words), re.I)
+
+
+def metric_label_check(text: str, cells: dict[str, dict[str, list[float]]]) -> ClaimCheckResult:
+    """Remove figures attached to the wrong strategy/metric label (see module notes above)."""
+    result = ClaimCheckResult(text=text)
+    if not cells:
+        return result
+    strategies = {name: _strategy_pattern(name) for name in cells}
+    metrics = {name: re.compile(p, re.I) for name, p in _METRIC_ALIASES.items()}
+    masked = _DATE.sub(lambda m: " " * len(m.group()), text)
+    bad: list[tuple[int, int]] = []
+    pos = 0
+    for clause_end in [m.start() for m in _CLAUSE.finditer(masked)] + [len(masked)]:
+        start, clause = pos, masked[pos:clause_end]
+        pos = clause_end
+        if clause.lstrip().startswith("|"):
+            continue  # table rows carry their own column labels
+        named = [s for s, p in strategies.items() if p.search(clause)]
+        if len(named) != 1:
+            continue
+        own = cells[named[0]]
+        labels = sorted((m.end(), metric) for metric, p in metrics.items() for m in p.finditer(clause))
+        for m in _NUM.finditer(clause):
+            prior = [metric for end, metric in labels if end <= m.start()]
+            if not prior:
+                continue
+            metric = prior[-1]
+            token = m.group()
+            result.checked += 1
+            if _matches(token, own.get(metric, [])):
+                continue
+            others = [v for s, block in cells.items() for k, vals in block.items() if (s, k) != (named[0], metric) for v in vals]
+            if _matches(token, others):
+                bad.append((start + m.start(), start + m.end()))
+                result.unsupported.append(token)
+    out, last = [], 0
+    for a, b in bad:
+        out.extend([text[last:a], REMOVED])
+        last = b
+    out.append(text[last:])
     result.text = "".join(out)
     return result

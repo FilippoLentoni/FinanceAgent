@@ -30,7 +30,7 @@ from ..providers.fixture import FixtureProvider
 from ..skills import provider_tool_specs
 from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
 from .brokerage import connection_plan
-from .claim_check import claim_check
+from .claim_check import claim_check, metric_label_check
 from .crypto import TOOLS as CRYPTO_TOOLS
 from .crypto import crypto_plan, render_crypto
 from .etf_news import etf_news_plan, render_etf_news
@@ -366,6 +366,47 @@ def _evidence(state: AgentState) -> tuple[dict[str, Any], ...]:
     return tuple(out)
 
 
+def _reviewed_selection(state: AgentState) -> dict[str, Any] | None:
+    """The latest reviewed model-selection summary from this turn's experiment results."""
+    from .experiment_evidence import reviewed_selection
+    for item in reversed(state.get("tool_results") or []):
+        if item.get("ok") and item.get("tool") == "get_experiment_result":
+            found = reviewed_selection(item.get("summary"))
+            if found is not None:
+                return found
+    return None
+
+
+def _narrate_selection(state: AgentState, ctx: AgentContext, selection: dict[str, Any]) -> dict[str, Any]:
+    """Experiment-result explanation: figures, rankings and selection facts are rendered
+    deterministically beside their strategy and source field; the provider may only add
+    qualitative context, and any provider sentence carrying a figure or a metric comparison
+    is dropped (it once relabelled a drawdown as a Sharpe ratio)."""
+    from .experiment_evidence import COMMENTARY_INSTRUCTION, qualitative_commentary, render_selection_evidence
+    text = render_selection_evidence(selection)
+    updates: dict[str, Any] = {}
+    draft = state.get("draft_text") or ""
+    if not draft:
+        request = GenerateRequest(
+            purpose="narrate",
+            system=SYSTEM_PROMPT,
+            stable_instructions=tuple(ctx.stable_instructions) + (COMMENTARY_INSTRUCTION,),
+            messages=[m for m in state.get("messages", []) if m.get("role") == "user" and any("text" in b for b in m.get("content", []))][-1:],
+            max_tokens=ctx.provider_config.max_tokens_invocation,
+            temperature=ctx.provider_config.temperature,
+            evidence=_evidence(state),
+        )
+        try:
+            result, updates = _invoke_provider(state, ctx, request, stream_tokens=False)
+            draft = result.text
+        except AgentError:
+            draft = ""
+    commentary, _dropped = qualitative_commentary(draft)
+    text += "\n\nQualitative context (model-written; the figures above are authoritative): " + commentary if commentary else "\n\nNo qualitative model commentary is included; the figures above are authoritative."
+    _emit({"type": "token", "text": text})
+    return {**updates, "narrative": text, "narrative_status": "generated"}
+
+
 def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     ctx = runtime.context
     _progress("narrate")
@@ -397,6 +438,9 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
             text += "\n\nIssued decision: " + item["result"]["decision_id"] + ". You can inspect, accept or reject this paper recommendation."
         _emit({"type": "token", "text": text})
         return {"narrative": text, "narrative_status": "generated"}
+    selection = _reviewed_selection(state)
+    if selection is not None:
+        return _narrate_selection(state, ctx, selection)
     if state.get("draft_text"):
         _emit({"type": "token", "text": state["draft_text"]})
         return {"narrative": state["draft_text"], "narrative_status": "generated"}
@@ -432,7 +476,17 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
             rec = (item.get("result") or {}).get("recommendation")
             if rec:
                 values.append({"computed_target_cash": target_cash_value(rec)})
+    selection = _reviewed_selection(state)
+    if selection is not None:
+        values.append(selection)
     res = claim_check(state["narrative"], values)
+    if selection is not None:
+        # Also reject a figure printed beside the wrong strategy or metric label.
+        from .experiment_evidence import comparison_cells
+        labelled = metric_label_check(res.text, comparison_cells(selection))
+        res.text = labelled.text
+        res.checked += labelled.checked
+        res.unsupported.extend(labelled.unsupported)
     return {"narrative": res.text, "claim_check": res.record()}
 
 

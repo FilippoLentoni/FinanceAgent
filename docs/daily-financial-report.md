@@ -125,3 +125,10 @@ ensemble and per-seed rows remain separate. A generic selected-seed warning must
 not be interpreted as evidence that this particular ensemble lacked evaluation.
 Its reused development history and configuration differences still limit transfer
 to future returns or differently configured daily optimizers.
+
+Recorded model-selection explanations (`get_experiment_result`) render every
+validation figure deterministically in source-labelled strategy x metric tables,
+with the ranking, per-metric extremes and selection facts derived from those same
+rows. The hosted model may add only figure-free qualitative context; sentences
+with figures or metric comparisons are dropped, and the claim check also rejects
+a figure printed beside the wrong strategy or metric label.
