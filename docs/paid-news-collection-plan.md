@@ -43,3 +43,11 @@ original reservation/token and its original short session deadline. Unknown
 outcomes retain their reservations and require reconciliation. Daily collection
 continues to repair pending central publication before considering new purchases;
 all successful scheduled pulls are published centrally by the existing publisher.
+
+Historical publication preserves a verified actual publication timestamp only
+inside the explicit request window and no later than retrieval. Outside-window,
+future, missing, or timezone-free dates remain null and quality-unverified. The
+retrieval timestamp is never backdated, and central ingestion assigns availability
+at ingestion time. Existing live seven-day normalization and the central reader's
+seven-day retrieval window remain unchanged. Historical metadata does not confer
+training rights or make the data available to a historical decision retrospectively.

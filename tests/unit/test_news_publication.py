@@ -64,3 +64,39 @@ def test_mixed_delivery_curation_preserves_raw_and_payment_identity():
     assert derived['retrieved_at']==document['retrieved_at']
     assert derived['payment_receipt']==document['payment_receipt'] and derived['receipt_checksum']==document['receipt_checksum']
     assert derived['payload_checksum']==checksum(derived['payload'])
+
+
+@pytest.mark.parametrize('published,expected', [
+    ('2026-09-03T12:00:00Z','2026-09-03T12:00:00Z'),
+    ('2026-08-31T23:59:59Z',None),
+    ('2026-09-08T00:00:00Z',None),
+    ('2026-11-01T00:00:00Z',None),
+    ('2026-09-03',None), ('unknown',None),
+])
+def test_historical_window_preserves_only_verified_publication_dates(published,expected):
+    record=receipt()
+    record['request'].update(startPublishedDate='2026-09-01T00:00:00Z',endPublishedDate='2026-09-07T23:59:59Z')
+    raw=json.dumps({'results':[{'title':'Historical ETF news','url':'https://example.org/history','publishedDate':published}]}).encode()
+    record.update(response_base64=base64.b64encode(raw).decode(),response_checksum='sha256:'+hashlib.sha256(raw).hexdigest())
+    result=publication(record,rights=RIGHTS)
+    assert result['payload']['records'][0]['published_at']==expected
+    assert result['quality_status']==('validated' if expected else 'unverified')
+    assert result['retrieved_at']==record['retrieved_at']
+    assert 'available_at' not in result  # central storage assigns current ingestion time
+    assert result['rights']==RIGHTS and result['rights']['status']!='research_and_training'
+
+
+def test_live_publication_still_quarantines_old_dates_without_explicit_window():
+    record=receipt()
+    raw=json.dumps({'results':[{'title':'Old ETF news','url':'https://example.org/history','publishedDate':'2026-09-03T12:00:00Z'}]}).encode()
+    record.update(response_base64=base64.b64encode(raw).decode(),response_checksum='sha256:'+hashlib.sha256(raw).hexdigest())
+    assert publication(record,rights=RIGHTS)['payload']['records'][0]['published_at'] is None
+
+
+def test_future_publication_rejected_even_inside_requested_window():
+    record=receipt()
+    record['request'].update(startPublishedDate='2026-10-01T00:00:00Z',endPublishedDate='2026-10-31T00:00:00Z')
+    raw=json.dumps({'results':[{'title':'Future','url':'https://example.org/news','publishedDate':'2026-10-20T12:00:00Z'}]}).encode()
+    record.update(response_base64=base64.b64encode(raw).decode(),response_checksum='sha256:'+hashlib.sha256(raw).hexdigest())
+    result=publication(record,rights=RIGHTS)
+    assert result['payload']['records'][0]['published_at'] is None and result['quality_status']=='unverified'

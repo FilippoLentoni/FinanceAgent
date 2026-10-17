@@ -41,6 +41,16 @@ def publication(record, *, rights, symbols=None):
     retrieved = datetime.fromisoformat(record['retrieved_at'].replace('Z', '+00:00'))
     if retrieved.tzinfo is None:
         raise ValueError('retrieval timezone missing')
+    # Explicit bounded historical requests preserve actual publication time;
+    # retrieval/availability remain the present-time anti-look-ahead boundary.
+    request = record['request']
+    start, end = request.get('startPublishedDate'), request.get('endPublishedDate')
+    lower, upper = retrieved-timedelta(days=7), retrieved
+    if start is not None or end is not None:
+        from .news_trial import query_body
+        query_body(record['profile'], start, end)  # same fail-closed bound validation
+        lower = datetime.fromisoformat(start.replace('Z', '+00:00'))
+        upper = min(datetime.fromisoformat(end.replace('Z', '+00:00')), retrieved)
     raw = json.loads(response)
     rows = raw.get('results') or raw.get('body', {}).get('results')
     if not isinstance(rows, list) or not 1 <= len(rows) <= 20:
@@ -58,7 +68,7 @@ def publication(record, *, rights, symbols=None):
         if isinstance(published, str):
             try:
                 dt = datetime.fromisoformat(published.replace('Z', '+00:00'))
-                if dt.tzinfo and retrieved-timedelta(days=7) <= dt <= retrieved:
+                if dt.tzinfo and lower <= dt <= upper:
                     stamp = dt.astimezone(UTC).isoformat().replace('+00:00', 'Z')
             except ValueError:
                 pass
