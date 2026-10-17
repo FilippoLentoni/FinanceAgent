@@ -130,5 +130,6 @@ Recorded model-selection explanations (`get_experiment_result`) render every
 validation figure deterministically in source-labelled strategy x metric tables,
 with the ranking, per-metric extremes and selection facts derived from those same
 rows. The hosted model may add only figure-free qualitative context; sentences
-with figures or metric comparisons are dropped, and the claim check also rejects
+with figures, metric comparisons, strategy-specific or availability claims are
+dropped, and the claim check also rejects
 a figure printed beside the wrong strategy or metric label.

@@ -401,7 +401,8 @@ def _narrate_selection(state: AgentState, ctx: AgentContext, selection: dict[str
             draft = result.text
         except AgentError:
             draft = ""
-    commentary, _dropped = qualitative_commentary(draft)
+    from .experiment_evidence import comparison_cells
+    commentary, _dropped = qualitative_commentary(draft, comparison_cells(selection))
     text += "\n\nQualitative context (model-written; the figures above are authoritative): " + commentary if commentary else "\n\nNo qualitative model commentary is included; the figures above are authoritative."
     _emit({"type": "token", "text": text})
     return {**updates, "narrative": text, "narrative_status": "generated"}

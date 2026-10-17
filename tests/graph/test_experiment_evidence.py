@@ -181,3 +181,14 @@ def test_qualitative_commentary_drops_figures_and_metric_comparisons():
     kept, dropped = qualitative_commentary(MISLABELLED)
     assert kept == 'Historical scores apply only to the frozen experiment configurations.'
     assert len(dropped) == 2
+
+
+def test_qualitative_commentary_drops_strategy_specific_and_availability_claims():
+    # Observed live after the first fix: the provider called scenario_cvar's listed configuration unavailable.
+    live = ('However, the scenario_cvar strategy was not selected for promotion due to a predeclared development period not being an untouched holdout. '
+            'Historical scores apply only to the frozen experiment configurations and do not establish performance for differently configured daily optimizers. '
+            'The configuration used for the scenario_cvar strategy is unavailable in the tool evidence. '
+            'The configuration is not available. Minimum variance is a conservative choice. CVaR is tail-aware.')
+    kept, dropped = qualitative_commentary(live, comparison_cells(selection_evidence(actual_experiment(), 4000)))
+    assert kept == 'Historical scores apply only to the frozen experiment configurations and do not establish performance for differently configured daily optimizers.'
+    assert len(dropped) == 5

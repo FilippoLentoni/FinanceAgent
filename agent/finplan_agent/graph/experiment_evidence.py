@@ -253,24 +253,30 @@ COMMENTARY_INSTRUCTION = (
     'The metric tables, rankings, selection facts and settings for this experiment are rendered deterministically from the '
     'tool result and shown to the user before your text. Add at most four sentences of qualitative context only: what the '
     'evidence scope means (frozen selection versus deployment readiness, reused development/test history, lack of independent '
-    'forward evidence, configuration differences). Do not write any number, date or metric value, and do not compare or rank '
-    'strategies on any metric.')
+    'forward evidence, configuration differences). Do not write any number, date or metric value, do not name or characterise '
+    'individual strategies, and do not compare or rank strategies on any metric or say which evidence is unavailable.')
 
 _DIGIT = re.compile(r'\d')
 _METRIC_WORD = re.compile(r'sharpe|drawdown|cost|return|volatil|turnover|cagr|risk.adjusted|performance|perform', re.I)
 _COMPARATIVE = re.compile(r'\b(?:higher|lower|highest|lowest|better|worse|best|worst|more|less|most|least|greater|smaller|'
                           r'larger|outperform\w*|underperform\w*|beat\w*|exceed\w*|superior|inferior|favou?r\w*|stronger|weaker|top|leading)\b', re.I)
+# Availability is stated deterministically above; a provider once called a listed configuration unavailable.
+_AVAILABILITY = re.compile(r'\b(?:unavailable|not available|missing|absent|not (?:present|provided|recorded|included|listed|reported))\b', re.I)
 _SENTENCE = re.compile(r'(?<=[.!?])\s+')
 
 
-def qualitative_commentary(text: str) -> tuple[str, list[str]]:
-    """Keep only provider sentences without figures or metric comparisons."""
+def qualitative_commentary(text: str, strategies=()) -> tuple[str, list[str]]:
+    """Keep only strategy-agnostic provider sentences without figures, metric comparisons
+    or availability claims; strategy-specific facts come only from the rendered tables."""
+    from .claim_check import strategy_pattern
+    names = [strategy_pattern(name) for name in strategies]
     kept, dropped = [], []
     for sentence in _SENTENCE.split((text or '').strip()):
         sentence = sentence.strip()
         if not sentence:
             continue
-        if _DIGIT.search(sentence) or (_METRIC_WORD.search(sentence) and _COMPARATIVE.search(sentence)):
+        if (_DIGIT.search(sentence) or (_METRIC_WORD.search(sentence) and _COMPARATIVE.search(sentence))
+                or _AVAILABILITY.search(sentence) or any(p.search(sentence) for p in names)):
             dropped.append(sentence)
         else:
             kept.append(sentence)

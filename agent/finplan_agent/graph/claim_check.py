@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["ClaimCheckResult", "claim_check", "collect_values", "metric_label_check", "REMOVED"]
+__all__ = ["ClaimCheckResult", "claim_check", "collect_values", "metric_label_check", "strategy_pattern", "REMOVED"]
 
 REMOVED = "[unsupported figure removed]"
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
@@ -171,7 +171,7 @@ _STRATEGY_EXTRA = {
 _CLAUSE = re.compile(r"(?<=[.!?;])\s+|\n+")
 
 
-def _strategy_pattern(name: str) -> re.Pattern[str]:
+def strategy_pattern(name: str) -> re.Pattern[str]:
     words = [re.escape(name), re.escape(name).replace("_", r"[\s_-]+")] + _STRATEGY_EXTRA.get(name, [])
     return re.compile("|".join(f"(?:{w})" if w.startswith(r"\b") else rf"(?<![\w]){w}(?![\w])" for w in words), re.I)
 
@@ -181,7 +181,7 @@ def metric_label_check(text: str, cells: dict[str, dict[str, list[float]]]) -> C
     result = ClaimCheckResult(text=text)
     if not cells:
         return result
-    strategies = {name: _strategy_pattern(name) for name in cells}
+    strategies = {name: strategy_pattern(name) for name in cells}
     metrics = {name: re.compile(p, re.I) for name, p in _METRIC_ALIASES.items()}
     masked = _DATE.sub(lambda m: " " * len(m.group()), text)
     bad: list[tuple[int, int]] = []
