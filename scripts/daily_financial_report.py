@@ -276,6 +276,10 @@ def generate(reader, config: dict, now: datetime) -> dict:
         did = record['decision_id']
         news = (rec.get('diagnostics') or {}).get('news_evidence') or {}
         item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features', 'observation_dimension', 'observation_checksum', 'observed_drawdown', 'interpretation')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
+        if method != 'ppo' and (news.get('sensitivity_assumptions') or news.get('assumptions')):
+            item['model_assumptions']['news_sensitivity_assumptions'] = news.get('sensitivity_assumptions') or news['assumptions']
+            item['model_assumptions']['news_interpretation'] = ('Declared fixed research sensitivity, not a learned or calibrated return forecast. '
+                'Shared source fields and availability/coverage checks do not make the optimizer a PPO observation-state model.')
         item['news_evidence'] = news
         item['news_input_summary'] = summarize_news(news)
         provenance = news.get('provenance') or {}

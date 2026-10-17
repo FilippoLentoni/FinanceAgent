@@ -100,3 +100,8 @@ also respects the existing tool-call and planning-round limits, reserving room f
 the actual explanation. Every page remains in its private raw receipt or durable
 tool evidence. A bounded or failed search is incomplete history, never evidence
 that a genuine prior decision does not exist.
+
+Classical reports expose the producer's declared `sensitivity_assumptions`
+separately from PPO observation dimensions. The shared source extractor does not
+mean each optimizer uses every feature as a forecast; coefficients and predictive
+limitations remain those recorded by the actual producer.
