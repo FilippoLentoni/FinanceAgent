@@ -94,6 +94,10 @@ class HostedReader:
         self.sequence += 1
         print(json.dumps({'stage': label, 'tool': tool}), flush=True)
         payload = {'tool_request': {'name': tool, 'arguments': arguments}, 'stream': False}
+        if tool == 'get_experiment_result':
+            payload['prompt'] = ('Explain why the recorded validation evidence favors one modeling approach over the others, or why it does not support a choice. '
+                'Compare PPO, minimum variance, mean variance, CVaR and available controls using only this run\'s actual common windows, costs, constraints and seed metrics. '
+                'Distinguish frozen selection from deployment readiness, failed runs, reused development/test history and independent forward evidence; never infer superiority from one allocation.')
         sid = 'daily_financial_report_' + uuid.uuid4().hex
         request = urllib.request.Request(self.url, data=json.dumps(payload).encode(), headers={
             'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json',
