@@ -57,6 +57,8 @@ def test_all_methods_pin_snapshot_holdings_and_settings_and_explain_three_levels
     report = generate(reader, cfg, NOW)
     assert report['status'] == 'complete'
     assert report['session_label'] == 'market_closed_latest_completed_session'
+    assert report['recommendation_context'] == 'closed_market_preview'
+    assert report['training_distribution_status'] == 'outside_regular_exchange_session_training_distribution'
     assert report['comparison']['recommendations_differ'] is True
     assert report['comparison']['winner'] == 'not_established'
     assert len(report['cross_method_explanations']) == 3
@@ -177,3 +179,32 @@ def test_report_market_timing_labels_sunday_and_dst_opens_without_claiming_fills
     assert timing['methods'][0]['next_exchange_open_after_formation'] == '2026-11-02T14:30:00+00:00'
     assert timing['methods'][0]['report_completed_before_that_open'] is False
     assert timing['execution_status'] == 'advisory_only_no_fills'
+
+
+def test_report_retains_fixed_formation_quality_and_distinct_serving_time(recommendation, tmp_path):
+    recommendation.setdefault('diagnostics', {})['news_evidence'] = {
+        'consumed': True, 'feature_protocol': 'gdelt-gkg-v2-premarket-organization-tone-v1',
+        'decision_time': '2026-10-08T13:00:00Z', 'freshness_basis': 'window_end_at_fixed_09:00_formation',
+        'provenance': {'quality_status': 'partial', 'captured_batches': 3, 'expected_batches': 4,
+                       'missing_batches': ['20261008121500'], 'missingness_basis': 'actual_central_capture'}}
+    recommendation['serving_time'] = '2026-10-08T18:00:00Z'
+    report = generate(Reader(recommendation), config(recommendation, tmp_path), NOW)
+    summary = report['methods'][0]['news_input_summary']
+    assert summary['decision_cutoff'] == '2026-10-08T13:00:00Z'
+    assert summary['serving_time'] == '2026-10-08T18:00:00Z'
+    assert summary['quality_status'] == 'partial'
+    assert summary['captured_batches'] == 3 and summary['expected_batches'] == 4
+    assert summary['missing_batches'] == ['20261008121500']
+    assert summary['missingness_basis'] == 'actual_central_capture'
+    assert summary['freshness_basis'] == 'window_end_at_fixed_09:00_formation'
+
+
+def test_evening_request_reuses_same_new_york_formation_after_utc_midnight(recommendation, tmp_path):
+    from finplan_agent.core.news_evidence import summarize
+    from scripts.daily_financial_report import pipeline_readiness
+    from tests.unit.test_news_evidence import news
+    cfg = config(recommendation, tmp_path)
+    inputs = [summarize(news())]
+    # 21:00 New York still belongs to the October8 formation session.
+    result = pipeline_readiness(cfg, datetime(2026, 10, 9, 1, tzinfo=UTC), recommendation['as_of'], inputs)
+    assert 'numeric_news_decision_cutoff_not_current' not in result['issues']

@@ -196,7 +196,7 @@ def generate(reader, config: dict, now: datetime) -> dict:
     report = {'generated_at': now.isoformat(), 'local_date': now.astimezone(ZoneInfo('America/New_York')).date().isoformat(),
               'portfolio_id': pid, 'mode': 'advisory_saved_paper', 'holdings_changed': False,
               'expected_instruments': config.get('expected_instruments', []), 'methods': [],
-              'method_selection': 'No statistically validated winner is inferred from one allocation. PPO optimizes its frozen sequential training objective; minimum variance minimizes modeled risk; mean variance balances modeled return and risk; CVaR penalizes modeled tail loss. Compare out-of-sample net-of-cost evidence, constraints and data readiness before choosing.',
+              'method_selection': 'No statistically validated winner is inferred from one allocation. PPO optimizes its frozen sequential training objective; minimum variance minimizes modeled risk; mean variance balances modeled return and risk; CVaR penalizes modeled tail loss. Compare out-of-sample net-of-cost evidence, constraints and data readiness before choosing. Retrospective tests of the currently requested eight assets carry asset-selection and survivorship bias; provider prices are revised history downloaded today, not original point-in-time price vintages. Reused 2026 development/evaluation history is not fresh forward validation. Whole-document GDELT organization tone is neither calibrated stock sentiment nor a calibrated asset-return forecast.',
               'history_status': history['status'], 'classical_settings': config.get('classical_settings', {}),
               'decision_cutoff_comparison': 'Each producer reads approved latest data at its current decision cutoff; snapshot identity, completed date, returned holdings and actual news features/provenance are checked after each call. Calls are sequential rather than atomic; a change invalidates controlled comparison.',
               'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment.'}
@@ -239,6 +239,11 @@ def generate(reader, config: dict, now: datetime) -> dict:
         item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
         item['news_evidence'] = news
         item['news_input_summary'] = summarize_news(news)
+        provenance = news.get('provenance') or {}
+        item['news_input_summary'].update({key: provenance.get(key) for key in (
+            'quality_status', 'captured_batches', 'expected_batches', 'missing_batches', 'missingness_basis')})
+        item['news_input_summary']['freshness_basis'] = news.get('freshness_basis')
+        item['news_input_summary']['serving_time'] = rec.get('serving_time')
         item['news_status'] = 'consumed_under_declared_cutoff' if news.get('consumed') else 'not_consumed'
         if config.get('require_news_features', True) and not news.get('consumed'):
             issues.append('approved_news_features_not_consumed')
@@ -263,6 +268,9 @@ def generate(reader, config: dict, now: datetime) -> dict:
     report['input_snapshot_id'] = reference.get('input_snapshot_id') if reference else None
     local = now.astimezone(ZoneInfo('America/New_York')).date()
     report['session_label'] = ('market_closed_latest_completed_session' if (config.get('_calendar_context') or {}).get('is_trading_session') is False or local.weekday() >= 5 else 'latest_approved_completed_session_not_live_intraday')
+    closed = report['session_label'] == 'market_closed_latest_completed_session'
+    report['recommendation_context'] = 'closed_market_preview' if closed else 'regular_exchange_session_advisory'
+    report['training_distribution_status'] = 'outside_regular_exchange_session_training_distribution' if closed else 'regular_exchange_session_training_distribution'
     report['comparison'] = compare_methods(report['methods'])
     comparable = [item for item in report['methods'] if item.get('decision_id') and
                   not any(issue not in ('requested_universe_not_served', 'approved_news_features_not_consumed') for issue in item.get('readiness_issues', []))]
@@ -308,6 +316,7 @@ def compare_methods(methods: list[dict]) -> dict:
 def markdown(report: dict) -> str:
     lines = ['# Daily financial recommendation', '', f"Generated: {report['generated_at']}", '',
              f"Status: {report['status']}. Market evidence: {report.get('reference_market_date') or 'unavailable'}. {report['session_label']}.", '',
+             'Context: ' + report.get('recommendation_context', 'unverified') + '; ' + report.get('training_distribution_status', 'unverified') + '.', '',
              'These are saved paper holdings and indicative proposed trades. No holdings were changed.', '', report['method_selection'], '', report.get('constraint_comparison', '')]
     for item in report['methods']:
         lines.extend(['', '## ' + item['method'], '', 'Readiness: ' + item['status'] + '.'])
@@ -344,9 +353,11 @@ def markdown(report: dict) -> str:
     if report.get('market_timing'):
         lines.extend(['', '## Report and market timing', '', json.dumps(report['market_timing'], indent=2),
                       'Reference prices and proposed quantities do not establish fills at any market open.', ''])
+    if report.get('recommendation_context') == 'closed_market_preview':
+        lines.extend(['', 'Closed-market news with the latest completed prices is an informational preview. Training links a completed close to the next actual exchange-session formation; it contains no synthetic weekend transition or weekend fill. Re-run at the next actual session formation before interpreting a regular-session policy action.', ''])
     if report.get('method_selection_evidence'):
         lines.extend(['', '## Recorded model comparison evidence', '',
-                      'Completed experiments are historical research evidence. Compare the same windows, costs, constraints and seeds; reused development/test history is not fresh forward validation.', ''])
+                      'These records include failed and incomplete experiments. Only completed, evaluated artifacts support model selection or deployment. Compare the same windows, costs, constraints and seeds; reused development/test history is not fresh forward validation.', ''])
         for context in report['method_selection_evidence']:
             lines.extend(['Run: ' + context['run_id'] + '; evidence status: ' + context['status'] + '.', '',
                           context.get('answer', {}).get('narrative') or json.dumps(context.get('error'), default=str), ''])
@@ -393,7 +404,7 @@ def pipeline_readiness(config: dict, now: datetime, market_date: str | None, new
             issues.append('numeric_news_central_availability_not_verified')
         try:
             formed = datetime.fromisoformat(str(row.get('decision_cutoff') or '').replace('Z', '+00:00'))
-            if formed.tzinfo is None or formed.astimezone(UTC).date() != now.astimezone(UTC).date():
+            if formed.tzinfo is None or formed.astimezone(ZoneInfo('America/New_York')).date().isoformat() != day or formed > now:
                 issues.append('numeric_news_decision_cutoff_not_current')
             central = datetime.fromisoformat(str(row.get('central_available_at') or '').replace('Z', '+00:00'))
             if central.tzinfo is None or central > formed:
