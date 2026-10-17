@@ -5,6 +5,7 @@ import json
 import pytest
 
 from finplan_agent.modeling.jobs import atomic_json, missed_hours, run_job, slot_for
+from finplan_agent.modeling import jobs
 
 
 def test_independent_minute_halfhour_hour_slots_and_ny_calendar():
@@ -50,3 +51,42 @@ def test_atomic_health_state_does_not_lose_retry_slot(tmp_path):
     atomic_json(p, {**interrupted, "status": "failed"})
     assert json.loads(p.read_text())["slot"] == "fixed"
     assert not p.with_suffix(".json.tmp").exists()
+
+
+def test_failed_slot_retries_then_duplicate_is_a_noop(tmp_path, monkeypatch):
+    cfg = {"environment": "beta", "region": "us-east-2", "state_dir": str(tmp_path / "state")}
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(cfg))
+    calls = []
+    def worker(*args):
+        calls.append(args[2])
+        if len(calls) == 1:
+            raise RuntimeError("simulated process interruption")
+        return {"snapshot": "verified"}
+    monkeypatch.setattr(jobs, "run_job", worker)
+    args = ["snapshot", "--config", str(config), "--slot", "2026-10-17T22:00:00Z"]
+    assert jobs.main(args) == 1
+    assert jobs.main(args) == 0
+    assert jobs.main(args) == 0
+    assert calls == ["2026-10-17T22:00:00Z"] * 2
+    record = json.loads((tmp_path / "state/snapshot/2026-10-17T220000Z/status.json").read_text())
+    assert record["attempt"] == 2 and record["status"] == "succeeded"
+
+
+def test_actual_restart_path_accounts_each_cohort_without_historical_inference(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir()
+    atomic_json(state / "hourly-last-completed.json", {"slot": "2026-10-17T22:00:00Z"})
+    cfg = {"environment": "beta", "region": "us-east-2", "state_dir": str(state), "experiment_id": "test", "runtime_root": str(tmp_path),
+           "commands": {"hourly": [["python", "-m", "finplan_model.forward.hourly", "--slot", "{slot}"],
+                                    ["python", "-m", "finplan_model.forward.hourly", "--cohort", "eight_assets", "--slot", "{slot}"],
+                                    ["python", "modeling_report.py"]]}}
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps(cfg))
+    calls = []
+    monkeypatch.setattr(jobs, "execute", lambda command, **kwargs: calls.append(command))
+    monkeypatch.setattr(jobs, "run_job", lambda *a: {"completed": True})
+    assert jobs.main(["hourly", "--config", str(config), "--slot", "2026-10-18T00:00:00Z"]) == 0
+    assert len(calls) == 2
+    assert all("--account-missed" in c and "2026-10-17T23:00:00Z" in c for c in calls)
+    assert json.loads((state / "hourly-last-completed.json").read_text())["slot"] == "2026-10-18T00:00:00Z"
