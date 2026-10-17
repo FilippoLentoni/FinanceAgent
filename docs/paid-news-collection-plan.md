@@ -26,7 +26,7 @@ For an explicit historical collection, supply both UTC publication bounds:
 .venv/bin/python scripts/paid_news_trial.py collect --asset ETF_MARKET \
   --start-published 2026-10-01T00:00:00Z \
   --end-published 2026-10-02T00:00:00Z
-.venv/bin/python scripts/publish_paid_news.py RECEIPT_ID
+.venv/bin/python scripts/publish_paid_news.py --receipt RECEIPT_ID
 ```
 
 Bounds require ISO UTC seconds ending `Z`, a positive interval, and no more than
