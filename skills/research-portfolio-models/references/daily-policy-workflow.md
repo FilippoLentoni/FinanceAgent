@@ -75,6 +75,33 @@ decision comparison and observed-outcome/context tools. Distinct centrally
 eligible news formations can share a price close; repeated receipts cannot become
 history, and missing forward outcomes remain unavailable.
 
+The registered V2 producer accepts only a small server-owned source descriptor
+before dispatch: `rl.gdelt_corpus_request` has status
+`source_freeze_pending_cpu_setup`. Its checksummed query binds the approved
+snapshot ID and manifest checksum, exact symbols, feature/protocol version,
+chronological splits, interval and acceptance cutoff. A successful dry run proves
+configuration/budget eligibility; it does not prove source coverage or learner
+execution. Do not pass caller-selected storage locations or claim the descriptor
+is an already frozen corpus.
+
+Inside the bounded CPU job, setup uses at most two source readers to verify all
+actual required session windows before any learner starts. Every retained source
+retrieval/platform/central timestamp must be no later than the accepted cutoff;
+historical feature formation still uses the disclosed source-availability proxy.
+Setup writes the immutable corpus and a `finplan.gdelt-source-realization/1`
+manifest binding the accepted query, exact required sessions and realized protocol
+checksum/ID. The registered 3000-second job limit includes setup and training;
+setup deadline, coverage, rights, integrity or vintage failure is nondeployable.
+Only an actual successful result with `source_setup.status=complete` proves setup
+completion. Retain source/query/corpus/manifest identities with all seed results.
+
+Export verifies those immutable references against the accepted descriptor,
+snapshot, chosen environment/hyperparameters and actual realized evaluation
+protocol before binding them into the paper policy. This avoids synchronous bulk
+source scans within the job API's short deadline and prevents quota bursts from
+unbounded source-read fanout. Never export a pending, failed or partially realized
+source merely because submission or budget validation succeeded.
+
 Daily retention is not automatic weekly retraining of the new eight-asset policy.
 The legacy scheduled research loop keeps its own portfolio, supported profiles,
 one-job rule and category/global budgets. New training, complete export, scoped

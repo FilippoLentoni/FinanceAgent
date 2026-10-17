@@ -109,3 +109,12 @@ The registered V2 producer shifts expected mean with `tone_scaled` and rescales
 risk using `cluster_count_log_scaled`; availability and source coverage support
 readiness/provenance. Its recorded coefficients are unestimated sensitivity
 assumptions, not validated incremental forecasting accuracy.
+
+The numeric PPO fit now freezes the small server-owned
+`rl.gdelt_corpus_request` descriptor at submission and verifies/materializes the
+required source corpus inside the bounded CPU job with two readers, before learner
+start. Its `source_freeze_pending_cpu_setup` dry-run status is not training
+completion. The 3000-second limit includes setup. Only actual
+`source_setup.status=complete` evidence and immutable corpus/source-realization
+references support export; failed coverage, vintage or integrity remains
+nondeployable. See the research skill's operator reference for the full workflow.
