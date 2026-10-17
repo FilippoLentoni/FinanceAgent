@@ -117,3 +117,9 @@ for both decisions of every approach. Missing or uninspectable required approach
 remain coverage blockers even if the rest of the deployment works. Daily and weekly
 reports stay provisional until their actual cutoffs/window mature; the observed
 comparable winner is not proof of universal optimality or permission to promote it.
+
+The hourly configuration includes `commands.rollover`: at New York midnight it
+renders the previous calendar day using `{previous_day}` before the current-day
+commands. This incorporates late evening and 23:30 interim recommendations into
+a new immutable dated revision while leaving the original 17:00 archive intact.
+The current-day render runs last and restores the current `latest.html` alias.

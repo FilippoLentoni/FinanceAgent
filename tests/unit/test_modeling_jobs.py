@@ -122,3 +122,17 @@ def test_health_rotation_retains_parseable_events_and_permanent_slot_receipts(tm
     assert json.loads((tmp_path / "events.jsonl.2").read_text()) == {"cycle": 2}
     assert not (tmp_path / "events.jsonl.3").exists()
     assert json.loads(receipt.read_text())["slot"] == "permanent"
+
+
+@pytest.mark.parametrize("slot,expected", [
+    ("2026-10-18T04:00:00Z", ["2026-10-17", "current"]),
+    ("2026-11-02T05:00:00Z", ["2026-11-01", "current"]),
+    ("2026-10-18T03:00:00Z", ["current"]),
+])
+def test_midnight_calendar_revision_precedes_current_latest(tmp_path, slot, expected):
+    cfg = {"project_root": str(tmp_path), "runtime_root": str(tmp_path), "experiment_id": "isolated",
+           "commands": {"hourly": [["report", "current"]], "rollover": [["report", "{previous_day}"]]}}
+    calls = []
+    run_job(cfg, "hourly", slot, tmp_path,
+            execute_fn=lambda command, **kwargs: calls.append(command[-1]))
+    assert calls == expected

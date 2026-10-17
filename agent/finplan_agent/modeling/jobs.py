@@ -132,10 +132,18 @@ def run_job(cfg, job, slot, directory, *, execute_fn=execute):
     commands = cfg["commands"][job]
     if commands and isinstance(commands[0], str):
         commands = [commands]
+    prior_day = None
+    if job == "hourly":
+        local_slot = datetime.fromisoformat(slot.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York"))
+        if local_slot.hour == 0:
+            prior_day = (local_slot.date() - timedelta(days=1)).isoformat()
+            # Include late previous-day interim runs before rendering the current
+            # day last, so latest.html continues to identify the current day.
+            commands = cfg["commands"].get("rollover", []) + commands
     records = []
     failures = []
     for template in commands:
-        command = [s.replace("{slot}", slot).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(directory)) for s in template]
+        command = [s.replace("{slot}", slot).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(directory)).replace("{previous_day}", prior_day or "") for s in template]
         try:
             execute_fn(command, cwd=cfg["runtime_root"], timeout=900)
             records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "succeeded"})
