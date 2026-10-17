@@ -51,3 +51,35 @@ retrieval timestamp is never backdated, and central ingestion assigns availabili
 at ingestion time. Existing live seven-day normalization and the central reader's
 seven-day retrieval window remain unchanged. Historical metadata does not confer
 training rights or make the data available to a historical decision retrospectively.
+
+## Installed first checkpoint
+
+The operator installed `finplan-etf-news.timer` and the one-shot
+`finplan-forward-news-checkpoint.timer` on the research host. The checkpoint is
+October 30, 2026 at 16:15 America/New_York; user lingering is enabled. These
+host timers require the EC2 machine to remain running.
+
+`forward_news_checkpoint.py` assumes the existing narrow central publisher/read
+role, resolves the endpoint from SSM, and runs the Model CLI in capture-only
+mode. It writes the immutable corpus, checksum manifest and readiness report in
+`.worktmp/news-backfill/checkpoint-20261030`. Credentials stay in subprocess
+environment and are not printed. No purchase, learner or serving promotion occurs.
+An early invocation exits `checkpoint_not_due`; `--verify-now` explicitly captures
+the preceding fourteen days for a read-only installation check.
+
+The installation check read six actual central deliveries and reported
+`missing_price_bundle` and `rights_review_pending`, with zero learners. Training
+is not scheduled as an unconditional action: the Model candidate runner requires
+approved actual price arrays, eligible training rights/coverage and fresh whole-run
+budget evidence. See `FinanceModel/docs/ppo-forward-checkpoint.md`. The current
+research-only classification is a conservative unresolved review, not evidence
+that the provider categorically prohibits model training. Additional collection
+alone does not resolve that classification or demonstrate improved returns.
+
+Observed historical probe: the September 1--8 ETF request cost USD 0.011 and
+returned five results, three dated September 17. Only the September 4 and 6 rows
+were centrally curated; all raw results were retained. There have been five
+purchases totaling USD 0.055 across the unchanged cumulative USD 10 ledger.
+Expected ten-session daily collection cost is USD 0.22 at the observed quote.
+Raw and curated current versions have no configured age expiry in beta storage;
+the seven-calendar-day API read bound is separate from storage retention.

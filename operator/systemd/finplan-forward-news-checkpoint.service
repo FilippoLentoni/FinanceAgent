@@ -1,0 +1,13 @@
+[Unit]
+Description=Freeze two-week ETF news corpus and report PPO training readiness
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ec2-user/projects/FinanceAgent
+ExecStart=/home/ec2-user/projects/FinanceAgent/.venv/bin/python /home/ec2-user/projects/FinanceAgent/scripts/forward_news_checkpoint.py
+Environment=TMPDIR=/home/ec2-user/projects/.worktmp/pytest-tmp
+UMask=0077
+TimeoutStartSec=240
+NoNewPrivileges=true

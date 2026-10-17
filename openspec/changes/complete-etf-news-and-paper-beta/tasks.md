@@ -22,3 +22,16 @@
 
 - Actual paid financial-news publication, hosted VOO/GOOGL feature inspection, all three news-consuming optimizer recommendations and View-only Coinbase/SPY status passed. Four beta integration suites passed; executions stopped before Gamma and original transitions were restored.
 - `.worktmp/etf-news/live/strict-news-exit-result.json` and the executable checker retain a failed strict criterion. The current corpus is research-only and forward-collected; no eligible historical training corpus or compatible news-trained five-seed PPO ensemble exists. The hosted PPO request explicitly refuses the incompatible older policy. Task 2.3 stays open; no archive or model-performance improvement is claimed.
+
+## Forward accumulation follow-up (October 16 New York)
+- [x] Test paid historical publication-date search; retain the full raw response and centrally publish only verified in-window rows without backdating availability.
+- [x] Configure the authorized daily two-week collection plan, preserving the original ledger and cumulative $10 limit; install the weekday 09:35 New York timer.
+- [x] Implement and verify the October 30 16:15 New York corpus/readiness checkpoint and matched candidate runner.
+- [ ] Execute eligible news-aware PPO training, held-out evaluation and hosted recommendation verification; additional data alone does not close this gate.
+
+Operator verification: the installed read-only checkpoint froze six actual central
+deliveries and reported `missing_price_bundle` and `rights_review_pending`, with
+zero learners. The October30 timer is active. Those explicit blockers mean the
+scheduled capture/readiness check is not a promise of automatic training. The
+Model runner supports explicit candidate execution only with actual approved
+prices, eligible news and fresh whole-run budget evidence.

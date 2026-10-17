@@ -1,0 +1,10 @@
+[Unit]
+Description=First two-week forward-news checkpoint October 30 New York
+
+[Timer]
+OnCalendar=2026-10-30 16:15:00 America/New_York
+Persistent=true
+Unit=finplan-forward-news-checkpoint.service
+
+[Install]
+WantedBy=timers.target
