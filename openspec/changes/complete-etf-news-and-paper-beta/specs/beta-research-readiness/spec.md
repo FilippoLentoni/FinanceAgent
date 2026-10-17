@@ -88,7 +88,7 @@ The system SHALL test bounded historical publication-date search, retain the com
 - **THEN** the raw response is retained and only verified in-window rows enter the separately immutable eligible subset without another payment
 
 ### Requirement: Two-week forward checkpoint
-The operator SHALL collect ETF/macro and GOOGL research once per trading day at 09:35 New York through October 30, preserving the ledger, $10 cumulative cap and per-call cap. The new authorized expiry SHALL retain the original expiry. The October 30 16:15 New York checkpoint SHALL freeze fourteen calendar days using overlapping bounded reads and report actual session coverage and unresolved training inputs.
+The operator SHALL collect ETF/macro and GOOGL research once per trading day at 08:55 New York before the 09:00 price pipeline through October 30, preserving the ledger, $10 cumulative cap and per-call cap. The new authorized expiry SHALL retain the original expiry. The October 30 16:15 New York checkpoint SHALL freeze fourteen calendar days using overlapping bounded reads and report actual session coverage and unresolved training inputs.
 
 #### Scenario: Small forward cohort is ready
 - **WHEN** actual licensed news, approved real price arrays, sufficient price warmup and fresh whole-run budget evidence pass all checks

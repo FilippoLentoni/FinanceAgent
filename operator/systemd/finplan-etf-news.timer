@@ -1,8 +1,8 @@
 [Unit]
-Description=Daily ETF news during New York regular sessions, bounded by trial expiry
+Description=Daily financial research before the 09:00 New York price pipeline
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 09:35:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 08:55:00 America/New_York
 Persistent=false
 Unit=finplan-etf-news.service
 

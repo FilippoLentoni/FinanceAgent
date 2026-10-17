@@ -95,3 +95,24 @@ one symbol; a search association is not proof that every returned article is
 company-specific or financially useful. The checkpoint captures two four-symbol
 batches; no expanded hosted PPO model or eight-asset training result is claimed.
 Existing price ingestion does not yet cover the entire selected universe.
+
+## Premarket collection and daily readiness
+
+The updated timer runs at 08:55 America/New_York. Collection is permitted from
+08:45 through the actual session close on XNYS session dates, including early
+closes, using FinancialPlanning's shipped versioned calendar. Weekends and
+exchange holidays make no purchases. This lets the same-day news arrive before
+the 09:00 price pipeline and the 09:30 regular session open. Trial expiry,
+cumulative reservations, funding checks and uncertain-payment handling remain
+the collection limits.
+
+Every scheduled attempt writes a private, immutable JSON readiness record under
+`.worktmp/news-backfill/daily-status/YYYY-MM-DD/`. It includes the actual central
+manifest identifier, retrieval and availability timestamps, publication status,
+research eligibility and training eligibility per profile. A reserved or unknown
+delivery cannot count as published. Research eligibility never implies training
+permission. The report runner should read the newest attempt for its decision
+session and verify the timestamps against its own cutoff before claiming news
+was available; the model's artifact evidence separately establishes whether it
+actually consumed news. Beta's expanded price universe retains NFLX alongside
+the eight selected symbols, preserving the original portfolio's price coverage.

@@ -41,3 +41,5 @@ training integration. Aligned approved price ingestion for all eight assets,
 explicit daily collection/no-news/failure status, compatible multi-batch PPO
 state integration and deployed recommendation evidence remain required. Do not
 claim an old two-asset profile or policy covers the new investment universe.
+
+October 17 daily-loop refinement: collect at 08:55 America/New_York on actual XNYS session dates before the 09:00 price ingestion. Use the shipped XNYS calendar, including holidays and early closes; the research gate starts at 08:45. Freeze per-profile publication, availability and rights readiness for the daily report. Reserved and uncertain slots never count as successfully published.

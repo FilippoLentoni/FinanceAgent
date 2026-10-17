@@ -25,7 +25,7 @@
 
 ## Forward accumulation follow-up (October 16 New York)
 - [x] Test paid historical publication-date search; retain the full raw response and centrally publish only verified in-window rows without backdating availability.
-- [x] Configure the authorized daily two-week collection plan, preserving the original ledger and cumulative $10 limit; install the weekday 09:35 New York timer.
+- [x] Configure the authorized daily two-week collection plan, preserving the original ledger and cumulative $10 limit; install the weekday 08:55 New York premarket timer.
 - [x] Implement and verify the October 30 16:15 New York corpus/readiness checkpoint and matched candidate runner.
 - [ ] Execute eligible news-aware PPO training, held-out evaluation and hosted recommendation verification; additional data alone does not close this gate.
 

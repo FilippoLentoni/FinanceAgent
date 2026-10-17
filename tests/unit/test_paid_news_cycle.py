@@ -92,3 +92,28 @@ def test_configured_eight_asset_universe_collects_each_profile_once(tmp_path,mon
     result=cycle.cycle(now=now)
     assert collected==list(DAILY_UNIVERSE) and len(published)==8
     assert result['status']=='collected_and_published'
+
+
+def test_premarket_collection_gate_observes_sessions_and_early_close():
+    assert cycle.market_open(datetime(2026,10,19,12,55,tzinfo=UTC))
+    assert not cycle.market_open(datetime(2026,10,18,12,55,tzinfo=UTC))
+    assert not cycle.market_open(datetime(2026,12,25,13,55,tzinfo=UTC))
+    assert not cycle.market_open(datetime(2026,11,27,18,1,tzinfo=UTC))
+    assert not cycle.market_open(datetime(2026,10,19,12,30,tzinfo=UTC))
+
+
+def test_readiness_requires_manifest_and_preserves_research_only_rights(tmp_path):
+    import hashlib
+    from finplan_agent.payments.news_trial import collection_slot,query_body
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,19,12,55,tzinfo=UTC)
+    config={'collection_plan':{'cadence':'daily','profiles':['GOOGL','AAPL']}}
+    ledger.write(CONFIG,config)
+    def ident(profile):return hashlib.sha256(collection_slot(profile,query_body(profile),now,config).encode()).hexdigest()[:32]
+    ledger.write(ident('GOOGL'),{'status':'received_unvalidated','central_publication_complete':True,
+        'central_curated_response':{'manifest':{'record_id':'synthetic','available_at':now.isoformat(),'eligible':True,'rights':{'status':'research_only'}}}})
+    ledger.write(ident('AAPL'),{'status':'delivery_unknown','central_publication_complete':False})
+    report=cycle.readiness(now=now,outcome={'status':'slots_already_reserved'},directory=tmp_path)
+    assert not report['all_profiles_published'] and not report['all_profiles_training_eligible']
+    assert report['profiles'][0]['eligible_for_research']
+    assert not report['profiles'][0]['eligible_for_training']
+    assert report['profiles'][1]['delivery_status']=='delivery_unknown'
