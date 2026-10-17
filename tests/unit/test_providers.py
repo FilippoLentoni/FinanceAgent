@@ -139,6 +139,35 @@ def test_stream_error_event_maps_to_contract_code():
     assert e.value.code == "RATE_LIMITED"
 
 
+@pytest.mark.parametrize("chunks,expected", [
+    (["<thinking>private deliberation</thinking>Service unavailable."], "Service unavailable."),
+    (["Visible <thi", "nking>private", "<think>nested</think>", "</thin", "king> explanation."], "Visible  explanation."),
+    (["<ANALYSIS>private</ANALYSIS>", "Evidence retained."], "Evidence retained."),
+    (["Visible.", "<thinking>unfinished private deliberation"], "Visible."),
+    (["Comparison: 1 < 2; <b>ordinary markup</b>."], "Comparison: 1 < 2; <b>ordinary markup</b>."),
+])
+def test_reasoning_text_never_reaches_stream_or_final(chunks, expected):
+    events = [{"contentBlockDelta": {"delta": {"text": part}}} for part in chunks]
+    events += [{"metadata": {"usage": {"inputTokens": 50, "outputTokens": 17}}}]
+    stub = StubBedrockClient(stream_events=[events])
+    tokens = []
+    result = BedrockProvider(bedrock_config(), stub).generate(_narrate_req(), on_token=tokens.append)
+    assert result.text == "".join(tokens) == expected
+    assert result.usage.output_tokens == 17  # Hidden output still counts toward usage.
+    response = text_response("".join(chunks))
+    response["output"]["message"]["content"].append({"reasoningContent": {"reasoningText": {"text": "native private reasoning"}}})
+    plain = BedrockProvider(bedrock_config(), StubBedrockClient([response])).generate(_narrate_req())
+    assert plain.text == expected
+
+
+def test_reasoning_tags_split_at_every_character_are_suppressed():
+    text = "<thinking>private</thinking>Evidence available."
+    events = [{"contentBlockDelta": {"delta": {"text": char}}} for char in text]
+    tokens = []
+    result = BedrockProvider(bedrock_config(), StubBedrockClient(stream_events=[events])).generate(_narrate_req(), on_token=tokens.append)
+    assert result.text == "".join(tokens) == "Evidence available."
+
+
 def test_no_secret_reads_and_no_real_bedrock_calls():
     import inspect
 
