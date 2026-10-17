@@ -280,6 +280,9 @@ def generate(reader, config: dict, now: datetime) -> dict:
             item['model_assumptions']['news_sensitivity_assumptions'] = news.get('sensitivity_assumptions') or news['assumptions']
             item['model_assumptions']['news_interpretation'] = ('Declared fixed research sensitivity, not a learned or calibrated return forecast. '
                 'Shared source fields and availability/coverage checks do not make the optimizer a PPO observation-state model.')
+            if news.get('feature_protocol') == 'gdelt-gkg-v2-premarket-organization-tone-v1':
+                item['model_assumptions']['news_sensitivity_features'] = {'mean_shift': 'tone_scaled', 'risk_scale': 'cluster_count_log_scaled',
+                    'other_extracted_fields': 'Availability and source coverage support readiness/provenance; the shared five-field extractor is not the PPO 98-dimensional state.'}
         item['news_evidence'] = news
         item['news_input_summary'] = summarize_news(news)
         provenance = news.get('provenance') or {}

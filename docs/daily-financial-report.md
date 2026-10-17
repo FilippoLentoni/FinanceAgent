@@ -105,3 +105,7 @@ Classical reports expose the producer's declared `sensitivity_assumptions`
 separately from PPO observation dimensions. The shared source extractor does not
 mean each optimizer uses every feature as a forecast; coefficients and predictive
 limitations remain those recorded by the actual producer.
+The registered V2 producer shifts expected mean with `tone_scaled` and rescales
+risk using `cluster_count_log_scaled`; availability and source coverage support
+readiness/provenance. Its recorded coefficients are unestimated sensitivity
+assumptions, not validated incremental forecasting accuracy.
