@@ -90,3 +90,22 @@ def test_actual_restart_path_accounts_each_cohort_without_historical_inference(t
     assert len(calls) == 2
     assert all("--account-missed" in c and "2026-10-17T23:00:00Z" in c for c in calls)
     assert json.loads((state / "hourly-last-completed.json").read_text())["slot"] == "2026-10-18T00:00:00Z"
+
+
+def test_research_coordinates_owned_collection_then_review_and_requires_matching_receipt(tmp_path):
+    prompt = tmp_path / "research.prompt"
+    prompt.write_text("{{runtime_python}} {{platform_root}}/scripts/collect_modeling_sources.py --kind research --slot '{{slot}}' --experiment '{{experiment}}' --output '{{output}}'\n{{runtime_python}} -m finplan_model.forward.research cycle --slot '{{slot}}' --experiment '{{experiment}}' --output '{{output}}'")
+    cfg = {"project_root": str(tmp_path), "runtime_root": str(tmp_path), "runtime_python": "/release/bin/python",
+           "platform_root": "/release/platform", "research_prompt": str(prompt), "codex": "/codex", "experiment_id": "isolated"}
+    def worker(command, **kwargs):
+        assert command[:2] == ["/codex", "exec"]
+        lines = kwargs["stdin"].splitlines()
+        assert "collect_modeling_sources.py" in lines[0] and "research cycle" in lines[1]
+        assert "{{" not in kwargs["stdin"]
+        (tmp_path / "cycle-receipt.json").write_text(json.dumps({"slot": "2026-10-17T22:30:00Z", "experiment_id": "isolated-interim", "run_id": "permanent-id", "status": "hold"}))
+    result = run_job(cfg, "research", "2026-10-17T22:30:00Z", tmp_path, execute_fn=worker)
+    assert result["receipt"]["status"] == "hold"
+    doc = json.loads((tmp_path / "cycle-receipt.json").read_text())
+    (tmp_path / "cycle-receipt.json").write_text(json.dumps({**doc, "experiment_id": "wrong"}))
+    with pytest.raises(RuntimeError, match="permanent slot"):
+        run_job(cfg, "research", "2026-10-17T22:30:00Z", tmp_path, execute_fn=lambda *a, **k: None)
