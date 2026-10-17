@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily financial research before the 09:00 New York price pipeline
+Description=Daily financial research before the 09:00 New York model formation
 
 [Timer]
 OnCalendar=Mon..Fri *-*-* 08:55:00 America/New_York

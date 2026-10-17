@@ -31,6 +31,9 @@ universe mismatch, unconsumed news, stale prices and missing news collector
 completion. Closed-day reports still run and label the latest completed session.
 A new decision has no future observed outcome; absent historical plans are never
 manufactured. Report status does not establish profitability or approve a model.
+Closed-market advice is additionally labeled `closed_market_preview` and
+`outside_regular_exchange_session_training_distribution`: training links a close
+to the next actual exchange-session formation, without synthetic weekend fills.
 
 The operator templates in `operator/systemd/` schedule 09:05 America/New_York every
 day, including Sunday 2026-10-18. Before installation, populate the private config
@@ -60,5 +63,14 @@ refresh and market-day 08:55 paid research collection. A measured 16-call hosted
 took 172 seconds between first and last receipts; this is an observation, not a
 completion guarantee. Reports retain their actual completion time and next future
 exchange open. Sunday 2026-10-18's next trading open is Monday 2026-10-19.
-`method_selection_run_ids` may name genuine completed experiment results for hosted
-read-only evidence retrieval; results do not automatically declare a winning method.
+V2 premarket metadata uses the declared 09:00 New York formation cutoff; serving
+time remains separate. A late request reads that day's frozen state. The report
+retains actual source-window times, batch quality and missingness, and compares
+freshness at formation rather than pretending the report time is a new formation.
+
+`method_selection_run_ids` names genuine experiment results, including retained
+failed attempts. The hosted question explicitly asks why the actual common-window
+validation, cost and seed evidence supports a modeling choice or cannot support one.
+The runtime preserves a reviewed validation excerpt within its existing result
+budget; it retains source checksums, splits, test reuse and promotion status. An
+incomplete or failed run never supplies deployable performance evidence.

@@ -16,7 +16,7 @@ start retraining or promote a model.
 The plan collects `ETF_MARKET` and `GOOGL` once per New York trading day. At the
 observed USD 0.011 per request, expected collection cost is USD 0.022 per trading
 day; each actual quote must still satisfy the USD 0.03 request ceiling. The
-repository timer runs weekdays at 09:35 New York; the cycle additionally checks
+repository timer runs weekdays at 08:55 New York; the cycle additionally checks
 the XNYS session calendar. Installation/reload is a separate operator step.
 Without the daily plan, the existing hourly slot grouping remains unchanged.
 
@@ -94,7 +94,7 @@ but are no longer a scheduled daily profile. Each new publication is scoped to
 one symbol; a search association is not proof that every returned article is
 company-specific or financially useful. The checkpoint captures two four-symbol
 batches; no expanded hosted PPO model or eight-asset training result is claimed.
-Existing price ingestion does not yet cover the entire selected universe.
+Expanded price ingestion covers the eight selected symbols plus legacy NFLX; model readiness remains separately verified.
 
 ## Premarket collection and daily readiness
 
@@ -102,7 +102,7 @@ The updated timer runs at 08:55 America/New_York. Collection is permitted from
 08:45 through the actual session close on XNYS session dates, including early
 closes, using FinancialPlanning's shipped versioned calendar. Weekends and
 exchange holidays make no purchases. This lets the same-day news arrive before
-the 09:00 price pipeline and the 09:30 regular session open. Trial expiry,
+the 09:00 model formation and the 09:30 regular session open. Trial expiry,
 cumulative reservations, funding checks and uncertain-payment handling remain
 the collection limits.
 

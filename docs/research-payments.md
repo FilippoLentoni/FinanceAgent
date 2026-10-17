@@ -202,7 +202,7 @@ readback route. A frozen request can be republished without buying again. Privat
 payment proofs, wallet state and credentials stay in the local ledger.
 
 The checked-in `operator/systemd/finplan-etf-news.*` units run the single-host
-collector at 09:35 through 15:35 America/New_York on weekdays. The XNYS calendar
+collector at 08:55 America/New_York on weekdays before 09:00 model formation. The XNYS calendar
 also excludes holidays and early-close hours. The script stops the timer after
 trial expiry, stops purchases on low funds/cap failure, and repairs pending
 central publications before buying more news. It uses the platform environment's
