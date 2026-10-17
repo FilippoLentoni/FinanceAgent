@@ -367,6 +367,19 @@ def compare_methods(methods: list[dict]) -> dict:
             'winner': 'not_established'}
 
 
+def benchmark_ppo_scope(context: dict) -> str | None:
+    """Identify aggregate ensemble rows only from explicit reviewed producer metadata."""
+    for evidence in context.get('answer', {}).get('evidence', []):
+        selection = (evidence.get('summary') or {}).get('model_selection') or {}
+        params = (selection.get('validation_parameters') or {}).get('ppo') or {}
+        comparison = selection.get('validation_comparison') or {}
+        if (params.get('policy_selection') == 'ensemble' and (comparison.get('columns') or [None])[0] == 'strategy'
+                and any(isinstance(row, list) and row and row[0] == 'ppo' for row in comparison.get('rows', []))):
+            return ('The recorded aggregate PPO comparison row evaluates the frozen ensemble; per-seed validation rows describe its individual members separately. '
+                    'This establishes historical evaluation for that ensemble configuration, not independent forward evidence or the performance of differently configured daily optimizers.')
+    return None
+
+
 def markdown(report: dict) -> str:
     lines = ['# Daily financial recommendation', '', f"Generated: {report['generated_at']}", '',
              f"Status: {report['status']}. Market evidence: {report.get('reference_market_date') or 'unavailable'}. {report['session_label']}.", '',
@@ -413,6 +426,9 @@ def markdown(report: dict) -> str:
         lines.extend(['', '## Recorded model comparison evidence', '',
                       'These records include failed and incomplete experiments. Only completed, evaluated artifacts support model selection or deployment. Compare the same windows, costs, constraints and seeds; reused development/test history is not fresh forward validation.', ''])
         for context in report['method_selection_evidence']:
+            scope = benchmark_ppo_scope(context)
+            if scope:
+                lines.extend([scope, ''])
             lines.extend(['Run: ' + context['run_id'] + '; evidence status: ' + context['status'] + '.', '',
                           context.get('answer', {}).get('narrative') or json.dumps(context.get('error'), default=str), ''])
     return '\n'.join(lines)

@@ -118,3 +118,10 @@ completion. The 3000-second limit includes setup. Only actual
 `source_setup.status=complete` evidence and immutable corpus/source-realization
 references support export; failed coverage, vintage or integrity remains
 nondeployable. See the research skill's operator reference for the full workflow.
+
+When reviewed producer metadata explicitly declares PPO `policy_selection=ensemble`,
+the aggregate historical PPO comparison row is labeled as the evaluated frozen
+ensemble and per-seed rows remain separate. A generic selected-seed warning must
+not be interpreted as evidence that this particular ensemble lacked evaluation.
+Its reused development history and configuration differences still limit transfer
+to future returns or differently configured daily optimizers.

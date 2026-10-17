@@ -208,3 +208,19 @@ def test_evening_request_reuses_same_new_york_formation_after_utc_midnight(recom
     # 21:00 New York still belongs to the October8 formation session.
     result = pipeline_readiness(cfg, datetime(2026, 10, 9, 1, tzinfo=UTC), recommendation['as_of'], inputs)
     assert 'numeric_news_decision_cutoff_not_current' not in result['issues']
+
+
+@pytest.mark.parametrize('aggregation', ['ensemble', 'best_seed', None])
+def test_benchmark_ensemble_label_requires_explicit_reviewed_aggregation(aggregation):
+    from scripts.daily_financial_report import benchmark_ppo_scope
+    selection = {
+        'validation_parameters': {'ppo': {'policy_selection': aggregation}},
+        'validation_comparison': {'columns': ['strategy', 'total_return'], 'rows': [['ppo', .2]]},
+        'validation_seeds': {'columns': ['algorithm', 'seed', 'total_return'], 'rows': [['ppo', 0, .2]]}}
+    context = {'answer': {'evidence': [{'summary': {'model_selection': selection}}]}}
+    scope = benchmark_ppo_scope(context)
+    if aggregation == 'ensemble':
+        assert 'aggregate PPO comparison row evaluates the frozen ensemble' in scope
+        assert 'individual members separately' in scope
+    else:
+        assert scope is None  # A matching numeric seed score cannot establish aggregation.
