@@ -160,6 +160,41 @@ def collection(result: dict, key: str) -> list[dict]:
     return next((row[key] for row in producer_documents(result) if isinstance(row.get(key), list)), [])
 
 
+class DecisionHistory:
+    """Scan immutable producer pages lazily inside a fixed read bound."""
+    def __init__(self, reader, portfolio_id):
+        self.reader, self.portfolio_id = reader, portfolio_id
+        self.rows, self.receipts, self.seen = [], [], set()
+        self.status, self.next_token, self.stop_reason = 'available', None, None
+        self._page('history', {})
+
+    def _page(self, label, arguments):
+        result = self.reader.call(label, 'list_portfolio_decisions', {'portfolio_id': self.portfolio_id, 'limit': 100, **arguments})
+        self.receipts.append(result['receipt'])
+        if result['status'] != 'available':
+            self.status, self.stop_reason = 'not_available', 'history_page_unavailable'
+            return
+        self.rows.extend(collection(result, 'decisions'))
+        document = next((row for row in producer_documents(result) if isinstance(row.get('decisions'), list)), {})
+        self.next_token = document.get('next_token')
+
+    def previous(self, method, current):
+        while True:
+            old = previous_decision(self.rows, method, current)
+            if old or not self.next_token or self.status != 'available':
+                return old
+            if len(self.receipts) >= 8 or self.next_token in self.seen:
+                self.stop_reason = 'history_search_page_bound' if len(self.receipts) >= 8 else 'history_cursor_repeated'
+                return None
+            token = self.next_token
+            self.seen.add(token)
+            self._page('history-page-' + str(len(self.receipts) + 1), {'next_token': token})
+
+    def evidence(self):
+        return {'status': self.status, 'pages_read': len(self.receipts), 'page_receipts': self.receipts,
+                'more_pages_available': bool(self.next_token), 'stop_reason': self.stop_reason}
+
+
 def check_recommendation(record: dict, method: str, portfolio_id: str, reference: dict | None, expected: set[str]) -> list[str]:
     rec = record.get('recommendation') or {}
     state = rec.get('portfolio_state') or {}
@@ -196,13 +231,12 @@ def check_recommendation(record: dict, method: str, portfolio_id: str, reference
 
 def generate(reader, config: dict, now: datetime) -> dict:
     pid = config['portfolio_id']
-    history = reader.call('history', 'list_portfolio_decisions', {'portfolio_id': pid, 'limit': 100})
-    rows = collection(history, 'decisions')
+    history = DecisionHistory(reader, pid)
     report = {'generated_at': now.isoformat(), 'local_date': now.astimezone(ZoneInfo('America/New_York')).date().isoformat(),
               'portfolio_id': pid, 'mode': 'advisory_saved_paper', 'holdings_changed': False,
               'expected_instruments': config.get('expected_instruments', []), 'methods': [],
               'method_selection': 'No statistically validated winner is inferred from one allocation. PPO optimizes its frozen sequential training objective; minimum variance minimizes modeled risk; mean variance balances modeled return and risk; CVaR penalizes modeled tail loss. Compare out-of-sample net-of-cost evidence, constraints and data readiness before choosing. Retrospective tests of the currently requested eight assets carry asset-selection and survivorship bias; provider prices are revised history downloaded today, not original point-in-time price vintages. Reused 2026 development/evaluation history is not fresh forward validation. Whole-document GDELT organization tone is neither calibrated stock sentiment nor a calibrated asset-return forecast.',
-              'history_status': history['status'], 'classical_settings': config.get('classical_settings', {}),
+              'history_status': history.status, 'classical_settings': config.get('classical_settings', {}),
               'decision_cutoff_comparison': 'Each producer reads approved latest data at its current decision cutoff; snapshot identity, completed date, returned holdings and actual news features/provenance are checked after each call. Calls are sequential rather than atomic; a change invalidates controlled comparison.',
               'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment. Historical rankings and scores belong only to their frozen tuned experiment configurations; they do not establish those scores for the current daily optimizer settings or paper-book size. Cash constraints, covariance/scenario methods, horizon, turnover penalties and execution costs must be matched before transferring performance claims.'}
     reference = None
@@ -256,10 +290,10 @@ def generate(reader, config: dict, now: datetime) -> dict:
         item['status'] = 'not_ready' if issues else 'available'
         # These are the existing deployed explanation levels, not invented numerical tiers.
         item['explainability']['1_recommendation'] = reader.call(method + '-why', 'explain_portfolio_decision', {'portfolio_id': pid, 'decision_id': did})
-        old = previous_decision(rows, method, rec)
+        old = history.previous(method, rec)
         item['explainability']['2_plan_change'] = (reader.call(method + '-change', 'compare_portfolio_decisions', {
             'portfolio_id': pid, 'previous_decision_id': old['decision_id'], 'current_decision_id': did}) if old else
-            {'status': 'not_available', 'reason': 'no_prior_compatible_market_date_or_news_formation', 'history_status': history['status']})
+            {'status': 'not_available', 'reason': history.stop_reason or 'no_prior_compatible_market_date_or_news_formation', 'history_status': history.status})
         evaluated = old['decision_id'] if old else did
         outcome = reader.call(method + '-outcome', 'evaluate_portfolio_decision', {'portfolio_id': pid, 'decision_id': evaluated})
         outcome['evaluated_decision_id'] = evaluated
@@ -290,11 +324,18 @@ def generate(reader, config: dict, now: datetime) -> dict:
                           'portfolio_id': pid, 'previous_decision_id': first['decision_id'], 'current_decision_id': item['decision_id']})})
     report['cross_method_explanations'] = cross
     report['pipeline_readiness'] = pipeline_readiness(config, now, report['reference_market_date'], [item.get('news_input_summary', {}) for item in report['methods']])
-    validation_issues = [] if history['status'] == 'available' else ['history_tool_unavailable']
+    report['history_status'] = history.status
+    report['history_search'] = history.evidence()
+    validation_issues = [] if history.status == 'available' else ['history_tool_unavailable']
+    if any(item['explainability'].get('2_plan_change', {}).get('reason', '').startswith('history_') for item in report['methods']):
+        validation_issues.append('prior_history_search_incomplete')
     for item in report['methods']:
         if not item.get('decision_id'):
             continue
-        for level in ('1_recommendation', '3_realization_and_context'):
+        levels = ['1_recommendation', '3_realization_and_context']
+        if item['explainability']['2_plan_change'].get('tool') == 'compare_portfolio_decisions':
+            levels.append('2_plan_change')
+        for level in levels:
             if item['explainability'][level]['status'] != 'available':
                 validation_issues.append(item['method'] + ':' + level + '_tool_unavailable')
     if any(item['status'] != 'available' for item in cross):
@@ -354,7 +395,7 @@ def markdown(report: dict) -> str:
         lines.extend(['', '### ' + item['previous_method'] + ' versus ' + item['current_method'], '',
                       'Controlled inputs aligned: ' + str(item.get('controlled_inputs_aligned')) + '. ' + ', '.join(item.get('alignment_issues', [])), '',
                       item.get('answer', {}).get('narrative') or json.dumps(item.get('error'), default=str)])
-    lines.extend(['', 'Pipeline readiness: ' + json.dumps(report.get('pipeline_readiness'), default=str), '',
+    lines.extend(['', 'History search: ' + json.dumps(report.get('history_search'), default=str), '', 'Pipeline readiness: ' + json.dumps(report.get('pipeline_readiness'), default=str), '',
                   report.get('constraint_comparison', ''), '', 'Explanation validation issues: ' + ', '.join(report.get('validation_issues', [])), ''])
     if report.get('market_timing'):
         lines.extend(['', '## Report and market timing', '', json.dumps(report['market_timing'], indent=2),

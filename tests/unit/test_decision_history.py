@@ -72,3 +72,17 @@ def test_ineligible_or_replayed_same_close_state_is_not_a_prior_daily_recommenda
     elif invalid == "changed_actor":
         rec['policy_artifact_checksum'] = 'sha256:' + 'd' * 64
     assert previous_decision([old], "ppo", current) is None
+
+
+@pytest.mark.parametrize('change', ['protocol', 'actor', 'price_only'])
+def test_an_older_price_date_does_not_make_a_different_news_model_a_controlled_prior(change):
+    old, current = issued('17', 'a', 'old'), issued('18', 'b', 'current')
+    old['recommendation']['as_of'] = '2026-10-15'
+    assert previous_decision([old], 'ppo', current) == old
+    if change == 'protocol':
+        old['recommendation']['diagnostics']['news_evidence']['feature_protocol'] = 'earlier-protocol'
+    elif change == 'actor':
+        old['recommendation']['policy_artifact_checksum'] = 'sha256:' + 'd' * 64
+    else:
+        old['recommendation']['diagnostics']['news_evidence']['consumed'] = False
+    assert previous_decision([old], 'ppo', current) is None

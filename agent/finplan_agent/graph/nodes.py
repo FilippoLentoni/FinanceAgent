@@ -181,7 +181,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     )
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
-    workflow = etf_news_plan(state, ctx.session_id) or crypto_plan(state, ctx.session_id) or improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id) or portfolio_plan(state, ctx.session_id)
+    workflow = etf_news_plan(state, ctx.session_id) or crypto_plan(state, ctx.session_id) or improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id, max_tool_calls=ctx.guard.config.max_tool_calls_turn, remaining_plan_rounds=MAX_PLAN_ROUNDS-rounds) or portfolio_plan(state, ctx.session_id)
     if workflow is not None:
         updates["portfolio_workflow"] = workflow["workflow"]
         if workflow.get("clarification"):

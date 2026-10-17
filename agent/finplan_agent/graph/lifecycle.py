@@ -63,7 +63,7 @@ def _date(row):
     return row.get("reference_date") or row.get("recommendation", {}).get("as_of")
 
 
-def _run(workflow, results, turn):
+def _run(workflow, results, turn, remaining_calls=6, remaining_plan_rounds=4):
     mode = workflow["mode"]
     if mode == "lifecycle_sensitivity":
         return sensitivity_plan(workflow, results, turn)
@@ -75,23 +75,53 @@ def _run(workflow, results, turn):
     if mode == "lifecycle_lookup":
         if not results:
             return {"workflow": workflow, "calls": []}
-        rows = (results[-1].get("result") or {}).get("decisions", [])
+        pages = [row.get("result") or {} for row in results if row.get("tool") == "list_portfolio_decisions" and row.get("ok")]
+        rows = []
+        seen_ids = set()
+        for page in pages:
+            for row in page.get("decisions", []):
+                if row.get("decision_id") not in seen_ids:
+                    rows.append(row)
+                    seen_ids.add(row.get("decision_id"))
         family = workflow.get("family")
         if family:
             rows = [row for row in rows if _strategy(row) in family]
         action = workflow["intent"]
+
+        def next_page():
+            token = pages[-1].get("next_token") if pages else None
+            if not token:
+                return None
+            seen = workflow.get("history_cursors", [])
+            reserve = 1 if action == "compare" else 3 if action == "performance" and workflow.get("deep_dive") else 2
+            if len(pages) >= 8 or token in seen or remaining_calls <= reserve or remaining_plan_rounds < reserve:
+                return {"workflow": {**workflow, "mode": "lifecycle_complete"}, "calls": [],
+                        "clarification": "The bounded history search is incomplete. Additional immutable decision pages remain; provide both decision IDs or continue with a narrower request. I have not established that prior history is missing."}
+            arguments = {**workflow.get("history_portfolio", {}), "limit": 30, "next_token": token}
+            return {"workflow": {**workflow, "history_cursors": [*seen, token]},
+                    "calls": [_call("list_portfolio_decisions", arguments, turn, len(pages))]}
+
         if action == "compare":
             current = rows[0] if rows else None
             previous = previous_decision(rows[1:], _strategy(current), current) if current else None
             if previous:
                 return {"workflow": {"mode": "lifecycle_complete"}, "calls": [_call("compare_portfolio_decisions", {"portfolio_id":current["portfolio_id"], "previous_decision_id":previous["decision_id"], "current_decision_id":current["decision_id"]}, turn, 1)]}
+            more = next_page()
+            if more:
+                return more
             return {"workflow": workflow, "calls": [], "clarification": "I could not find two issued decisions from distinct market dates or independently retained eligible news formations. A repeated call is not yesterday's recommendation; provide both real decision IDs or wait for another eligible formation."}
         if not rows:
+            more = next_page()
+            if more:
+                return more
             return {"workflow": workflow, "calls": [], "clarification": "No stored recommendation was found. Ask for a PPO or traditional recommendation first."}
         selected = rows[0]
         if workflow.get("previous_date"):
             selected = previous_decision(rows[1:], _strategy(rows[0]), rows[0])
             if selected is None:
+                more = next_page()
+                if more:
+                    return more
                 return {"workflow": workflow, "calls": [], "clarification": "No issued recommendation from a previous market date was found. I will not substitute today's recommendation for yesterday's."}
         workflow = {**workflow, "mode":"lifecycle_read", "decision_id":selected["decision_id"]}
         return {"workflow":workflow,"calls":[_call("get_portfolio_decision", {"decision_id":workflow["decision_id"]}, turn, 1)]}
@@ -120,14 +150,14 @@ def _run(workflow, results, turn):
     return {"workflow":workflow,"calls":[]}
 
 
-def lifecycle_plan(state, session_id):
+def lifecycle_plan(state, session_id, *, max_tool_calls=6, remaining_plan_rounds=4):
     messages = state.get("messages", [])
     user = next((m for m in reversed(messages) if m.get("role")=="user" and any("text" in b for b in m.get("content",[]))), {})
     text = text_of(user)
     turn = state.get("turn",1)
     workflow = state.get("portfolio_workflow")
     if workflow:
-        return _run(workflow,state.get("tool_results") or [],turn) if workflow["mode"].startswith("lifecycle_") else None
+        return _run(workflow,state.get("tool_results") or [],turn,max_tool_calls-int(state.get("turn_tool_calls", 0)),remaining_plan_rounds) if workflow["mode"].startswith("lifecycle_") else None
     for block in user.get("content",[]):
         request = block.get("tool_request") or {}
         if request.get("name") in LIFECYCLE_TOOLS:
@@ -189,7 +219,7 @@ def lifecycle_plan(state, session_id):
         latest = next((row for row in reversed(issued) if _strategy(row) in family), None)
     previous_date = intent != "compare" and bool(re.search(r"\b(?:yesterday|previous day)\b", text, re.I))
     did = ids[0] if ids else latest.get("decision_id") if latest and not previous_date and intent != "compare" else None
-    workflow={"mode":"lifecycle_read" if did else "lifecycle_lookup","intent":intent,"deep_dive":bool(_WHY.search(text) or re.search(r"deep dive|news|world",text,re.I)), "family":family,"previous_date":previous_date}
+    workflow={"mode":"lifecycle_read" if did else "lifecycle_lookup","intent":intent,"deep_dive":bool(_WHY.search(text) or re.search(r"deep dive|news|world",text,re.I)), "family":family,"previous_date":previous_date,"history_portfolio":portfolio}
     for instrument, pattern in INSTRUMENT_ALIASES.items():
         if re.search(pattern, text, re.I):
             workflow["instrument_id"]=instrument

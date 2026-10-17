@@ -71,6 +71,14 @@ def previous_decision(rows: list[dict], method: str, current: dict) -> dict | No
                 or universe and current_universe and universe != current_universe):
             continue
         if day < current_day:
+            current_consumed = ((rec.get('diagnostics') or {}).get('news_evidence') or {}).get('consumed') is True
+            old_consumed = ((old.get('diagnostics') or {}).get('news_evidence') or {}).get('consumed') is True
+            if current_consumed or old_consumed:
+                previous, present = _news_formation(old), _news_formation(rec)
+                identity = _reported_model_identity(rec)
+                if (not previous or not present or previous[0] >= present[0] or previous[2] != present[2]
+                        or identity is None or _reported_model_identity(old) != identity):
+                    continue
             return row
         if day == current_day:
             previous, present = _news_formation(old), _news_formation(rec)

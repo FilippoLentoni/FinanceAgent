@@ -93,3 +93,10 @@ They do not transfer to daily optimizers with different cash constraints, covari
 or scenario estimators, objective horizon, turnover penalty, execution assumptions
 or book size. These differences remain explicit; no constraints change during a
 comparison to manufacture matching results.
+
+Decision-history reads follow immutable continuation tokens lazily until a compatible
+prior is found, with at most eight operator pages. The hosted conversational lookup
+also respects the existing tool-call and planning-round limits, reserving room for
+the actual explanation. Every page remains in its private raw receipt or durable
+tool evidence. A bounded or failed search is incomplete history, never evidence
+that a genuine prior decision does not exist.
