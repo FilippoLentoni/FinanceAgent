@@ -45,6 +45,7 @@ __all__ = [
     "deploy_execution_statements",
     "gateway_role_policy",
     "gateway_trust_conditions",
+    "recommendation_runs_deploy_statements",
     "runtime_role_policy",
     "runtime_trust_conditions",
     "stage_role_statements",
@@ -230,6 +231,43 @@ def deploy_execution_statements(env: str, store_bucket_arn: str, *, partition: s
     ]
     stmts += list(contract_iam.ssm_access_policy(n.REPO, env, partition=partition, region=region, account=account)["Statement"])
     return stmts
+
+
+def recommendation_runs_deploy_statements(env: str, *, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> list[dict[str, Any]]:
+    """CloudFormation execution grants for the beta recommendation trigger and run log (exact names, no
+    wildcard actions). Roles are created by ``EnvRolesCreateWithBoundary``, the SSM table-name parameter
+    by the contract SSM statements, the Lambda code object is read through ``ReadStoreTemplates``.
+
+    Attached by ``infra/stacks/pipeline.py`` as a separate inline policy of the beta execution role:
+    added to the default policy, CDK's conservative size estimate would split it into a managed policy
+    that the ownership matrix does not list for ``deploy-role`` (the resolved total stays under IAM's
+    10,240-character inline limit; asserted by a synth test)."""
+    a = lambda svc, res, reg=True: _arn(svc, res, partition=partition, region=region if reg else "", account=account)  # noqa: E731
+    fn, table = n.recommendation_trigger_name(env), n.recommendation_runs_table_name(env)
+    group = f"/aws/lambda/{fn}"
+    return [
+        {
+            "Sid": "ManageRecommendationTriggerLambda",
+            "Effect": "Allow",
+            "Action": ["lambda:CreateFunction", "lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:DeleteFunction", "lambda:TagResource", "lambda:UntagResource", "lambda:ListTags"],
+            "Resource": [a("lambda", f"function:{fn}")],
+        },
+        {"Sid": "PassRecommendationTriggerRole", "Effect": "Allow", "Action": ["iam:PassRole"], "Resource": [a("iam", f"role/{n.role_name(env, 'recommendation-trigger')}", reg=False)], "Condition": {"StringEquals": {"iam:PassedToService": "lambda.amazonaws.com"}}},
+        {"Sid": "PassRecommendationScheduleRole", "Effect": "Allow", "Action": ["iam:PassRole"], "Resource": [a("iam", f"role/{n.role_name(env, 'recommendation-schedule')}", reg=False)], "Condition": {"StringEquals": {"iam:PassedToService": "scheduler.amazonaws.com"}}},
+        {"Sid": "RecommendationTriggerLogGroup", "Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy", "logs:DeleteRetentionPolicy", "logs:TagResource", "logs:UntagResource", "logs:ListTagsForResource"], "Resource": [a("logs", f"log-group:{group}"), a("logs", f"log-group:{group}:*")]},
+        {
+            "Sid": "ManageRecommendationRunsTable",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:CreateTable", "dynamodb:DescribeTable", "dynamodb:UpdateTable", "dynamodb:DeleteTable", "dynamodb:DescribeContinuousBackups", "dynamodb:UpdateContinuousBackups",
+                "dynamodb:DescribeContributorInsights", "dynamodb:UpdateContributorInsights", "dynamodb:DescribeKinesisStreamingDestination", "dynamodb:DescribeTimeToLive", "dynamodb:UpdateTimeToLive",
+                "dynamodb:GetResourcePolicy", "dynamodb:ListTagsOfResource", "dynamodb:TagResource", "dynamodb:UntagResource",
+            ],
+            "Resource": [a("dynamodb", f"table/{table}"), a("dynamodb", f"table/{table}/index/*")],
+        },
+        {"Sid": "RecommendationRunsTableNameTags", "Effect": "Allow", "Action": ["ssm:ListTagsForResource"], "Resource": [a("ssm", f"parameter/finplan/{env}/{n.REPO}/config/recommendation-runs-table")]},
+        {"Sid": "ManageRecommendationSchedule", "Effect": "Allow", "Action": ["scheduler:CreateSchedule", "scheduler:UpdateSchedule", "scheduler:DeleteSchedule", "scheduler:GetSchedule"], "Resource": [a("scheduler", f"schedule/default/{fn}")]},
+    ]
 
 
 def stage_role_statements(env: str, store_bucket_arn: str, *, partition: str = PARTITION, region: str = REGION, account: str = ACCOUNT) -> list[dict[str, Any]]:

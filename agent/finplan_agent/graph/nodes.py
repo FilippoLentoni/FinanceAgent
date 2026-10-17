@@ -39,6 +39,7 @@ from .lifecycle import lifecycle_plan
 from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
 from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
 from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
+from .runs_query import runs_plan
 from .state import TURN_RESET, AgentContext, AgentState
 
 __all__ = ["start_turn", "route", "plan", "confirm", "tool_call", "narrate", "check_claims", "respond", "compact", "NON_TERMINAL_JOB_STATES"]
@@ -161,6 +162,14 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     brokerage = connection_plan(state, ctx.brokerage)
     if brokerage is not None:
         return {**updates, **brokerage, "skills_used": [s for s in ctx.skills if s.get("name") == "etf-brokerage-readiness"]}
+    # Run-log listings are answered from the agent-owned run table: no Gateway tool and no model.
+    if not state.get("portfolio_workflow"):
+        runs = runs_plan(state, ctx.run_log)
+        if runs is not None:
+            updates.update(portfolio_workflow=runs["workflow"], draft_text=runs["clarification"])
+            if runs.get("degraded"):
+                updates["degraded"] = runs["degraded"]
+            return updates
     # A recommendation is a single fresh, read-only inference call. Do not let subsequent
     # provider drafts replace a complete allocation or silently retry failed inference.
     if not state.get("portfolio_workflow") and any(r.get("tool") == "recommend_portfolio" for r in state.get("tool_results") or []):
@@ -413,7 +422,7 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     _progress("narrate")
     if state.get("portfolio_workflow"):
         kind = state["portfolio_workflow"].get("kind")
-        text = state.get("draft_text", "") if kind == "etf_connection" else render_etf_news(state) if kind == "etf_news" else render_crypto(state) if kind == "crypto_paper" else render_portfolio_results(state)[0]
+        text = state.get("draft_text", "") if kind in ("etf_connection", "recommendation_runs") else render_etf_news(state) if kind == "etf_news" else render_crypto(state) if kind == "crypto_paper" else render_portfolio_results(state)[0]
         _emit({"type": "token", "text": text})
         failed = next((r for r in state.get("tool_results") or [] if not r.get("ok") and not r.get("declined")), None)
         return {"narrative": text, "narrative_status": "generated", **({"status": "failed", "error": failed.get("error")} if failed else {})}
@@ -468,7 +477,11 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
         return {"claim_check": {"passed": True, "checked_figures": 0, "removed_figures": []}}
     values = [r.get("result", r.get("summary")) for r in state.get("tool_results") or [] if r.get("ok")]
     if state.get("portfolio_workflow"):
-        if state["portfolio_workflow"].get("kind") not in {"crypto_paper", "etf_connection", "etf_news"}:
+        kind = state["portfolio_workflow"].get("kind")
+        if kind == "recommendation_runs":
+            # The deterministic run-log renderer records every figure and date it printed.
+            values.append(state["portfolio_workflow"].get("evidence") or {})
+        elif kind not in {"crypto_paper", "etf_connection", "etf_news"}:
             values.extend(render_portfolio_results(state)[1])
     # The cash dollar target is the one derived figure in the deterministic recommendation
     # renderer: verify the same exact multiplication of fresh producer value and target weight.

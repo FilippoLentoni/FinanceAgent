@@ -46,7 +46,7 @@ from finplan_contracts import ssm as contract_ssm
 from . import naming as n
 from .agent import AgentStack, bedrock_param, target_param, target_variable
 from .common import tag_role
-from .policies import build_role_statements, deploy_execution_statements, stage_role_statements
+from .policies import build_role_statements, deploy_execution_statements, recommendation_runs_deploy_statements, stage_role_statements
 from .tooling import ToolingStack, add_log_group, get_tooling_stack
 
 __all__ = ["BUILD_NAMESPACE", "CONNECTION_PARAMETER", "ENV_SUITES", "STAGE_NAMES", "add_pipeline", "add_to_app", "build_spec", "resolve_namespace", "stage_spec", "template_path"]
@@ -262,6 +262,9 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
         f"CloudFormation execution role for the {env} FinanceAgent stacks",
         _stmts(deploy_execution_statements(env, res.store.bucket_arn, partition=p, region=r, account=a)),
     )
+    if env == "beta":
+        iam.Policy(st, f"DeployExecRole{cap}RecommendationRuns", policy_name="recommendation-runs-deploy", roles=[exec_role],
+                   statements=_stmts(recommendation_runs_deploy_statements(env, partition=p, region=r, account=a)))
     stage_role = _role(
         st,
         f"StageRole{cap}",

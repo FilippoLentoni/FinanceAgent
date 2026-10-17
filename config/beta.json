@@ -68,5 +68,31 @@
     "secret_name": "finplan/beta/financeagent/coinbase-brokerage-readonly",
     "portfolio_uuid": "888cf3e7-0644-5f51-9901-c3bfb871c5d8",
     "owner_sub": "817b3580-a0b1-70c2-9bbe-5015d0fe89ec"
+  },
+  "recommendation_trigger": {
+    "$comment": "Cloud recommendation runs (OpenSpec add-recommendation-trigger-and-run-log): Lambda finplan-beta-financeagent-recommendation-trigger, EventBridge Scheduler and the run-log table. Beta only; set enabled=false to remove the schedule and function (the table is retained). classical_settings are the arguments the daily report pins for the classical optimizers.",
+    "enabled": true,
+    "schedule_expression": "rate(1 hour)",
+    "timezone": "America/New_York",
+    "portfolio_ids": [
+      "pf_01M547WFC8S9W35652YX87Z204"
+    ],
+    "methods": [
+      "ppo",
+      "min_variance",
+      "mean_variance",
+      "cvar"
+    ],
+    "daily_cap": 40,
+    "narrative_excerpt_bytes": 2048,
+    "classical_settings": {
+      "lookback_days": 60,
+      "risk_aversion": 2.0,
+      "cvar_alpha": 0.9,
+      "max_weight": 0.6,
+      "cash_weight": 0.0,
+      "horizon_sessions": 21,
+      "turnover_penalty": 0.001
+    }
   }
 }
