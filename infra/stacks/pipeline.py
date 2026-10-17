@@ -97,10 +97,10 @@ def build_spec() -> dict[str, Any]:
     }
 
 
-def stage_spec(tools: list[str]) -> dict[str, Any]:
+def stage_spec(tools: list[str], *, resolved_configuration: bool = False) -> dict[str, Any]:
     """Post-deploy actions run from BuildOutput only (never the source checkout, never a synth)."""
     exported = [target_variable(t) for t in tools] + [BEDROCK_VARIABLE]
-    return {
+    spec = {
         "version": "0.2",
         "env": {"shell": "bash", "variables": {"UV_LINK_MODE": "copy"}, "exported-variables": exported},
         "phases": {
@@ -115,6 +115,13 @@ def stage_spec(tools: list[str]) -> dict[str, Any]:
         },
         "cache": {"paths": ["/root/.cache/uv/**/*"]},
     }
+    if resolved_configuration:
+        spec["artifacts"] = {"files": ["agent-parameters.json"]}
+        # The same project also runs publish/tests without an output artifact.
+        # Keep their upload phase well formed; successful Resolve replaces this
+        # placeholder with its complete, validated parameter document.
+        spec["phases"]["build"]["commands"].insert(0, "printf '%s\\n' '{\"Parameters\":{}}' > agent-parameters.json")
+    return spec
 
 
 def template_path(stage: cdk.Stage, stack: cdk.Stack) -> str:
@@ -270,6 +277,7 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
 
     agent: AgentStack = ctx.stacks["agent"]
     identity = ctx.stacks["identity"]
+    use_resolved_configuration = env in (res.tooling.shared.get("classical_gateway_environments") or [])
     project_name = n.shared_name("pipeline-build-project", f"{env}-stage")
     project = codebuild.PipelineProject(
         st,
@@ -278,7 +286,7 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
         role=stage_role,
         environment=stage_env,
         environment_variables={**env_common, "FINPLAN_ENV": codebuild.BuildEnvironmentVariable(value=env)},
-        build_spec=codebuild.BuildSpec.from_object(stage_spec(agent.tools)),
+        build_spec=codebuild.BuildSpec.from_object(stage_spec(agent.tools, resolved_configuration=use_resolved_configuration)),
         timeout=Duration.minutes(30),
         cache=codebuild.Cache.local(codebuild.LocalCacheMode.CUSTOM),
         logging=_logging(res, f"StageProject{cap}LogGroup", project_name),
@@ -290,8 +298,9 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
     stage = ctx.stage
     execution_id = codebuild.BuildEnvironmentVariable(value="#{codepipeline.PipelineExecutionId}")
     ns = resolve_namespace(env)
+    resolved_config = codepipeline.Artifact(f"Resolved{cap}Configuration")
 
-    def cb(name: str, action: str, order: int, kind: actions.CodeBuildActionType, namespace: str | None = None) -> actions.CodeBuildAction:
+    def cb(name: str, action: str, order: int, kind: actions.CodeBuildActionType, namespace: str | None = None, outputs: list[codepipeline.Artifact] | None = None) -> actions.CodeBuildAction:
         return actions.CodeBuildAction(
             action_name=name,
             project=project,
@@ -300,13 +309,21 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
             run_order=order,
             variables_namespace=namespace,
             environment_variables={"FINPLAN_STAGE_ACTION": codebuild.BuildEnvironmentVariable(value=action), "PIPELINE_EXECUTION_ID": execution_id},
+            outputs=outputs,
         )
 
-    overrides = {"ImageUri": f"#{{{BUILD_NAMESPACE}.IMAGE_URI}}", "ReleaseId": f"#{{{BUILD_NAMESPACE}.RELEASE_ID}}", bedrock_param(): f"#{{{ns}.{BEDROCK_VARIABLE}}}"}
-    for tool in agent.tools:
-        overrides[target_param(tool)] = f"#{{{ns}.{target_variable(tool)}}}"
+    # CodePipeline caps ParameterOverrides at 1KB. The complete per-environment
+    # resolved alias/Bedrock set is carried in TemplateConfiguration, with only
+    # immutable Build-stage identity overrides kept in the action itself.
+    overrides = {"ImageUri": f"#{{{BUILD_NAMESPACE}.IMAGE_URI}}", "ReleaseId": f"#{{{BUILD_NAMESPACE}.RELEASE_ID}}"}
+    if not use_resolved_configuration:
+        # Preserve higher-environment action roles and wiring until separately
+        # opted into the classical deployment; no output artifact/write grant.
+        overrides[bedrock_param()] = f"#{{{ns}.{BEDROCK_VARIABLE}}}"
+        for tool in agent.primary_tools:
+            overrides[target_param(tool)] = f"#{{{ns}.{target_variable(tool)}}}"
 
-    def deploy(stack: cdk.Stack, order: int, params: dict[str, str] | None = None) -> actions.CloudFormationCreateUpdateStackAction:
+    def deploy(stack: cdk.Stack, order: int, params: dict[str, str] | None = None, configuration: codepipeline.ArtifactPath | None = None) -> actions.CloudFormationCreateUpdateStackAction:
         return actions.CloudFormationCreateUpdateStackAction(
             action_name=f"Deploy{stack.node.id}",
             stack_name=stack.stack_name,
@@ -317,13 +334,14 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
             cfn_capabilities=[cdk.CfnCapabilities.NAMED_IAM, cdk.CfnCapabilities.AUTO_EXPAND],
             replace_on_failure=False,
             parameter_overrides=params,
+            template_configuration=configuration,
             run_order=order,
         )
 
     stage_actions: list[codepipeline.IAction] = [
-        cb("Resolve", "resolve", 1, actions.CodeBuildActionType.BUILD, ns),
+        cb("Resolve", "resolve", 1, actions.CodeBuildActionType.BUILD, ns, [resolved_config] if use_resolved_configuration else None),
         deploy(identity, 2),
-        deploy(agent, 3, overrides),
+        deploy(agent, 3, overrides, resolved_config.at_path("agent-parameters.json") if use_resolved_configuration else None),
         cb("PublishRelease", "publish", 4, actions.CodeBuildActionType.BUILD),
     ]
     suite = ENV_SUITES[env]

@@ -97,6 +97,10 @@ class SsmNames:
         return f"/finplan/{self.environment}/{REPO}/agent/gateway-endpoint-ref"
 
     @property
+    def classical_gateway_endpoint_ref(self) -> str:
+        return f"/finplan/{self.environment}/{REPO}/agent/classical-gateway-endpoint-ref"
+
+    @property
     def user_pool_ref(self) -> str:
         return f"/finplan/{self.environment}/{REPO}/agent/user-pool-ref"
 
@@ -127,6 +131,7 @@ class Settings:
     memory_id: str | None
     gateway_url: str | None
     repo_config: Mapping[str, Any] = field(default_factory=dict)
+    classical_gateway_url: str | None = None
 
     @property
     def ssm(self) -> SsmNames:
@@ -157,6 +162,9 @@ class Settings:
         gateway_url = env.get("FINPLAN_GATEWAY_URL") or None
         if gateway_url is not None and not _GATEWAY_URL_RE.match(gateway_url):
             raise AgentError.validation("FINPLAN_GATEWAY_URL must be the Gateway's https://<host>/mcp endpoint", pointer="/FINPLAN_GATEWAY_URL")
+        classical_url = env.get("FINPLAN_CLASSICAL_GATEWAY_URL") or None
+        if classical_url is not None and (not _GATEWAY_URL_RE.match(classical_url) or classical_url == gateway_url):
+            raise AgentError.validation("FINPLAN_CLASSICAL_GATEWAY_URL must name a distinct HTTPS MCP endpoint", pointer="/FINPLAN_CLASSICAL_GATEWAY_URL")
         return cls(
             environment=environment,
             region=env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION") or "us-east-2",
@@ -164,4 +172,5 @@ class Settings:
             memory_id=env.get("FINPLAN_MEMORY_ID") or None,
             gateway_url=gateway_url,
             repo_config=load_repo_config(environment),
+            classical_gateway_url=classical_url,
         )

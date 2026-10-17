@@ -45,4 +45,18 @@ def test_refresh_is_rate_limited():
     svc.deps.provider_loader = lambda: (calls.append(1), (svc.deps.provider_config, svc.deps.provider))[1]
     svc.deps.provider_refresh_seconds = 3600.0
     svc.refresh_provider()
-    assert calls == []
+    svc.refresh_provider()
+    assert calls == [1]
+
+
+def test_first_describe_picks_up_provider_published_after_process_start():
+    from finplan_agent.providers.bedrock import BedrockProvider
+    from tests.fakes.agent import StubBedrockClient, bedrock_config
+
+    svc, _ = make_service()
+    assert svc.deps.provider_config.kind == "fixture"
+    current = bedrock_config("beta")
+    provider = BedrockProvider(current, StubBedrockClient())
+    svc.deps.provider_loader = lambda: (current, provider)
+    assert svc.describe()["provider"]["kind"] == "bedrock"
+    assert svc.deps.provider is provider and svc.guard.config == current

@@ -164,13 +164,14 @@ class ToolingStack(cdk.Stack):
         p, r, a = Aws.PARTITION, Aws.REGION, Aws.ACCOUNT_ID
         self.gateway_roles: dict[str, iam.Role] = {}
         for env in n.ENVIRONMENTS:
+            classical = env in (shared.get("classical_gateway_environments") or [])
             role = iam.Role(
                 self,
                 f"GatewayServiceRole{env.capitalize()}",
                 role_name=n.gateway_role_name(env),
-                assumed_by=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com", conditions=gateway_trust_conditions(env, partition=p, region=r, account=a)),
+                assumed_by=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com", conditions=gateway_trust_conditions(env, classical=classical, partition=p, region=r, account=a)),
                 description=f"FinanceAgent {env} AgentCore Gateway service role: invokes {env} FinanceLambdasTool tools only",
-                inline_policies={"gateway": iam.PolicyDocument.from_json(gateway_role_policy(env, partition=p, region=r, account=a))},
+                inline_policies={"gateway": iam.PolicyDocument.from_json(gateway_role_policy(env, classical=classical, partition=p, region=r, account=a))},
             )
             tag_role(role, "gateway-service-role")
             self.scope_to_environment(role, env)

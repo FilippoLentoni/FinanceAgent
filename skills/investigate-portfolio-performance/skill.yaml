@@ -1,0 +1,5 @@
+name: investigate-portfolio-performance
+version: 0.1.0
+purpose: Separate daily portfolio attribution from objective-horizon strategy evidence and investigate supported discrepancies.
+tools: [get_portfolio_decision, evaluate_portfolio_decision, list_portfolio_decisions, get_portfolio_history, list_market_snapshots, research_market_events, submit_portfolio_feedback, get_classical_analysis]
+output_contract: finance/v1/tools/evaluate-portfolio-decision-response.json

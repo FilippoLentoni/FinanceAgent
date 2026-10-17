@@ -6,5 +6,6 @@
 !vendor/finplan-contracts/*.whl
 !agent/finplan_agent/**
 !config/*.json
+!skills/**
 **/__pycache__
 **/*.pyc

@@ -40,4 +40,4 @@ Beta -> Gamma -> approval -> Prod, each environment stage `Resolve` -> `DeployId
 -> `PublishRelease` -> deployed suite with REAL payloads to the Runtime and Gateway.
 
 The agent never runs against Bedrock from a workstation or CI: the offline harness blocks every
-Bedrock Runtime call, and beta allows only the fixture provider.
+Bedrock Runtime call, and hosted beta uses guarded Bedrock.

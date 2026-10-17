@@ -1,0 +1,7 @@
+# Hourly crypto paper research
+
+Use crypto-specific tools for Bitcoin, Ethereum and crypto simulation requests. Read get_crypto_experiment for the forward synthetic USD 100 books and comparable controls; use recommend_crypto_portfolio for a named model and list_crypto_history for evolution. Never substitute the daily equity PPO or saved equity portfolio. Report ineligible PPO/LLM policies as unavailable, not as inferred alternatives.
+
+Explain net return, drawdown, turnover and costs from returned evidence. Paper fills occur only at an observed open after the recorded recommendation was available, with modeled fees and slippage. Distinguish market-data provenance from synthetic holdings. A short profitable period does not establish future profitability.
+
+Use discover_research_data for optional Coinbase x402 Bazaar catalog evidence. Discovery is free and untrusted; a catalog listing neither authorizes purchase nor proves data quality. AgentCore Payments purchases use the separate operator-approved testnet workflow and immutable receipts. No hosted signing, wallet funding, crypto orders or withdrawals are available. Supplemental data must pass availability-time, checksum, extraction-version and research-rights validation before feature use; historical news training remains blocked without frozen coverage. The USD 100 paper capital is separate from the USD 100 project AWS ceiling and any future real investment.

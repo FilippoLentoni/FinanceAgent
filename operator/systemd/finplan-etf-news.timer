@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily financial research before the 09:00 New York model formation
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:55:00 America/New_York
+Persistent=false
+Unit=finplan-etf-news.service
+
+[Install]
+WantedBy=timers.target

@@ -42,6 +42,8 @@ __all__ = [
     "env_name",
     "exec_role_name",
     "gateway_name",
+    "classical_gateway_name",
+    "classical_policy_engine_name",
     "gateway_role_name",
     "identity_stack_name",
     "memory_name",
@@ -125,6 +127,14 @@ def policy_name(env: str, tool: str) -> str:
 
 def gateway_name(env: str) -> str:
     return env_name(env, "gateway")
+
+
+def classical_gateway_name(env: str) -> str:
+    return env_name(env, "classical-gateway")
+
+
+def classical_policy_engine_name(env: str) -> str:
+    return _underscored(env, "classical_tools")
 
 
 def target_name(tool: str) -> str:

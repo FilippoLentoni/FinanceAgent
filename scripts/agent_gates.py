@@ -8,7 +8,7 @@ FA-PRV-11, FA-PRV-14). Offline; exit 1 with named findings on failure.
 2. **Model-identifier scan** (FA-PRV-11): no literal Bedrock model or inference-profile identifier in
    agent code, skills, scripts or tests outside ``tests/fixtures/config/``; the ID lives only in
    ``/finplan/<env>/financeagent/config/explanation-model-id``.
-3. **Provider-kind check** (FA-PRV-14): beta allows only the ``fixture`` provider.
+3. **Provider-kind check** (FA-PRV-14): beta allows fixture tests and guarded hosted Bedrock use.
 4. **WebSocket gate** (FA-RT-03): an environment may enable WebSocket only with a recorded
    ``requirement_ref`` naming a design decision, and the agent may register a WebSocket handler only
    through the same service (same graph, policy and session store) as HTTP.
@@ -138,8 +138,8 @@ def _env_configs(root: Path) -> dict[str, dict]:
 def provider_kind_findings(root: Path = ROOT) -> list[Finding]:
     out = []
     beta = _env_configs(root).get("beta", {})
-    if beta.get("provider_kind_allowed") != ["fixture"]:
-        out.append(Finding("provider-kind", "config/beta.json", "beta must allow only the fixture provider (no Bedrock calls in CI)"))
+    if set(beta.get("provider_kind_allowed") or []) != {"fixture", "bedrock"}:
+        out.append(Finding("provider-kind", "config/beta.json", "beta must allow fixture tests and guarded hosted Bedrock use"))
     return out
 
 

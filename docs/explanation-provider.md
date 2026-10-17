@@ -6,7 +6,7 @@ No prices and no account-specific values are recorded here.
 
 | Parameter | Value |
 |---|---|
-| `/finplan/<env>/financeagent/config/explanation-provider` | `bedrock` or `fixture` (the registered contract value shape is a plain provider key). Beta is `fixture` only. |
+| `/finplan/<env>/financeagent/config/explanation-provider` | `bedrock` or `fixture` (the registered contract value shape is a plain provider key). Hosted beta uses guarded Bedrock; CI uses fixtures. |
 | `/finplan/<env>/financeagent/config/explanation-model-id` | Bedrock model or inference-profile ID (prod: the Claude Opus 5 US profile). Rejected: `global.` profiles, any Qwen identifier, FinanceModel/SageMaker references, ARNs. |
 | `/finplan/<env>/financeagent/config/explanation-guards` | JSON: `max_tokens_invocation`, `max_tokens_turn`, `max_tokens_session`, `max_tool_calls_turn`, `max_cost_session_usd`, `temperature` (or null), `prompt_caching` (`enabled`/`disabled`), `rates` `{input_per_1k_usd, output_per_1k_usd, cache_write_per_1k_usd?, cache_read_per_1k_usd?, source: configured\|aws_price_list, retrieved_at}`. Absent cap fields default from `config/<env>.json`; rates never default. |
 
@@ -31,5 +31,5 @@ uncached. Cache read/write tokens are recorded and priced with the configured ca
    month-to-date `EstimatedCostUSD` metric summed over all environments, plus this process's not yet
    visible spend). Refusal: `BUDGET_EXCEEDED`, no Bedrock call, tool-only/evidence-only answer.
 3. Prompt caching as above.
-4. Fixture provider in build and beta; the offline test harness blocks every Bedrock Runtime call.
+4. Fixture provider in build and offline tests; the offline test harness blocks every Bedrock Runtime call.
 5. The platform AWS Budgets deny action on the Runtime role (`budget-enforced-role-names`).

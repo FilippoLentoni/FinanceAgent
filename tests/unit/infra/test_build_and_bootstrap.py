@@ -77,11 +77,11 @@ def test_configuration_gate(tmp_path):
     root = tmp_path / "repo"
     shutil.copytree(bst.ROOT / "config", root / "config")
     beta = json.loads((root / "config" / "beta.json").read_text())
-    beta["explanation"]["provider"] = "bedrock"
+    beta["explanation"]["provider"] = "unknown"
     beta["explanation"]["rates"] = {"input_per_1k_usd": 1}
     (root / "config" / "beta.json").write_text(json.dumps(beta))
     probs = " ".join(bst.config_problems(root))
-    assert "fixture provider only" in probs and "no rates" in probs
+    assert "must be fixture or bedrock" in probs and "no rates" in probs
 
 
 # ------------------------------------------------------------------ bootstrap

@@ -1,0 +1,4 @@
+name: etf-news-research
+version: 0.2.0
+purpose: Inspect point-in-time ETF and GOOGL financial news features and compare declared optimizer sensitivity with matched price-only inputs.
+tools: [get_etf_research_inputs]

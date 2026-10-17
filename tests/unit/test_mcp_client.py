@@ -78,6 +78,18 @@ def test_tool_error_envelope_is_a_failed_outcome():
     assert not out.ok and out.error["code"] == "FORBIDDEN"
 
 
+def test_identity_propagation_is_opt_in_and_never_enters_rpc_arguments():
+    primary = FakeGateway()
+    client(primary).call_tool("get_plan_version", {})
+    assert all("X-Finplan-User-Token" not in headers for headers, _ in primary.requests)
+    classical = FakeGateway()
+    GatewayMcpClient(URL, lambda: "identity-token", transport=classical, forward_identity=True).call_tool("get_plan_version", {})
+    for headers, message in classical.requests:
+        assert headers["X-Finplan-User-Token"] == "identity-token"
+        assert headers["Authorization"] == "Bearer identity-token"
+        assert "identity-token" not in json.dumps(message)
+
+
 @pytest.mark.parametrize("status,code", [(401, "UNAUTHORIZED"), (403, "FORBIDDEN"), (429, "RATE_LIMITED"), (503, "DEPENDENCY_UNAVAILABLE")])
 def test_http_errors_map_to_contract_codes(status, code):
     with pytest.raises(AgentError) as e:
@@ -85,9 +97,61 @@ def test_http_errors_map_to_contract_codes(status, code):
     assert e.value.code == code
 
 
+@pytest.mark.parametrize("sse", [False, True])
+@pytest.mark.parametrize("rpc_code,message,expected", [
+    (-32002, "Tool Execution Denied: Tool call not allowed due to policy enforcement [No policy applies to the request (denied by default).]", "FORBIDDEN"),
+    (-32002, "Tool Execution Denied: Tool call not allowed due to policy enforcement [opaque-sensitive-policy-reason]", "FORBIDDEN"),
+    (-32002, "Authorization error - Insufficient permissions", "FORBIDDEN"),
+    (-32002, "Authorization error - Request forbidden", "FORBIDDEN"),
+    (-32002, "Resource not found", "DEPENDENCY_UNAVAILABLE"),
+    (-32002, "AccessDeniedException: Gateway role cannot invoke Lambda", "DEPENDENCY_UNAVAILABLE"),
+    (-32603, "Authorization error - Insufficient permissions", "DEPENDENCY_UNAVAILABLE"),
+])
+def test_rpc_authorization_denials_require_recognized_code_and_message(sse, rpc_code, message, expected):
+    base = FakeGateway(sse=sse)
+
+    def transport(url, headers, body, timeout):
+        request = json.loads(body)
+        if request["method"] != "tools/call":
+            return base(url, headers, body, timeout)
+        reply = {"jsonrpc": "2.0", "id": request["id"], "error": {"code": rpc_code, "message": message}}
+        encoded = json.dumps(reply)
+        return HttpResponse(200, {"content-type": "text/event-stream" if sse else "application/json"}, (f"event: message\ndata: {encoded}\n\n" if sse else encoded).encode())
+
+    result = client(transport).call_tool("get_plan_version", {})
+    assert not result.ok and result.error["code"] == expected
+    assert result.error["details"]["rpc_code"] == rpc_code
+    assert message not in json.dumps(result.error)
+    assert "opaque-sensitive-policy-reason" not in json.dumps(result.error)
+    if expected == "FORBIDDEN":
+        assert result.error["retryable"] is False
+        assert result.error["details"]["reason"] == "gateway_authorization_denied"
+
+
 def test_oversized_result_is_refused():
     out = client(FakeGateway(oversized=True)).call_tool("get_plan_version", {})
     assert not out.ok and out.error["details"]["reason"] == "response_too_large"
+
+
+@pytest.mark.parametrize("text,code,retryable", [
+    ("ValidationException - Parameter validation failed: Invalid request parameters:\n- Missing required field(s): '/holdings/cash_weight'", "VALIDATION_FAILED", False),
+    ("The target service is unavailable", "DEPENDENCY_UNAVAILABLE", True),
+    (json.dumps({"code":"NOT_FOUND","message":"missing snapshot","retryable":False,"details":{}}), "NOT_FOUND", False),
+])
+def test_gateway_plain_validation_errors_are_not_retryable_dependency_failures(text,code,retryable):
+    base=FakeGateway()
+    def transport(url,headers,body,timeout):
+        response=base(url,headers,body,timeout)
+        if json.loads(body)["method"]!="tools/call":
+            return response
+        doc=json.loads(response.body)
+        doc["result"]={"content":[{"type":"text","text":text}],"isError":True}
+        return HttpResponse(response.status,response.headers,json.dumps(doc).encode())
+    result=client(transport).call_tool("get_plan_version",{})
+    assert not result.ok and result.error["code"]==code and result.error["retryable"] is retryable
+    if code=="VALIDATION_FAILED":
+        assert result.error["details"]["pointer"]=="/arguments"
+        assert '/holdings/cash_weight' in result.error["details"]["validation_message"]
 
 
 def test_unknown_tool_and_missing_token():

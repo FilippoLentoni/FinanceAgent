@@ -51,7 +51,7 @@ CFG_B = "cfg_" + "b2" * 32
 CHK_PREV = "sha256:" + "11" * 32
 CHK_NEW = "sha256:" + "22" * 32
 WINDOW = {"start": "2026-01-02", "end": "2026-03-31"}
-EXPLAIN_READ_TOOLS = ("get_publication", "list_publications", "list_executions", "compare_plan_versions")
+EXPLAIN_READ_TOOLS = ("get_publication", "list_publications", "list_executions", "compare_plan_versions", "get_performance_evidence")
 
 
 def checksum(doc: Any) -> str:

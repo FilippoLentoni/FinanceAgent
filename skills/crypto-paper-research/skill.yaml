@@ -1,0 +1,4 @@
+name: crypto-paper-research
+version: 0.1.0
+purpose: Investigate hourly synthetic crypto portfolios and optional research-data services.
+tools: [get_crypto_experiment, recommend_crypto_portfolio, list_crypto_history, discover_research_data]

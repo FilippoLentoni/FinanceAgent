@@ -36,8 +36,10 @@ RUN groupadd --system --gid 10001 financeagent \
     && useradd --system --uid 10001 --gid financeagent --home-dir /opt/financeagent --shell /usr/sbin/nologin financeagent
 COPY --from=build /opt/financeagent/venv /opt/financeagent/venv
 COPY config/ /opt/financeagent/config/
+COPY skills/ /opt/financeagent/skills/
 ENV PATH=/opt/financeagent/venv/bin:${PATH} \
     FINPLAN_CONFIG_DIR=/opt/financeagent/config \
+    FINPLAN_SKILLS_DIR=/opt/financeagent/skills \
     DOCKER_CONTAINER=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1

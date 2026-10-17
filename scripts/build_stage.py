@@ -4,7 +4,7 @@
 Normal build (``--rollback-to`` empty or ``none``):
 
 1. pre-synth gates: contract pin (version + wheel digest), agent gates (architecture, model-ID scan,
-   provider kind, WebSocket), the configuration check (beta is fixture-only; every configured model ID
+   provider kind, WebSocket), the configuration check (offline tests use fixtures; every configured model ID
    passes the provider validation), and the offline suites ``tests/unit tests/graph tests/contract``
    under the offline harness (no network, no AWS, NO Bedrock call: FA-PRV-14);
 2. ``cdk synth`` ONCE (:func:`scripts.synth.synth`), then the post-synth gates
@@ -44,7 +44,7 @@ from scripts.release import ReleaseInfo, assembly_digest, contract_pin, fetch_bu
 __all__ = ["PACKAGE_PATHS", "BuildFailed", "config_problems", "main", "pre_gates", "run_build", "run_rollback"]
 
 #: Copied into BuildOutput for the post-deploy actions (they never read the source checkout).
-PACKAGE_PATHS = ("pyproject.toml", "uv.lock", "README.md", "contracts-pin.json", "cdk.json", "vendor", "agent", "config", "policy", "scripts", "tests", "infra")
+PACKAGE_PATHS = ("pyproject.toml", "uv.lock", "README.md", "contracts-pin.json", "cdk.json", "vendor", "agent", "config", "policy", "skills", "scripts", "tests", "infra")
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache", ".ruff_cache", "cdk.out")
 OFFLINE_SUITES = ("tests/unit", "tests/graph", "tests/contract")
 
@@ -62,7 +62,7 @@ def _has_key(node: Any, keys: tuple[str, ...]) -> bool:
 
 
 def config_problems(root: Path = ROOT) -> list[str]:
-    """Environment configuration: beta fixture-only, valid provider kinds and model IDs, no prices."""
+    """Environment configuration: valid hosted provider kinds and model IDs; no prices."""
     from finplan_agent.config.provider import model_id_problems
 
     out = []
@@ -74,8 +74,6 @@ def config_problems(root: Path = ROOT) -> list[str]:
             out.append(f"config/{env}.json: explanation.provider must be fixture or bedrock")
         if kind not in (cfg.get("provider_kind_allowed") or []):
             out.append(f"config/{env}.json: explanation.provider {kind!r} is not in provider_kind_allowed")
-        if env == "beta" and kind != "fixture":
-            out.append("config/beta.json: beta runs the fixture provider only (no Bedrock calls in CI, FA-PRV-14)")
         out += [f"config/{env}.json: explanation.model_id: {p}" for p in model_id_problems(expl.get("model_id"))]
         if _has_key(cfg, ("rates", "input_per_1k_usd", "output_per_1k_usd")):
             out.append(f"config/{env}.json: no rates or prices in repository configuration")

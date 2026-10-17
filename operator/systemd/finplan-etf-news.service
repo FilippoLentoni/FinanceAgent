@@ -1,0 +1,13 @@
+[Unit]
+Description=Bounded ETF news research purchase and central publication
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ec2-user/projects/FinanceAgent
+ExecStart=/home/ec2-user/projects/FinanceAgent/.venv/bin/python /home/ec2-user/projects/FinanceAgent/scripts/paid_news_cycle.py
+Environment=TMPDIR=/home/ec2-user/projects/.worktmp/pytest-tmp
+UMask=0077
+TimeoutStartSec=1800
+NoNewPrivileges=true

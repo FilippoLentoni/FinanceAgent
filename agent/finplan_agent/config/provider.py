@@ -22,7 +22,7 @@ Validation (any failure raises :class:`ProviderConfigError`, so the process refu
 Runtime health check fails):
 
 * kind not in {bedrock, fixture} (``openai`` included: the OpenAI adapter does not exist);
-* kind not allowed in the environment (beta is ``fixture`` only: no Bedrock calls in CI);
+* kind not allowed in the environment (CI uses fixtures; hosted beta may use guarded Bedrock);
 * model ID missing for ``bedrock``, an ARN, a ``global.`` inference profile, any ``qwen`` identifier
   or any FinanceModel / SageMaker reference (Qwen is a FinanceModel strategy benchmark only);
 * ``max_tokens_invocation`` above ``max_tokens_turn`` (or the turn cap above the session cap);

@@ -43,6 +43,22 @@ Exactly two account-level stacks (environment `shared`):
 Neither stack needs `CDKToolkit`; the bootstrap refuses an assembly that references `cdk-hnb659fds`
 roles or `cdk-*-assets` buckets or carries container-image assets (lesson L1).
 
+### Updating an existing pipeline's tool wiring
+
+The pipeline does not update itself. When the pinned catalog adds tools, its shared Tooling stack
+must also be refreshed: the stage CodeBuild projects export the target variables and the pipeline
+passes each one as a CloudFormation parameter. Deploying only a new Agent template leaves new
+parameters at `none`, even if Resolve found their Lambda references.
+
+For an existing installation, synthesize offline, compare the Tooling template with the deployed
+template, and update only `finplan-shared-financeagent-tooling` through a reviewed CloudFormation
+change set. This is a control-plane update, separate from the one-time bootstrap; do not rerun the
+bootstrap or directly deploy workload stacks. Stop the operator's pending executions first, hold
+Beta/Gamma transitions, preserve existing stack parameters, and verify the barriers after update.
+Then release the exact source commit through Beta. `RestartExecutionOnUpdate` stays false. The
+PublishRelease action refuses to publish if deployed target parameters differ from resolved targets.
+Restore the recorded transition states only after stopping the beta-only execution before Gamma.
+
 Scoped roles created:
 
 | Role | Tags / boundary | Used by |

@@ -23,7 +23,33 @@ from typing import Any
 
 from finplan_contracts.schemas import SchemaStore, load_store
 
-__all__ = ["GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "contract_tools", "project", "tool_definition", "to_cfn"]
+__all__ = ["CLASSICAL_IDENTITY_HEADER", "CLASSICAL_ONLY_TOOLS", "CLASSICAL_SHARED_TOOLS", "GATEWAY_TYPES", "MAX_DEPTH", "ToolDefinition", "classical_tools", "contract_tools", "primary_tools", "project", "target_metadata", "tool_definition", "to_cfn"]
+
+CLASSICAL_IDENTITY_HEADER = "X-Finplan-User-Token"
+
+
+def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
+    """Paid beta research and human portfolio resolutions receive a verification JWT.
+
+    Header propagation transports untrusted credentials, not trusted group claims. The
+    target verifies the signature and pinned Cognito issuer/client before authorizing.
+    Paper resolutions propagate the same header through either independent Gateway.
+    """
+    if tool == "resolve_portfolio_decision" or env == "beta" and classical and tool in {"run_portfolio_research", "run_recursive_improvement"}:
+        return {"allowedRequestHeaders": [CLASSICAL_IDENTITY_HEADER]}
+    return {}
+
+CLASSICAL_ONLY_TOOLS = frozenset({
+    "get_crypto_experiment", "recommend_crypto_portfolio", "list_crypto_history", "discover_research_data", "get_etf_research_inputs",
+    "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
+    "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
+    "research_portfolio_models", "research_market_events", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback",
+})
+CLASSICAL_SHARED_TOOLS = frozenset({
+    "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",
+    "query_market_data", "get_plan", "get_plan_version", "list_plan_versions", "get_performance_evidence",
+    "get_job_status", "get_experiment_result", "submit_experiment", "describe_capabilities",
+})
 
 GATEWAY_TYPES = ("string", "number", "integer", "boolean", "object", "array")
 #: Nesting depth carried into the Gateway schema; deeper structures become an undescribed object
@@ -58,6 +84,16 @@ def contract_tools(store: SchemaStore | None = None) -> list[str]:
     return sorted(out)
 
 
+def primary_tools(store: SchemaStore | None = None) -> list[str]:
+    """Preserve the existing MCP catalog when the contracts package adds traditional tools."""
+    return sorted(set(contract_tools(store)) - CLASSICAL_ONLY_TOOLS)
+
+
+def classical_tools(store: SchemaStore | None = None) -> list[str]:
+    """Traditional analysis catalog, with only the shared reads its workflows require."""
+    return sorted(set(contract_tools(store)) & (CLASSICAL_ONLY_TOOLS | CLASSICAL_SHARED_TOOLS))
+
+
 def _clip(text: str) -> str:
     text = " ".join(text.split())
     return text if len(text) <= _DESC_MAX else text[: _DESC_MAX - 3] + "..."
@@ -82,6 +118,41 @@ def _absolutize(node: Any, base: str) -> Any:
     if isinstance(node, list):
         return [_absolutize(v, base) for v in node]
     return node
+
+
+def _literal_type(value: Any) -> str:
+    """JSON literal type, with booleans distinguished from Python integers."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    return "array" if isinstance(value, list) else "object"
+
+
+def _implicit_type(node: Mapping[str, Any]) -> str:
+    """Infer the type constrained by a literal before falling back to structural hints."""
+    if "const" in node:
+        return _literal_type(node["const"])
+    if "enum" in node:
+        types = {_literal_type(value) for value in node["enum"]} - {"null"}
+        if len(types) == 1:
+            return types.pop()
+        if types and types <= {"integer", "number"}:
+            return "number"
+        # The Gateway cannot express a heterogeneous or null-only enum. Keep the
+        # existing string relaxation; its full constraint remains in the description.
+        return "string"
+    if "properties" in node or "additionalProperties" in node:
+        return "object"
+    if "items" in node:
+        return "array"
+    return "string" if "pattern" in node or "format" in node else "object"
 
 
 class _Projector:
@@ -127,7 +198,8 @@ class _Projector:
                 node = {**node, "type": "object", "properties": {**props, **(node.get("properties") or {})}, "required": sorted(set.intersection(*req_sets) | set(node.get("required") or [])) if req_sets else node.get("required")}
                 notes.append(f"one of {len(resolved)} shapes; the tool validates the exact shape")
             else:
-                types = [t for v in resolved for t in ([v["type"]] if isinstance(v.get("type"), str) else v.get("type") or []) if t != "null"]
+                variant_types = [v.get("type", _implicit_type(v)) for v in resolved]
+                types = [t for variant_type in variant_types for t in ([variant_type] if isinstance(variant_type, str) else variant_type or []) if t != "null"]
                 node = {**node, "type": types[0] if types else "string"}
                 notes.append("one of: " + "; ".join(_short(v) for v in resolved))
         t = node.get("type")
@@ -137,7 +209,7 @@ class _Projector:
                 notes.append("may be " + " or ".join(t))
             t = non_null[0] if non_null else "string"
         if t is None:
-            t = "object" if ("properties" in node or "additionalProperties" in node) else ("array" if "items" in node else ("string" if ("pattern" in node or "enum" in node or "format" in node) else "object"))
+            t = _implicit_type(node)
         if t == "null":
             t = "string"
             notes.append("null")
@@ -185,13 +257,35 @@ def project(schema_key: str, store: SchemaStore | None = None) -> dict[str, Any]
     return out
 
 
+def _output_shape(schema: dict[str, Any]) -> dict[str, Any]:
+    """Keep output types and members; omit verbose prose from the inline catalog.
+
+    The pinned response contracts remain authoritative in the Lambda adapters.
+    Input descriptions stay intact for callers and policy schema validation.
+    """
+    result = {key: value for key, value in schema.items() if key != "description"}
+    if "properties" in result:
+        result["properties"] = {key: _output_shape(value) for key, value in result["properties"].items()}
+    if "items" in result:
+        result["items"] = _output_shape(result["items"])
+    return result
+
+
 def tool_definition(tool: str, description: str | None = None, store: SchemaStore | None = None) -> ToolDefinition:
     store = store or load_store()
     stem = tool.replace("_", "-")
-    req = store.get(f"tools/{stem}{_REQ_SUFFIX}")
+    request_name = "tools/recommend-portfolio-invocation-request" if tool == "recommend_portfolio" else f"tools/{stem}{_REQ_SUFFIX}"
+    req = store.get(request_name)
     resp = store.get(f"tools/{stem}{_RESP_SUFFIX}")
     desc = description or str(req.schema.get("description") or tool)
-    return ToolDefinition(name=tool, description=_clip(desc), input_schema=project(req.name, store), output_schema=project(resp.name, store), input_schema_id=req.id, output_schema_id=resp.id)
+    desc = _clip(desc)
+    if tool == "recommend_portfolio":
+        from finplan_agent.skills import recommendation_mcp_description
+        desc = recommendation_mcp_description(desc)
+    elif tool in CLASSICAL_ONLY_TOOLS or tool in CLASSICAL_SHARED_TOOLS:
+        from finplan_agent.skills import classical_mcp_description
+        desc = classical_mcp_description(tool, desc)
+    return ToolDefinition(name=tool, description=desc, input_schema=project(req.name, store), output_schema=_output_shape(project(resp.name, store)), input_schema_id=req.id, output_schema_id=resp.id)
 
 
 _KEYS = {"type": "Type", "description": "Description", "properties": "Properties", "required": "Required", "items": "Items"}

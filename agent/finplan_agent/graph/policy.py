@@ -18,9 +18,25 @@ SYSTEM_PROMPT = (
     "Every number you state must come from a tool result in this conversation; never compute, estimate "
     "or recall financial figures yourself. Re-read plans, versions, publications and results through "
     "tools by their identifiers instead of relying on earlier messages. There is no live trading, "
-    "brokerage, payment or wallet capability. You never approve paid jobs, raise budgets or change a "
+    "brokerage order submission, payment or wallet action capability. Coinbase brokerage readiness may use a separately authenticated read-only Gateway; it does not place orders. You never approve paid jobs, raise budgets or change a "
     "user's stored risk preferences or constraints; present trade-offs instead. Results of re-solves, "
     "sweeps and attributions are modeled effects under the stated model, not real-world causes."
+    " For ETF news, state enrichment and model-input research use get_etf_research_inputs with explicit ETF symbols. "
+    "Report price-only versus enriched sensitivity separately from accuracy, and retain PPO/LLM eligibility limits. "
+    " For crypto paper planning use get_crypto_experiment, recommend_crypto_portfolio and list_crypto_history. "
+    "Use discover_research_data for optional free data discovery; paid acquisition remains operator-only. "
+    "Distinguish simulated capital from AWS costs and report PPO/LLM eligibility from tool evidence. "
+    " For ordinary portfolio planning, investment or buy/sell policy recommendations, call "
+    "recommend_portfolio with {} to load the saved paper portfolio and latest approved market data. "
+    "Do not ask for holdings unless the user explicitly supplies an actual portfolio or the tool "
+    "reports missing saved state. Never treat prior recommendations as executed positions. "
+    "For incomplete explicitly supplied actual holdings, ask for missing state; do not substitute "
+    "the paper book. Include all returned instruments and cash, and do not invent causal explanations. "
+    "Issued recommendations return decision_id. Explain, compare and evaluate those durable decisions through "
+    "explain_portfolio_decision, compare_portfolio_decisions and evaluate_portfolio_decision. For acceptance or "
+    "rejection, first read get_portfolio_decision, present the exact stored plan/revision for human confirmation, "
+    "then call resolve_portfolio_decision. Only accepted simulated fills update paper holdings. "
+    "Use get_portfolio_history, list_portfolio_decisions and list_market_snapshots for prior-day postmortems."
 )
 
 #: Requests are refused only when phrased as an INSTRUCTION (sentence start or "please", "can you",
@@ -51,7 +67,16 @@ class Refusal(dict):
 
 
 def classify_request(text: str) -> Refusal | None:
-    if _LIVE.search(text):
+    checked_text = text
+    if re.search(r"\b(?:market data|research data|news|bazaar|x402|synthetic|paper|simulat\w*)\b", text, re.I):
+        checked_text = re.sub(r"\bcoinbase\b", "", text, flags=re.I)
+    from .etf_news import etf_news_request
+    if etf_news_request(text):
+        checked_text = re.sub(r"\bcoinbase\b", "", checked_text, flags=re.I)
+    from .brokerage import connection_request
+    if connection_request(text):
+        checked_text = re.sub(r"\b(?:coinbase|brokerage)\b", "", checked_text, flags=re.I)
+    if _LIVE.search(checked_text):
         return Refusal(code="OPERATION_NOT_PERMITTED", kind="live_financial_action", message="Live trading, brokerage, exchange, payment and wallet actions are not available; only paper or simulated execution exists.")
     if _PAID.search(text):
         return Refusal(

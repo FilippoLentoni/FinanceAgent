@@ -1,0 +1,600 @@
+"""Read-only hosted LangGraph recommendations with frozen cross-method evidence.
+
+The token/config and outputs are private operator files. This runner never confirms,
+resolves, trades, trains, or refreshes market data. Missing methods/history stay visible.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import fcntl
+import json
+import math
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT), str(ROOT / 'agent')]
+from finplan_agent.config.settings import SsmNames  # noqa: E402
+from finplan_agent.core.decision_history import previous_decision  # noqa: E402
+from finplan_agent.core.news_evidence import summarize as summarize_news  # noqa: E402
+from finplan_agent.graph.activity import sanitize  # noqa: E402
+from scripts.beta_login import NoRedirect, validate_metadata  # noqa: E402
+from scripts.daily_paper_validation import token_for  # noqa: E402
+
+METHODS = ('ppo', 'min_variance', 'mean_variance', 'cvar')
+READ_TOOLS = frozenset({'recommend_portfolio', 'recommend_classical_portfolio', 'list_portfolio_decisions',
+                        'get_portfolio_decision', 'explain_portfolio_decision', 'compare_portfolio_decisions',
+                        'evaluate_portfolio_decision', 'research_market_events', 'get_job_status', 'get_experiment_result'})
+
+
+def private_json(path: Path, value: dict | list) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        json.dump(value, stream, indent=2, default=str, allow_nan=False)
+        stream.write('\n')
+    temporary.replace(path)
+
+
+def private_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + '.tmp-' + uuid.uuid4().hex)
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, 'w') as stream:
+        stream.write(value)
+    temporary.replace(path)
+
+
+def report_token(session, config: dict) -> str:
+    if config.get('auth_mode', 'user_refresh_token') == 'user_refresh_token':
+        return token_for(session, config)
+    if config['auth_mode'] != 'ci_client_credentials':
+        raise ValueError('unsupported report authentication mode')
+    # Existing read-only CI machine client; never impersonate a human or resolve decisions.
+    names = SsmNames('beta')
+    ssm = session.client('ssm')
+    meta = json.loads(ssm.get_parameter(Name=names.authorizer_metadata_ref)['Parameter']['Value'])
+    validate_metadata(meta)
+    secret_ref = ssm.get_parameter(Name=names.ci_test_client_secret_ref)['Parameter']['Value']
+    secret = json.loads(session.client('secretsmanager').get_secret_value(SecretId=secret_ref)['SecretString'])
+    basic = base64.b64encode((secret['client_id'] + ':' + secret['client_secret']).encode()).decode()
+    request = urllib.request.Request(meta['token_endpoint'], data=b'grant_type=client_credentials', headers={
+        'Authorization': 'Basic ' + basic, 'Content-Type': 'application/x-www-form-urlencoded'})
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=30) as response:
+        token = json.load(response)
+    if token.get('token_type', '').lower() != 'bearer' or not token.get('access_token'):
+        raise ValueError('invalid machine-token response')
+    return token['access_token']
+
+
+class UnavailableReader:
+    def __init__(self, error: dict, output: Path):
+        self.error, self.output = error, output
+
+    def call(self, label: str, tool: str, arguments: dict) -> dict:
+        if tool not in READ_TOOLS:
+            raise ValueError('daily reports permit read-only evidence tools only')
+        result = {'status': 'not_available', 'tool': tool, 'error': self.error, 'receipt': label + '.json'}
+        private_json(self.output / result['receipt'], {'payload': {'tool': tool, 'arguments': arguments}, **result})
+        return result
+
+
+class HostedReader:
+    def __init__(self, session, config: dict, output: Path):
+        self.session, self.config, self.output = session, config, output
+        self.token = report_token(session, config)
+        runtime = session.client('ssm').get_parameter(Name='/finplan/beta/financeagent/agent/runtime-ref')['Parameter']['Value']
+        region = session.region_name or 'us-east-2'
+        self.url = 'https://bedrock-agentcore.' + region + '.amazonaws.com/runtimes/' + urllib.parse.quote(runtime, safe='') + '/invocations?qualifier=DEFAULT'
+        self.sequence = 0
+
+    def call(self, label: str, tool: str, arguments: dict) -> dict:
+        if tool not in READ_TOOLS:
+            raise ValueError('daily reports permit read-only evidence tools only')
+        self.sequence += 1
+        print(json.dumps({'stage': label, 'tool': tool}), flush=True)
+        payload = {'tool_request': {'name': tool, 'arguments': arguments}, 'stream': False}
+        if tool == 'get_experiment_result':
+            payload['prompt'] = ('Explain why the recorded validation evidence favors one modeling approach over the others, or why it does not support a choice. '
+                'Compare PPO, minimum variance, mean variance, CVaR and available controls using only this run\'s actual common windows, costs, constraints and seed metrics. '
+                'Distinguish frozen selection from deployment readiness, failed runs, reused development/test history and independent forward evidence; never infer superiority from one allocation.')
+            payload['prompt'] += (' Historical scores apply only to the frozen experiment configurations and do not establish performance for differently configured daily optimizers. '
+                                  'Quote settings only when present in the tool evidence; otherwise disclose that the configuration is unavailable. Use structured split dates and session counts over conflicting calendar-year prose.')
+        sid = 'daily_financial_report_' + uuid.uuid4().hex
+        request = urllib.request.Request(self.url, data=json.dumps(payload).encode(), headers={
+            'Authorization': 'Bearer ' + self.token, 'Content-Type': 'application/json',
+            'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sid})
+        try:
+            with urllib.request.urlopen(request, timeout=420) as response:
+                final = json.load(response)
+        except urllib.error.HTTPError as error:
+            final = {'status': 'failed', 'error': {'code': 'HOSTED_HTTP_' + str(error.code),
+                     'message': 'Hosted invocation failed; response retained in private receipt.',
+                     'body': error.read(65536).decode(errors='replace')}}
+        except (OSError, ValueError) as error:
+            final = {'status': 'failed', 'error': {'code': 'HOSTED_TRANSPORT_ERROR', 'message': type(error).__name__}}
+        # The runtime normally redacts secrets itself; never persist a bearer even on an error.
+        if self.token in json.dumps(final, default=str):
+            final = {'status': 'failed', 'error': {'code': 'CREDENTIAL_ECHO_REDACTED'}}
+        receipt = sanitize({'payload': payload, 'session_id': sid, 'final': final})
+        private_json(self.output / f'{self.sequence:02d}-{label}.json', receipt)
+        answer = final.get('answer') or {}
+        evidence = answer.get('evidence') or []
+        matching = [row for row in evidence if row.get('tool') == tool]
+        valid = (final.get('status') == 'completed' and answer.get('claim_check', {}).get('passed') is True
+                 and bool(matching) and all(row.get('ok') for row in evidence))
+        if not valid:
+            errors = [row.get('error') for row in evidence if not row.get('ok')]
+            return {'status': 'not_available', 'tool': tool, 'error': sanitize(final.get('error') or errors or
+                    {'code': 'HOSTED_EVIDENCE_CHECK_FAILED', 'status': final.get('status')}), 'receipt': f'{self.sequence:02d}-{label}.json'}
+        return {'status': 'available', 'tool': tool, 'answer': answer, 'receipt': f'{self.sequence:02d}-{label}.json'}
+
+
+def producer_documents(result: dict) -> list[dict]:
+    answer = result.get('answer') or {}
+    documents = [row.get('result') for row in answer.get('evidence', []) if row.get('ok') and isinstance(row.get('result'), dict)]
+    documents.extend(answer.get('portfolio_decisions') or [])
+    documents.extend(answer.get('portfolio_analyses') or [])
+    if answer.get('recommendation'):
+        documents.append({'recommendation': answer['recommendation']})
+    return documents
+
+
+def recommendation_record(result: dict) -> dict:
+    documents = producer_documents(result)
+    return next((row for row in documents if row.get('recommendation') and row.get('decision_id')),
+                next((row for row in documents if row.get('recommendation')), {}))
+
+
+def collection(result: dict, key: str) -> list[dict]:
+    return next((row[key] for row in producer_documents(result) if isinstance(row.get(key), list)), [])
+
+
+class DecisionHistory:
+    """Scan immutable producer pages lazily inside a fixed read bound."""
+    def __init__(self, reader, portfolio_id):
+        self.reader, self.portfolio_id = reader, portfolio_id
+        self.rows, self.receipts, self.seen = [], [], set()
+        self.status, self.next_token, self.stop_reason = 'available', None, None
+        self._page('history', {})
+
+    def _page(self, label, arguments):
+        result = self.reader.call(label, 'list_portfolio_decisions', {'portfolio_id': self.portfolio_id, 'limit': 100, **arguments})
+        self.receipts.append(result['receipt'])
+        if result['status'] != 'available':
+            self.status, self.stop_reason = 'not_available', 'history_page_unavailable'
+            return
+        self.rows.extend(collection(result, 'decisions'))
+        document = next((row for row in producer_documents(result) if isinstance(row.get('decisions'), list)), {})
+        self.next_token = document.get('next_token')
+
+    def previous(self, method, current):
+        while True:
+            old = previous_decision(self.rows, method, current)
+            if old or not self.next_token or self.status != 'available':
+                return old
+            if len(self.receipts) >= 8 or self.next_token in self.seen:
+                self.stop_reason = 'history_search_page_bound' if len(self.receipts) >= 8 else 'history_cursor_repeated'
+                return None
+            token = self.next_token
+            self.seen.add(token)
+            self._page('history-page-' + str(len(self.receipts) + 1), {'next_token': token})
+
+    def evidence(self):
+        return {'status': self.status, 'pages_read': len(self.receipts), 'page_receipts': self.receipts,
+                'more_pages_available': bool(self.next_token), 'stop_reason': self.stop_reason}
+
+
+def check_recommendation(record: dict, method: str, portfolio_id: str, reference: dict | None, expected: set[str]) -> list[str]:
+    rec = record.get('recommendation') or {}
+    state = rec.get('portfolio_state') or {}
+    problems = []
+    if rec.get('strategy') != method:
+        problems.append('requested_method_not_served')
+    if state.get('portfolio_id') != portfolio_id:
+        problems.append('portfolio_mismatch')
+    if not record.get('decision_id'):
+        problems.append('immutable_decision_id_missing')
+    if not all(rec.get(key) for key in ('input_snapshot_id', 'snapshot_checksum', 'as_of')):
+        problems.append('market_provenance_missing')
+    weights = [row.get('weight') for row in rec.get('target_weights', [])] + [rec.get('cash_weight')]
+    if (not weights or any(isinstance(weight, bool) or not isinstance(weight, (int, float)) or not math.isfinite(weight) or weight < 0 or weight > 1 for weight in weights)
+            or abs(sum(weights) - 1) > 1e-6):
+        problems.append('invalid_target_weights')
+    if rec.get('solution_status') not in ('feasible', 'optimal') or (rec.get('constraint_outcome') or {}).get('violations') or (rec.get('constraint_outcome') or {}).get('action') not in ('accepted', 'projected'):
+        problems.append('infeasible_recommendation')
+    if reference and any(rec.get(key) != reference.get(key) for key in ('input_snapshot_id', 'as_of', 'snapshot_checksum', 'portfolio_state')):
+        problems.append('cross_method_inputs_differ')
+    if reference:
+        current_news = (rec.get('diagnostics') or {}).get('news_evidence') or {}
+        reference_news = (reference.get('diagnostics') or {}).get('news_evidence') or {}
+        current_values = {key: current_news.get(key) for key in ('consumed', 'features', 'provenance')}
+        reference_values = {key: reference_news.get(key) for key in ('consumed', 'features', 'provenance')}
+        if current_values != reference_values:
+            problems.append('cross_method_news_inputs_differ')
+    if expected and {row.get('instrument_id') for row in rec.get('target_weights', [])} != expected:
+        problems.append('requested_universe_not_served')
+    if any(row.get('reference_price', 0) <= 0 or row.get('price_as_of') != rec.get('as_of') for row in rec.get('decisions', [])):
+        problems.append('reference_prices_inconsistent')
+    return problems
+
+
+def generate(reader, config: dict, now: datetime) -> dict:
+    pid = config['portfolio_id']
+    history = DecisionHistory(reader, pid)
+    report = {'generated_at': now.isoformat(), 'local_date': now.astimezone(ZoneInfo('America/New_York')).date().isoformat(),
+              'portfolio_id': pid, 'mode': 'advisory_saved_paper', 'holdings_changed': False,
+              'expected_instruments': config.get('expected_instruments', []), 'methods': [],
+              'method_selection': 'No statistically validated winner is inferred from one allocation. PPO optimizes its frozen sequential training objective; minimum variance minimizes modeled risk; mean variance balances modeled return and risk; CVaR penalizes modeled tail loss. Compare out-of-sample net-of-cost evidence, constraints and data readiness before choosing. Retrospective tests of the currently requested eight assets carry asset-selection and survivorship bias; provider prices are revised history downloaded today, not original point-in-time price vintages. Reused 2026 development/evaluation history is not fresh forward validation. Whole-document GDELT organization tone is neither calibrated stock sentiment nor a calibrated asset-return forecast.',
+              'history_status': history.status, 'classical_settings': config.get('classical_settings', {}),
+              'decision_cutoff_comparison': 'Each producer reads approved latest data at its current decision cutoff; snapshot identity, completed date, returned holdings and actual news features/provenance are checked after each call. Calls are sequential rather than atomic; a change invalidates controlled comparison.',
+              'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment. Historical rankings and scores belong only to their frozen tuned experiment configurations; they do not establish those scores for the current daily optimizer settings or paper-book size. Cash constraints, covariance/scenario methods, horizon, turnover penalties and execution costs must be matched before transferring performance claims.'}
+    reference = None
+    for method in config.get('methods', METHODS):
+        if method not in METHODS:
+            raise ValueError('unsupported report method')
+        arguments = {'portfolio_id': pid}
+        # Invocation schemas couple snapshot_id and as_of. Supplying both would
+        # reinterpret current morning news at a historical close, so use approved
+        # defaults and validate all returned snapshot/state/feature identities.
+        tool = 'recommend_portfolio' if method == 'ppo' else 'recommend_classical_portfolio'
+        if method != 'ppo':
+            arguments['algorithm'] = method
+            arguments['settings'] = dict(config.get('classical_settings', {}))
+        result = reader.call(method + '-recommendation', tool, arguments)
+        item = {'method': method, 'status': result['status'], 'recommendation_receipt': result['receipt'], 'explainability': {}}
+        report['methods'].append(item)
+        if result['status'] != 'available':
+            item['error'] = result.get('error')
+            for level in ('1_recommendation', '2_plan_change', '3_realization_and_context'):
+                item['explainability'][level] = {'status': 'not_available', 'reason': 'recommendation_unavailable'}
+            continue
+        record = recommendation_record(result)
+        rec = record.get('recommendation') or {}
+        checks = check_recommendation(record, method, pid, reference, set(config.get('expected_instruments', [])))
+        item['comparison_issues'] = [issue for issue in checks if issue.startswith('cross_method_')]
+        issues = [issue for issue in checks if not issue.startswith('cross_method_')]
+        item.update(recommendation=rec, decision_id=record.get('decision_id'), readiness_issues=issues,
+                    narrative=result.get('answer', {}).get('narrative', ''))
+        if any(issue != 'requested_universe_not_served' for issue in issues):
+            item['status'] = 'not_ready'
+            for level in ('1_recommendation', '2_plan_change', '3_realization_and_context'):
+                item['explainability'][level] = {'status': 'not_available', 'reason': 'recommendation_evidence_invalid'}
+            continue
+        if reference is None:
+            reference = rec
+        did = record['decision_id']
+        news = (rec.get('diagnostics') or {}).get('news_evidence') or {}
+        item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features', 'observation_dimension', 'observation_checksum', 'observed_drawdown', 'interpretation')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
+        if method != 'ppo' and (news.get('sensitivity_assumptions') or news.get('assumptions')):
+            item['model_assumptions']['news_sensitivity_assumptions'] = news.get('sensitivity_assumptions') or news['assumptions']
+            item['model_assumptions']['news_interpretation'] = ('Declared fixed research sensitivity, not a learned or calibrated return forecast. '
+                'Shared source fields and availability/coverage checks do not make the optimizer a PPO observation-state model.')
+            if news.get('feature_protocol') == 'gdelt-gkg-v2-premarket-organization-tone-v1':
+                item['model_assumptions']['news_sensitivity_features'] = {'mean_shift': 'tone_scaled', 'risk_scale': 'cluster_count_log_scaled',
+                    'other_extracted_fields': 'Availability and source coverage support readiness/provenance; the shared five-field extractor is not the PPO 98-dimensional state.'}
+        item['news_evidence'] = news
+        item['news_input_summary'] = summarize_news(news)
+        provenance = news.get('provenance') or {}
+        item['news_input_summary'].update({key: provenance.get(key) for key in (
+            'quality_status', 'captured_batches', 'expected_batches', 'missing_batches', 'missingness_basis',
+            'row_count', 'rejected_rows', 'archive_coverage_fraction', 'row_acceptance_fraction', 'source_coverage_fraction')})
+        item['news_input_summary']['freshness_basis'] = news.get('freshness_basis')
+        item['news_input_summary']['serving_time'] = rec.get('serving_time')
+        item['news_status'] = 'consumed_under_declared_cutoff' if news.get('consumed') else 'not_consumed'
+        if config.get('require_news_features', True) and not news.get('consumed'):
+            issues.append('approved_news_features_not_consumed')
+        item['status'] = 'not_ready' if issues else 'available'
+        # These are the existing deployed explanation levels, not invented numerical tiers.
+        item['explainability']['1_recommendation'] = reader.call(method + '-why', 'explain_portfolio_decision', {'portfolio_id': pid, 'decision_id': did})
+        old = history.previous(method, rec)
+        item['explainability']['2_plan_change'] = (reader.call(method + '-change', 'compare_portfolio_decisions', {
+            'portfolio_id': pid, 'previous_decision_id': old['decision_id'], 'current_decision_id': did}) if old else
+            {'status': 'not_available', 'reason': history.stop_reason or 'no_prior_compatible_market_date_or_news_formation', 'history_status': history.status})
+        evaluated = old['decision_id'] if old else did
+        outcome = reader.call(method + '-outcome', 'evaluate_portfolio_decision', {'portfolio_id': pid, 'decision_id': evaluated})
+        outcome['evaluated_decision_id'] = evaluated
+        analyses = producer_documents(outcome)
+        analysis_id = next((row['analysis_id'] for row in analyses if row.get('analysis_id')), None)
+        if analysis_id:
+            outcome['dated_context'] = reader.call(method + '-context', 'research_market_events', {'analysis_id': analysis_id})
+        else:
+            outcome['dated_context'] = {'status': 'not_available', 'reason': 'outcome_analysis_unavailable'}
+        item['explainability']['3_realization_and_context'] = outcome
+    report['reference_market_date'] = reference.get('as_of') if reference else None
+    report['input_snapshot_id'] = reference.get('input_snapshot_id') if reference else None
+    local = now.astimezone(ZoneInfo('America/New_York')).date()
+    report['session_label'] = ('market_closed_latest_completed_session' if (config.get('_calendar_context') or {}).get('is_trading_session') is False or local.weekday() >= 5 else 'latest_approved_completed_session_not_live_intraday')
+    closed = report['session_label'] == 'market_closed_latest_completed_session'
+    report['recommendation_context'] = 'closed_market_preview' if closed else 'regular_exchange_session_advisory'
+    report['training_distribution_status'] = 'outside_regular_exchange_session_training_distribution' if closed else 'regular_exchange_session_training_distribution'
+    report['comparison'] = compare_methods(report['methods'])
+    comparable = [item for item in report['methods'] if item.get('decision_id') and
+                  not any(issue not in ('requested_universe_not_served', 'approved_news_features_not_consumed') for issue in item.get('readiness_issues', []))]
+    cross = []
+    for item in comparable[1:]:
+        first = comparable[0]
+        cross.append({'previous_method': first['method'], 'current_method': item['method'],
+                      'controlled_inputs_aligned': not bool(first.get('comparison_issues') or item.get('comparison_issues')),
+                      'alignment_issues': item.get('comparison_issues', []),
+                      **reader.call(first['method'] + '-versus-' + item['method'], 'compare_portfolio_decisions', {
+                          'portfolio_id': pid, 'previous_decision_id': first['decision_id'], 'current_decision_id': item['decision_id']})})
+    report['cross_method_explanations'] = cross
+    report['pipeline_readiness'] = pipeline_readiness(config, now, report['reference_market_date'], [item.get('news_input_summary', {}) for item in report['methods']])
+    report['history_status'] = history.status
+    report['history_search'] = history.evidence()
+    validation_issues = [] if history.status == 'available' else ['history_tool_unavailable']
+    if any(item['explainability'].get('2_plan_change', {}).get('reason', '').startswith('history_') for item in report['methods']):
+        validation_issues.append('prior_history_search_incomplete')
+    for item in report['methods']:
+        if not item.get('decision_id'):
+            continue
+        levels = ['1_recommendation', '3_realization_and_context']
+        if item['explainability']['2_plan_change'].get('tool') == 'compare_portfolio_decisions':
+            levels.append('2_plan_change')
+        for level in levels:
+            if item['explainability'][level]['status'] != 'available':
+                validation_issues.append(item['method'] + ':' + level + '_tool_unavailable')
+    if any(item['status'] != 'available' for item in cross):
+        validation_issues.append('cross_method_explanation_tool_unavailable')
+    report['validation_issues'] = validation_issues
+    report['status'] = 'complete' if (report['methods'] and all(item['status'] == 'available' for item in report['methods'])
+        and not report['pipeline_readiness']['issues'] and not validation_issues) else 'partial_readiness'
+    return report
+
+
+def compare_methods(methods: list[dict]) -> dict:
+    usable = [item for item in methods if item.get('recommendation') and not any(issue not in ('requested_universe_not_served', 'approved_news_features_not_consumed') for issue in item.get('readiness_issues', []))]
+    if len(usable) < 2:
+        return {'status': 'not_available', 'reason': 'fewer_than_two_comparable_methods'}
+    base = usable[0]['recommendation']
+    same = all(all(item['recommendation'].get(key) == base.get(key) for key in ('input_snapshot_id', 'as_of', 'snapshot_checksum', 'portfolio_state')) for item in usable)
+    if not same or any(item.get('comparison_issues') for item in usable):
+        return {'status': 'not_available', 'reason': 'inputs_differ', 'method_alignment_issues': {item['method']: item.get('comparison_issues', []) for item in usable}}
+    targets = {item['method']: {row['instrument_id']: row['weight'] for row in item['recommendation']['target_weights']} | {'CASH': item['recommendation']['cash_weight']} for item in usable}
+    return {'status': 'available', 'same_market_and_holdings': True, 'target_weights': targets,
+            'recommendations_differ': any(target != next(iter(targets.values())) for target in targets.values()),
+            'winner': 'not_established'}
+
+
+def benchmark_ppo_scope(context: dict) -> str | None:
+    """Identify aggregate ensemble rows only from explicit reviewed producer metadata."""
+    for evidence in context.get('answer', {}).get('evidence', []):
+        selection = (evidence.get('summary') or {}).get('model_selection') or {}
+        params = (selection.get('validation_parameters') or {}).get('ppo') or {}
+        comparison = selection.get('validation_comparison') or {}
+        if (params.get('policy_selection') == 'ensemble' and (comparison.get('columns') or [None])[0] == 'strategy'
+                and any(isinstance(row, list) and row and row[0] == 'ppo' for row in comparison.get('rows', []))):
+            return ('The recorded aggregate PPO comparison row evaluates the frozen ensemble; per-seed validation rows describe its individual members separately. '
+                    'This establishes historical evaluation for that ensemble configuration, not independent forward evidence or the performance of differently configured daily optimizers.')
+    return None
+
+
+def markdown(report: dict) -> str:
+    lines = ['# Daily financial recommendation', '', f"Generated: {report['generated_at']}", '',
+             f"Status: {report['status']}. Market evidence: {report.get('reference_market_date') or 'unavailable'}. {report['session_label']}.", '',
+             'Context: ' + report.get('recommendation_context', 'unverified') + '; ' + report.get('training_distribution_status', 'unverified') + '.', '',
+             'These are saved paper holdings and indicative proposed trades. No holdings were changed.', '', report['method_selection'], '', report.get('constraint_comparison', '')]
+    for item in report['methods']:
+        lines.extend(['', '## ' + item['method'], '', 'Readiness: ' + item['status'] + '.'])
+        if item.get('model_assumptions'):
+            lines.extend(['', 'Model assumptions and constraints: ' + json.dumps(item['model_assumptions'], default=str) + '.', '',
+                          'PPO action smoothing and cash/turnover constraints can retain cash while an optimizer fixes cash at zero; these assumptions must be compared before interpreting different allocations. Unreported artifact settings remain unknown.'])
+        if item.get('comparison_issues'):
+            lines.extend(['', 'Method comparison limitation: ' + ', '.join(item['comparison_issues']) + '. These recommendations remain independently frozen evidence.'])
+        if item.get('readiness_issues'):
+            lines.append('Issues: ' + ', '.join(item['readiness_issues']) + '.')
+        if item.get('narrative'):
+            lines.extend(['', item['narrative'], '', 'News: ' + item.get('news_status', 'not_verified') + '.', '',
+                          'Actual model news input: ' + json.dumps(item.get('news_input_summary', {}), indent=2, default=str)])
+        else:
+            lines.extend(['', json.dumps(item.get('error'), default=str)])
+        for level, detail in item['explainability'].items():
+            lines.extend(['', '### ' + level.replace('_', ' '), '', 'Evidence status: ' + detail['status'] + '.'])
+            if detail.get('answer', {}).get('narrative'):
+                lines.extend(['', detail['answer']['narrative']])
+            elif detail.get('reason'):
+                lines.append(detail['reason'])
+            elif detail.get('error'):
+                lines.append(json.dumps(detail['error'], default=str))
+            context = detail.get('dated_context', {})
+            if context:
+                lines.extend(['', 'Dated market context: ' + context.get('status', 'not_available') + '.', context.get('answer', {}).get('narrative', context.get('reason', ''))])
+    lines.extend(['', '## Controlled method comparison', '', json.dumps(report['comparison'], indent=2), ''])
+    for item in report.get('cross_method_explanations', []):
+        lines.extend(['', '### ' + item['previous_method'] + ' versus ' + item['current_method'], '',
+                      'Controlled inputs aligned: ' + str(item.get('controlled_inputs_aligned')) + '. ' + ', '.join(item.get('alignment_issues', [])), '',
+                      item.get('answer', {}).get('narrative') or json.dumps(item.get('error'), default=str)])
+    lines.extend(['', 'History search: ' + json.dumps(report.get('history_search'), default=str), '', 'Pipeline readiness: ' + json.dumps(report.get('pipeline_readiness'), default=str), '',
+                  report.get('constraint_comparison', ''), '', 'Explanation validation issues: ' + ', '.join(report.get('validation_issues', [])), ''])
+    if report.get('market_timing'):
+        lines.extend(['', '## Report and market timing', '', json.dumps(report['market_timing'], indent=2),
+                      'Reference prices and proposed quantities do not establish fills at any market open.', ''])
+    if report.get('recommendation_context') == 'closed_market_preview':
+        lines.extend(['', 'Closed-market news with the latest completed prices is an informational preview. Training links a completed close to the next actual exchange-session formation; it contains no synthetic weekend transition or weekend fill. Re-run at the next actual session formation before interpreting a regular-session policy action.', ''])
+    if report.get('method_selection_evidence'):
+        lines.extend(['', '## Recorded model comparison evidence', '',
+                      'These records include failed and incomplete experiments. Only completed, evaluated artifacts support model selection or deployment. Compare the same windows, costs, constraints and seeds; reused development/test history is not fresh forward validation.', ''])
+        for context in report['method_selection_evidence']:
+            scope = benchmark_ppo_scope(context)
+            if scope:
+                lines.extend([scope, ''])
+            lines.extend(['Run: ' + context['run_id'] + '; evidence status: ' + context['status'] + '.', '',
+                          context.get('answer', {}).get('narrative') or json.dumps(context.get('error'), default=str), ''])
+    return '\n'.join(lines)
+
+
+def calendar_evidence(now: datetime) -> dict:
+    from finplan_agent.core.market_calendar import evidence
+    return evidence(now)
+
+
+def pipeline_readiness(config: dict, now: datetime, market_date: str | None, news_inputs: list[dict] | None = None) -> dict:
+    calendar = config.get('_calendar_context') or {}
+    issues = []
+    if not calendar:
+        issues.append('exchange_calendar_not_verified')
+    elif market_date != calendar.get('expected_completed_session'):
+        issues.append('latest_expected_completed_prices_not_served')
+    day = now.astimezone(ZoneInfo('America/New_York')).date().isoformat()
+    directory = Path(config.get('news_status_dir', ROOT.parent / '.worktmp/news-backfill/daily-status')).expanduser()
+    candidates = sorted(directory.glob('*/*.json'))
+    marker = None
+    for candidate in reversed(candidates):
+        try:
+            document = json.loads(candidate.read_text())
+            if document.get('decision_session', '') <= day:
+                marker = {'path': str(candidate), **document}
+                break
+        except (OSError, ValueError):
+            continue
+    numeric = [row for row in news_inputs or [] if row.get('source_kind') == 'GDELT_released_numeric_machine_metadata' and row.get('consumed')]
+    gdelt_markers = sorted(Path(config.get('gdelt_status_dir', ROOT.parent / '.worktmp/gdelt-daily-v1/daily-status')).expanduser().glob('*/*.json'))
+    gdelt_marker = None
+    for path in reversed(gdelt_markers):
+        try:
+            document = json.loads(path.read_text())
+            if document.get('decision_session', '') <= day:
+                gdelt_marker = {'path': str(path), **document}
+                break
+        except (OSError, ValueError):
+            continue
+    for row in numeric:
+        if not row.get('central_available_at') or row.get('availability_mode') != 'platform':
+            issues.append('numeric_news_central_availability_not_verified')
+        try:
+            formed = datetime.fromisoformat(str(row.get('decision_cutoff') or '').replace('Z', '+00:00'))
+            if formed.tzinfo is None or formed.astimezone(ZoneInfo('America/New_York')).date().isoformat() != day or formed > now:
+                issues.append('numeric_news_decision_cutoff_not_current')
+            central = datetime.fromisoformat(str(row.get('central_available_at') or '').replace('Z', '+00:00'))
+            if central.tzinfo is None or central > formed:
+                issues.append('numeric_news_central_availability_after_decision')
+        except (KeyError, TypeError, ValueError):
+            issues.append('numeric_news_timestamps_not_verified')
+        lag = row.get('source_availability_lag_hours')
+        limit = row.get('max_source_age_hours')
+        if lag is None or lag < 0 or (limit is not None and lag > limit):
+            issues.append('numeric_news_source_lag_outside_declared_limit')
+        window_lag, window_limit = row.get('source_window_lag_hours'), row.get('max_window_age_hours')
+        if window_lag is not None and (window_lag < 0 or (window_limit is not None and window_lag > window_limit)):
+            issues.append('numeric_news_window_lag_outside_declared_limit')
+    if calendar.get('is_trading_session') and not numeric:
+        if not marker or marker.get('decision_session') != day:
+            issues.append('today_news_collector_marker_missing')
+        elif not marker.get('all_profiles_published'):
+            issues.append('today_news_profiles_not_all_published')
+    return {'exchange_calendar': calendar, 'served_completed_session': market_date, 'news_collection': marker,
+            'numeric_model_inputs': numeric, 'numeric_collection_marker': gdelt_marker,
+            'numeric_marker_scope': 'Local capture only; model provenance.central_available_at establishes central availability.',
+            'paid_headline_scope': 'Separate research collection, not proof of numeric GDELT actor input.',
+            'new_collection_expected': calendar.get('is_trading_session'), 'issues': sorted(set(issues)),
+            'meaning': 'Collection publication and training eligibility differ from each model actual feature consumption.'}
+
+
+def next_exchange_open(at: datetime) -> datetime:
+    from finplan_agent.core.market_calendar import calendar, session
+    document = calendar()
+    local_zone = ZoneInfo(document['timezone'])
+    day = at.astimezone(local_zone).date()
+    while True:
+        row = session(day)
+        if row['status'] in ('regular', 'early_close'):
+            opening = datetime.combine(day, time.fromisoformat(row.get('open') or document['regular_open']), tzinfo=local_zone).astimezone(UTC)
+            if opening > at:
+                return opening
+        day += timedelta(days=1)
+
+
+def market_timing(report: dict, completed_at: datetime) -> dict:
+    """Distinguish model formation from report delivery and real future opens."""
+    result = {'report_started_at': report['generated_at'], 'report_completed_at': completed_at.isoformat(),
+              'next_actual_exchange_open': next_exchange_open(completed_at).isoformat(),
+              'execution_status': 'advisory_only_no_fills', 'methods': []}
+    for item in report['methods']:
+        rec = item.get('recommendation') or {}
+        cutoff = (item.get('news_input_summary') or {}).get('decision_cutoff') or rec.get('decision_at')
+        if not cutoff:
+            continue
+        try:
+            formed = datetime.fromisoformat(cutoff.replace('Z', '+00:00'))
+            if formed.tzinfo is None:
+                raise ValueError('formation cutoff lacks timezone')
+            intended = next_exchange_open(formed)
+            result['methods'].append({'method': item['method'], 'declared_formation_cutoff': cutoff,
+                                      'next_exchange_open_after_formation': intended.isoformat(),
+                                      'report_completed_before_that_open': completed_at < intended})
+        except ValueError:
+            result['methods'].append({'method': item['method'], 'declared_formation_cutoff': cutoff,
+                                      'timing_status': 'not_verified'})
+    return result
+
+
+def main() -> int:
+    import boto3
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', type=Path, required=True)
+    args = parser.parse_args()
+    os.umask(0o077)
+    if args.config.stat().st_mode & 0o077:
+        raise ValueError('report configuration must be private (chmod 600)')
+    config = json.loads(args.config.read_text())
+    if config.get('environment') != 'beta':
+        raise ValueError('this operator workflow is beta only')
+    now = datetime.now(UTC)
+    try:
+        config['_calendar_context'] = calendar_evidence(now)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        config['_calendar_context'] = {}
+    day = now.astimezone(ZoneInfo('America/New_York')).date().isoformat()
+    report_root = Path(config['output_dir']).expanduser()
+    report_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    report_root.chmod(0o700)
+    output = report_root / day
+    output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    output.chmod(0o700)
+    with (output / 'run.lock').open('w') as lock:
+        os.fchmod(lock.fileno(), 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        attempt = output / 'attempts' / uuid.uuid4().hex
+        try:
+            reader = HostedReader(boto3.Session(region_name=config.get('region', 'us-east-2')), config, attempt)
+        except Exception as error:
+            # Preserve daily readiness even when authentication/SSM is unavailable.
+            # Exception text can contain request details; retain only the class and HTTP status.
+            detail = {'code': 'HOSTED_INITIALIZATION_UNAVAILABLE', 'error_type': type(error).__name__}
+            if isinstance(error, urllib.error.HTTPError):
+                detail['http_status'] = error.code
+            reader = UnavailableReader(detail, attempt)
+        report = generate(reader, config, now)
+        report['method_selection_evidence'] = []
+        for run_id in config.get('method_selection_run_ids', []):
+            result = reader.call('source-experiment-' + run_id, 'get_experiment_result', {'run_id': run_id})
+            report['method_selection_evidence'].append({'run_id': run_id, **result})
+        report['market_timing'] = market_timing(report, datetime.now(UTC))
+        report['receipts_directory'] = str(attempt)
+        frozen = sanitize(report)
+        rendered = markdown(report)
+        private_json(attempt / 'report.json', frozen)
+        private_text(attempt / 'report.md', rendered)
+        private_json(output / 'report.json', frozen)
+        private_text(output / 'report.md', rendered)
+        private_text(output.parent / 'latest.md', rendered)
+        private_json(output.parent / 'latest.json', {'date': day, 'status': report['status'],
+            'report': str(output / 'report.md'), 'frozen_report': str(attempt / 'report.md'),
+            'frozen_json': str(attempt / 'report.json'), 'generated_at': report['generated_at']})
+        print(json.dumps({'status': report['status'], 'report': str(output / 'report.md'), 'methods': {row['method']: row['status'] for row in report['methods']}}))
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

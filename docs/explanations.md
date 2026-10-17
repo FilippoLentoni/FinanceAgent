@@ -9,7 +9,7 @@ evidence and the narrative, the three workflows, and the modeled-effect disclaim
 Every number in an explanation comes from an **evidence artifact computed by a deterministic tool or
 FinanceModel job** and referenced by a contract trusted reference (`core/v1/artifact-ref.json`, kind
 `explanation_evidence`, with `checksum`). The agent and the explanation provider (Amazon Bedrock, or the
-fixture provider in CI and beta) never compute financial figures. The narrative is a separate field,
+fixture provider in CI) never compute financial figures. The narrative is a separate field,
 written after the evidence is final and checked deterministically against it.
 
 > **Disclaimer (fixed text, appended whenever a result carries `modeled_effect`):** Attributions,

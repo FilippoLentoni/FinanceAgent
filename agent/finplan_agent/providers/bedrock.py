@@ -32,6 +32,7 @@ from typing import Any
 from ..config.provider import ProviderConfig
 from ..core.errors import AgentError
 from .base import GenerateRequest, GenerateResult, ToolCall, Usage, estimate_tokens
+from .visible_text import VisibleText, visible_text
 
 __all__ = ["BedrockProvider", "to_converse_messages", "to_tool_config", "map_bedrock_error"]
 
@@ -173,7 +174,7 @@ class BedrockProvider:
         content = resp.get("output", {}).get("message", {}).get("content", [])
         text = "".join(b.get("text", "") for b in content if "text" in b)
         calls = [ToolCall(id=b["toolUse"]["toolUseId"], name=b["toolUse"]["name"], arguments=dict(b["toolUse"].get("input") or {})) for b in content if "toolUse" in b]
-        return self._result(text, calls, self._usage(resp.get("usage")), str(resp.get("stopReason", "end_turn")))
+        return self._result(visible_text(text), calls, self._usage(resp.get("usage")), str(resp.get("stopReason", "end_turn")))
 
     def _from_stream(self, stream: Any, on_token: Callable[[str], None]) -> GenerateResult:
         text: list[str] = []
@@ -181,6 +182,7 @@ class BedrockProvider:
         current: dict[str, Any] | None = None
         usage = Usage()
         stop = "end_turn"
+        visible = VisibleText()
         for event in stream:
             if "contentBlockStart" in event:
                 start = event["contentBlockStart"].get("start", {})
@@ -189,8 +191,10 @@ class BedrockProvider:
             elif "contentBlockDelta" in event:
                 delta = event["contentBlockDelta"].get("delta", {})
                 if "text" in delta:
-                    text.append(delta["text"])
-                    on_token(delta["text"])
+                    token = visible.feed(delta["text"])
+                    if token:
+                        text.append(token)
+                        on_token(token)
                 elif "toolUse" in delta and current is not None:
                     current["input"] += delta["toolUse"].get("input", "")
             elif "contentBlockStop" in event:
@@ -207,6 +211,7 @@ class BedrockProvider:
                     if err in event:
                         name = err[0].upper() + err[1:]
                         raise map_bedrock_error(_StreamError(name), self.model_id)
+        visible.finish()
         return self._result("".join(text), calls, usage, stop)
 
 

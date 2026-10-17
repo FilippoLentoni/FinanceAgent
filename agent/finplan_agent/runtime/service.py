@@ -78,6 +78,9 @@ class Deps:
     #: Re-reads the provider configuration (SSM) so a model change applies without a restart.
     provider_loader: Callable[[], tuple[ProviderConfig, ExplanationProvider]] | None = None
     provider_refresh_seconds: float = 60.0
+    durable_activity: bool = False
+    #: Approved per-caller brokerage reader; absent until separate OAuth activation.
+    brokerage_client_factory: Callable[[Caller], Any] | None = None
 
 
 class AgentService:
@@ -89,7 +92,9 @@ class AgentService:
             deps.explanation_settings = load_explanation_settings(deps.settings.repo_config)
         self._catalog: tuple[float, ToolCatalog] | None = None
         self._lock = threading.Lock()
-        self._provider_loaded_at = time.monotonic()
+        # Health checks can start the process before release publishing updates SSM.
+        # Refresh on the first user request, including describe, then use the TTL.
+        self._provider_loaded_at = float("-inf")
 
     # ------------------------------------------------------------------ construction
     @classmethod
@@ -112,13 +117,14 @@ class AgentService:
         gw = settings.gateway
 
         def tool_client(caller: Caller) -> ToolClient:
-            return GatewayMcpClient(
-                settings.gateway_url or "",
-                lambda: caller.bearer,
-                protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
-                timeout_seconds=float(gw.get("request_timeout_seconds", 60)),
-                max_response_bytes=int(gw.get("max_response_bytes", 262144)),
-            )
+            def gateway(url: str, *, forward_identity: bool = False) -> GatewayMcpClient:
+                return GatewayMcpClient(url, lambda: caller.bearer, forward_identity=forward_identity, protocol_version=str(gw.get("mcp_protocol_version", "2025-11-25")),
+                                        timeout_seconds=float(gw.get("request_timeout_seconds", 60)), max_response_bytes=int(gw.get("max_response_bytes", 262144)))
+            primary = gateway(settings.gateway_url or "", forward_identity=True)
+            if not settings.classical_gateway_url:
+                return primary
+            from ..tools.portfolio import PortfolioMcpClient
+            return PortfolioMcpClient(primary, gateway(settings.classical_gateway_url, forward_identity=True))
 
         def sink(usage: dict[str, Any]) -> None:
             put_usage(
@@ -128,7 +134,14 @@ class AgentService:
                 ),
             )
 
+        from ..skills import load_skills
+        skills, skill_instructions = load_skills()
+        import os
+        from ..brokerage.gateway import BrokerageGatewayReader
+        brokerage_url=os.environ.get("FINPLAN_BROKERAGE_GATEWAY_URL")
         deps = Deps(
+            skills=skills,
+            stable_instructions=skill_instructions,
             settings=settings,
             provider_config=provider_config,
             provider=provider,
@@ -141,6 +154,8 @@ class AgentService:
             usage_sink=sink,
             explanation_settings=load_explanation_settings(settings.repo_config, ssm, settings.ssm.explanation_limits),
             provider_loader=lambda: _load_provider(settings.environment, ssm),
+            durable_activity=True,
+            brokerage_client_factory=(lambda caller: BrokerageGatewayReader(brokerage_url,lambda:caller.bearer)) if brokerage_url else None,
         )
         return cls(deps)
 
@@ -174,6 +189,7 @@ class AgentService:
             return self._catalog[1]
 
     def describe(self) -> dict[str, Any]:
+        self.refresh_provider()
         s = self.deps.settings
         return {
             "type": "describe",
@@ -209,9 +225,12 @@ class AgentService:
             catalog=self.catalog(),
             session_id=session_id,
             stable_instructions=self.deps.stable_instructions,
+            skills=self.deps.skills,
             on_usage=on_usage,
             on_spend=getattr(spend, "record_local", None),
             explanations=self.deps.explanation_settings,
+            durable_activity=self.deps.durable_activity,
+            brokerage=self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None,
         )
 
     def _final(self, config: dict[str, Any], session_id: str, correlation_id: str) -> dict[str, Any]:
@@ -222,7 +241,7 @@ class AgentService:
         if snap.interrupts:
             status = "awaiting_confirmation"
             confirmation = snap.interrupts[0].value
-        evidence = [{k: v for k, v in r.items() if k in ("id", "tool", "ok", "summary", "error", "declined")} for r in st.get("tool_results") or []]
+        evidence = [{k: v for k, v in r.items() if k in ("id", "tool", "ok", "summary", "error", "declined", "gateway")} for r in st.get("tool_results") or []]
         return {
             "type": "final",
             "session_id": session_id,
@@ -233,7 +252,14 @@ class AgentService:
                 "narrative_status": "pending_confirmation" if confirmation else st.get("narrative_status", "not_needed"),
                 "evidence": evidence,
                 "claim_check": st.get("claim_check") or {},
+                "skills_used": st.get("skills_used") or [],
                 "explanation": st.get("explanation_result"),
+                "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in st.get("tool_results") or [] if r.get("ok") and r.get("result", {}).get("recommendation")),None),
+                "portfolio_decisions": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and (r["result"].get("decision_id") or r["result"].get("decision") or r.get("tool") == "list_portfolio_decisions")],
+                "activity_receipt": st.get("activity_receipt"),
+                "etf_research_inputs": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_research_inputs" and isinstance(r.get("result"), dict)],
+                "brokerage_connection_status": next((r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_connection_status"), None),
+                "portfolio_analyses": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and r["result"].get("analysis_id")],
             },
             "confirmation": confirmation,
             "in_progress": st.get("in_progress"),
@@ -312,6 +338,11 @@ class AgentService:
             raise AgentError("PRECONDITION_FAILED", "a confirmation is pending in this session; answer it with action confirm first")
         prompt = payload.get("prompt")
         tool_request = payload.get("tool_request")
+        recommendation = payload.get("recommendation")
+        if recommendation is not None:
+            if not isinstance(recommendation, dict) or tool_request is not None or payload.get("explanation") is not None:
+                raise AgentError.validation("recommendation must be an object and cannot be combined with another workflow", pointer="/recommendation")
+            tool_request = {"name":"recommend_portfolio", "arguments":recommendation}
         explanation = payload.get("explanation")
         if explanation is not None and not isinstance(explanation, dict):
             raise AgentError.validation("explanation must be an object", pointer="/explanation")
