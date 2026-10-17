@@ -27,17 +27,18 @@ from ..core.errors import AgentError
 from ..core.ids import idempotency_key
 from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec, Usage, text_of
 from ..providers.fixture import FixtureProvider
-from .claim_check import claim_check
-from .crypto import crypto_plan, render_crypto, TOOLS as CRYPTO_TOOLS
-from .brokerage import connection_plan
-from .etf_news import etf_news_plan, render_etf_news
-from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
-from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
-from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
-from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
-from .lifecycle import lifecycle_plan
-from .improvement import improvement_plan
 from ..skills import provider_tool_specs
+from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
+from .brokerage import connection_plan
+from .claim_check import claim_check
+from .crypto import TOOLS as CRYPTO_TOOLS
+from .crypto import crypto_plan, render_crypto
+from .etf_news import etf_news_plan, render_etf_news
+from .improvement import improvement_plan
+from .lifecycle import lifecycle_plan
+from .policy import SYSTEM_PROMPT, classify_request, tool_call_refusal
+from .portfolio import portfolio_plan, render_portfolio_results, selected_portfolio_skills
+from .recommendations import explanation_requested, recommendation_arguments, recommendation_reference, render_recommendation, render_recommendation_explanation, replay_matches, supplied_state_recommendation, target_cash_value
 from .state import TURN_RESET, AgentContext, AgentState
 
 __all__ = ["start_turn", "route", "plan", "confirm", "tool_call", "narrate", "check_claims", "respond", "compact", "NON_TERMINAL_JOB_STATES"]
@@ -311,6 +312,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
             count += 1
             if outcome.ok and name == "get_etf_research_inputs":
                 from finplan_contracts.validate import validate
+
                 from ..tools.mcp_client import ToolOutcome
                 if not validate(outcome.result, "tools/get-etf-research-inputs-response").valid:
                     outcome = ToolOutcome(tool=name, ok=False, error=AgentError.dependency("ETF research response does not validate against the pinned contract.").to_envelope(state.get("correlation_id", "")))
@@ -320,6 +322,13 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
                     from .activity import activity_history_references
                     result = activity_history_references(result)
                 kept, summary = compact(result, 65536 if name in CRYPTO_TOOLS or name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                if name == 'get_experiment_result':
+                    from .experiment_evidence import selection_evidence
+                    reviewed = selection_evidence(result, ctx.max_result_chars)
+                    if reviewed is not None:
+                        summary = reviewed
+                        if kept.get('compacted'):
+                            kept = reviewed
                 entry = {"id": p["id"], "tool": name, "ok": True, "summary": summary, "result": kept, "error": None}
                 content = kept
                 if isinstance(outcome.result, dict) and outcome.result.get("run_id") and outcome.result.get("state") in NON_TERMINAL_JOB_STATES:
