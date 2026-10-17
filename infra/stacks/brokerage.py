@@ -13,13 +13,13 @@ def build_brokerage(stack,identity,env,cfg):
     if not owner or not portfolio or secret!='finplan/beta/financeagent/coinbase-brokerage-readonly':
         raise ValueError('explicit brokerage owner, portfolio and dedicated read-only secret are required')
     prefix=f'finplan-{env}-financeagent-brokerage'
-    secret_arn=f'arn:{Aws.PARTITION}:secretsmanager:{Aws.REGION}:{Aws.ACCOUNT_ID}:secret:{secret}-??????'
+    secret_arn=Fn.join('',['arn:',Aws.PARTITION,':secretsmanager:',Aws.REGION,':',Aws.ACCOUNT_ID,':secret:',secret,'-??????'])
     function_name=prefix+'-read'
     group_name='/aws/lambda/'+function_name
     role=iam.Role(stack,'BrokerageReadRole',role_name=prefix+'-read-role',assumed_by=iam.ServicePrincipal('lambda.amazonaws.com'),
         inline_policies={'read-only':iam.PolicyDocument.from_json({'Version':'2012-10-17','Statement':[
             {'Effect':'Allow','Action':['secretsmanager:GetSecretValue'],'Resource':[secret_arn]},
-            {'Effect':'Allow','Action':['logs:CreateLogStream','logs:PutLogEvents'],'Resource':[f'arn:{Aws.PARTITION}:logs:{Aws.REGION}:{Aws.ACCOUNT_ID}:log-group:{group_name}:*']}]})})
+            {'Effect':'Allow','Action':['logs:CreateLogStream','logs:PutLogEvents'],'Resource':[Fn.join('',['arn:',Aws.PARTITION,':logs:',Aws.REGION,':',Aws.ACCOUNT_ID,':log-group:',group_name,':*'])]}]})})
     tag_role(role,'brokerage-read-lambda')
     group=logs.CfnLogGroup(stack,'BrokerageReadLogs',log_group_name=group_name,retention_in_days=30)
     tag_role(group,'brokerage-read-lambda')
@@ -32,7 +32,7 @@ def build_brokerage(stack,identity,env,cfg):
     function.add_dependency(group)
     function.add_metadata('logical-role','brokerage-read-lambda')
     gateway_role=iam.Role(stack,'BrokerageGatewayRole',role_name=prefix+'-gateway-role',assumed_by=iam.ServicePrincipal('bedrock-agentcore.amazonaws.com',conditions={
-        'StringEquals':{'aws:SourceAccount':Aws.ACCOUNT_ID},'ArnLike':{'aws:SourceArn':f'arn:{Aws.PARTITION}:bedrock-agentcore:{Aws.REGION}:{Aws.ACCOUNT_ID}:gateway/{prefix}-gateway-*'}}),
+        'StringEquals':{'aws:SourceAccount':Aws.ACCOUNT_ID},'ArnLike':{'aws:SourceArn':Fn.join('',['arn:',Aws.PARTITION,':bedrock-agentcore:',Aws.REGION,':',Aws.ACCOUNT_ID,':gateway/',prefix,'-gateway-*'])}}),
         inline_policies={'invoke-read-only':iam.PolicyDocument.from_json({'Version':'2012-10-17','Statement':[{'Effect':'Allow','Action':['lambda:InvokeFunction'],'Resource':[function.attr_arn]}]})})
     tag_role(gateway_role,'brokerage-read-gateway')
     gateway=ac.CfnGateway(stack,'BrokerageGateway',name=prefix+'-gateway',description='Owner-authenticated View-only Coinbase ETF discovery; no trading tools',
