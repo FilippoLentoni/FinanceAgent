@@ -57,6 +57,9 @@ def invoke_graph(arguments: dict[str, Any], capture_before: Callable[[dict[str, 
     check_public(final)
     final["latency_seconds"] = time.monotonic() - start
     final["framework"] = "langgraph"
+    usage = final.get("usage") or {}
+    final["usage"] = {**usage, "cost_usd": usage.get("estimated_cost_usd"),
+                      "cost_basis": "estimated_from_reported_provider_tokens_and_configured_rates" if usage.get("estimated_cost_usd") is not None else "not_available"}
     recommendation = (final.get("answer") or {}).get("recommendation")
     if isinstance(recommendation, dict) and isinstance(recommendation.get("target_weights"), list) and recommendation.get("cash_weight") is not None:
         final["target_weights"] = recommendation["target_weights"]

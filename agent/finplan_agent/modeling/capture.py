@@ -86,7 +86,11 @@ class InputCapture:
                 # GenerateResult.text is the adapter's visible final text. Never raw provider reasoning.
                 output = {"text": result.text, "tool_calls": [asdict(c) for c in result.tool_calls],
                           "usage": result.usage_record(), "stop_reason": result.stop_reason}
-                check_public(output)
+                try:
+                    check_public(output)
+                except AgentError:
+                    item.update(status="failed", error_code="CREDENTIAL_OUTPUT_REJECTED")
+                    raise
                 item.update(status="completed", output=copy.deepcopy(output))
                 return result
 
@@ -111,7 +115,11 @@ class InputCapture:
                     item.update(status="failed", error_code=getattr(exc, "code", type(exc).__name__))
                     raise
                 output = {"ok": result.ok, "result": result.result, "error": result.error}
-                check_public(output)
+                try:
+                    check_public(output)
+                except AgentError:
+                    item.update(status="failed", error_code="CREDENTIAL_OUTPUT_REJECTED")
+                    raise
                 item.update(status="completed" if result.ok else "failed", output=copy.deepcopy(output))
                 return result
 

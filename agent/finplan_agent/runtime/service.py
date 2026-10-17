@@ -335,6 +335,8 @@ class AgentService:
                     if not result.ok:
                         raise AgentError.dependency("Could not durably capture graph input before invocation", reason=(result.error or {}).get("code", "CAPTURE_UNAVAILABLE"))
                     receipt = result.result or {}
+                    if not receipt.get("activity_event_id") or not str(receipt.get("checksum", "")).startswith("sha256:"):
+                        raise AgentError.dependency("Graph capture returned no immutable receipt", reason="CAPTURE_RECEIPT_MISSING")
                     return {k: receipt[k] for k in ("activity_event_id", "checksum", "recorded_at") if k in receipt}
 
                 capture.sink = persist_input
