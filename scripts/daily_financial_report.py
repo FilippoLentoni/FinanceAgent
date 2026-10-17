@@ -274,7 +274,18 @@ def generate(reader, config: dict, now: datetime) -> dict:
                           'portfolio_id': pid, 'previous_decision_id': first['decision_id'], 'current_decision_id': item['decision_id']})})
     report['cross_method_explanations'] = cross
     report['pipeline_readiness'] = pipeline_readiness(config, now, report['reference_market_date'])
-    report['status'] = 'complete' if (report['methods'] and all(item['status'] == 'available' for item in report['methods']) and not report['pipeline_readiness']['issues']) else 'partial_readiness'
+    validation_issues = [] if history['status'] == 'available' else ['history_tool_unavailable']
+    for item in report['methods']:
+        if not item.get('decision_id'):
+            continue
+        for level in ('1_recommendation', '3_realization_and_context'):
+            if item['explainability'][level]['status'] != 'available':
+                validation_issues.append(item['method'] + ':' + level + '_tool_unavailable')
+    if any(item['status'] != 'available' for item in cross):
+        validation_issues.append('cross_method_explanation_tool_unavailable')
+    report['validation_issues'] = validation_issues
+    report['status'] = 'complete' if (report['methods'] and all(item['status'] == 'available' for item in report['methods'])
+        and not report['pipeline_readiness']['issues'] and not validation_issues) else 'partial_readiness'
     return report
 
 
@@ -326,7 +337,7 @@ def markdown(report: dict) -> str:
                       'Controlled inputs aligned: ' + str(item.get('controlled_inputs_aligned')) + '. ' + ', '.join(item.get('alignment_issues', [])), '',
                       item.get('answer', {}).get('narrative') or json.dumps(item.get('error'), default=str)])
     lines.extend(['', 'Pipeline readiness: ' + json.dumps(report.get('pipeline_readiness'), default=str), '',
-                  report.get('constraint_comparison', ''), ''])
+                  report.get('constraint_comparison', ''), '', 'Explanation validation issues: ' + ', '.join(report.get('validation_issues', [])), ''])
     return '\n'.join(lines)
 
 

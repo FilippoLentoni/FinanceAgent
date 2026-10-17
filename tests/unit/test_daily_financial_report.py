@@ -132,3 +132,17 @@ def test_invalid_producer_state_still_renders_a_readiness_report(recommendation,
     assert all(item['status'] == 'not_ready' for item in report['methods'])
     assert 'not_verified' in markdown(report)
     assert report['comparison']['status'] == 'not_available'
+
+
+def test_explanation_transport_failure_prevents_complete_status(recommendation, tmp_path):
+    reader = Reader(recommendation)
+    original = reader.call
+    def call(label, tool, args):
+        if tool == 'explain_portfolio_decision':
+            return {'status': 'not_available', 'error': {'code': 'DEPENDENCY_UNAVAILABLE'}, 'receipt': label}
+        return original(label, tool, args)
+    reader.call = call
+    report = generate(reader, config(recommendation, tmp_path), NOW)
+    assert all(item['status'] == 'available' for item in report['methods'])
+    assert report['status'] == 'partial_readiness'
+    assert len(report['validation_issues']) == 4
