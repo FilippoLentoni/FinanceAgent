@@ -387,3 +387,18 @@ def test_repeated_hosted_activity_reads_keep_bounded_narratives_and_reconstructa
         assert len(saved['narrative'])<7000 and sizes[-1]<14000
     assert events[0]==original
     assert max(sizes[-10:])-min(sizes[-10:])<200
+
+
+def test_hosted_decision_history_preserves_raw_dates_ids_and_pagination(recommendation):
+    """Daily reports need authoritative historical joins, not dates parsed from prose."""
+    svc, tools, _ = setup(recommendation)
+    document = {'decisions': [{'decision_id': OLD, 'portfolio_id': recommendation['portfolio_state']['portfolio_id'],
+                              'algorithm': 'ppo', 'reference_date': '2026-10-07', 'status': 'issued'}],
+                'next_token': 'opaque-history-page'}
+    tools.results['list_portfolio_decisions'] = lambda _: deepcopy(document)
+    result = svc.handle({'tool_request': {'name': 'list_portfolio_decisions', 'arguments': {'limit': 100}},
+                         'stream': False}, auth(), runtime_session_id=SESSION)
+    assert result['status'] == 'completed'
+    assert result['answer']['claim_check']['passed']
+    assert result['answer']['portfolio_decisions'] == [document]
+    assert tools.calls == [('list_portfolio_decisions', {'limit': 100})]

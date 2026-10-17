@@ -327,6 +327,9 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             derived.extend(figures)
         elif name in LIFECYCLE_TOOLS:
             parts.append(render_lifecycle(doc))
+            for key in ("history", "decisions", "snapshots"):
+                if isinstance(doc.get(key), list):
+                    derived.append({"returned_record_count": len(doc[key])})
     workflow = state.get("portfolio_workflow") or {}
     if workflow.get("mode") == "lifecycle_sensitivity":
         parts.insert(0, "Controlled hypothetical sensitivity using the original snapshot, date and frozen holdings. Each alternative changes only its named setting; no holdings update or paid experiment is requested.")

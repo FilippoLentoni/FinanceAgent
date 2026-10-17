@@ -255,7 +255,7 @@ class AgentService:
                 "skills_used": st.get("skills_used") or [],
                 "explanation": st.get("explanation_result"),
                 "recommendation": None if status == "failed" else next((r.get("result",{}).get("recommendation") for r in st.get("tool_results") or [] if r.get("ok") and r.get("result", {}).get("recommendation")),None),
-                "portfolio_decisions": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and (r["result"].get("decision_id") or r["result"].get("decision"))],
+                "portfolio_decisions": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and isinstance(r.get("result"), dict) and (r["result"].get("decision_id") or r["result"].get("decision") or r.get("tool") == "list_portfolio_decisions")],
                 "activity_receipt": st.get("activity_receipt"),
                 "etf_research_inputs": [r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_research_inputs" and isinstance(r.get("result"), dict)],
                 "brokerage_connection_status": next((r["result"] for r in st.get("tool_results") or [] if r.get("ok") and r.get("tool") == "get_etf_connection_status"), None),

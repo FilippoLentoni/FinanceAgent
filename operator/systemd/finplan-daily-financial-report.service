@@ -1,0 +1,13 @@
+[Unit]
+Description=Read-only daily financial recommendation and explainability report
+After=network-online.target finplan-etf-news.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ec2-user/projects/FinanceAgent
+ExecStart=/home/ec2-user/projects/FinanceAgent/.venv/bin/python /home/ec2-user/projects/FinanceAgent/scripts/daily_financial_report.py --config /home/ec2-user/.finplan/daily-financial-report.json
+Environment=PYTHONUNBUFFERED=1
+UMask=0077
+TimeoutStartSec=3600
+NoNewPrivileges=true
