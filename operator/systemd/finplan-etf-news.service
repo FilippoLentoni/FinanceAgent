@@ -9,5 +9,5 @@ WorkingDirectory=/home/ec2-user/projects/FinanceAgent
 ExecStart=/home/ec2-user/projects/FinanceAgent/.venv/bin/python /home/ec2-user/projects/FinanceAgent/scripts/paid_news_cycle.py
 Environment=TMPDIR=/home/ec2-user/projects/.worktmp/pytest-tmp
 UMask=0077
-TimeoutStartSec=240
+TimeoutStartSec=480
 NoNewPrivileges=true

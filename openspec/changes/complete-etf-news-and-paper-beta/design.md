@@ -10,7 +10,7 @@ See proposal.md. Platform beta tests passed, but Model/Tools/Agent beta transiti
 
 ## Decisions
 - Reuse the canonical receipt ledger and its original seven-day expiry; replay publication before enabling recurring purchases. This avoids duplicate spending and resetting limits.
-- Preserve actual central availability and immutable raw/curated evidence. Old news can prove delivery but cannot be relabeled fresh; collect a new fixed-profile sample only inside existing limits if needed for current-input verification.
+- Preserve actual central availability and immutable raw/curated evidence. Shared ETF-market and GOOGL company profiles retain separate symbol scopes and ledger slots. Old news can prove delivery but cannot be relabeled fresh; collect a new fixed-profile sample only inside existing limits if needed for current-input verification.
 - Release platform → model → tools → agent using recorded pipeline execution identities and explicit beta dependency barriers. Stop each verified execution before Gamma and restore its original transitions; builds alone do not imply release completion.
 - Implement brokerage access as a narrowly scoped Agent-owned read-only Gateway boundary, with an exact secret permission and explicit caller binding. It remains independent from payment credentials and has no order routes.
 - FinanceModel's coordinated change owns a reproducible matched experiment runner and separate $100 paper simulation. Historical news performance is ineligible without point-in-time coverage and rights; prospective comparisons record actual observations without claiming alpha.

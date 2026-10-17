@@ -9,6 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'agent')]
 from finplan_agent.payments.execution import PrivateLedger
 from finplan_agent.payments.news_trial import CONFIG, CAP
+from finplan_agent.payments.news_publication import PROFILE_SYMBOLS
 from scripts.paid_news_trial import DIRECTORY
 from scripts.publish_paid_news import publish
 
@@ -41,7 +42,7 @@ def cycle(*,now=None):
     # Retry publication from its frozen request without another merchant purchase.
     for path in sorted(DIRECTORY.glob('*.json')):
         record=json.loads(path.read_text())
-        if record.get('profile')=='ETF_MARKET' and record.get('status')=='received_unvalidated' and not record.get('central_import_response'):
+        if record.get('profile') in PROFILE_SYMBOLS and record.get('status')=='received_unvalidated' and not record.get('central_import_response'):
             publish(path.stem)
     if not market_open(now):
         return {'status':'market_closed','purchases':0}
@@ -49,24 +50,27 @@ def cycle(*,now=None):
     if reserved>=CAP:
         stop_timer()
         return {'status':'cap_exhausted','purchases':0}
-    slot=now.strftime('%Y%m%d%H')+'-ETF_MARKET'
+    receipts=[]
     import hashlib
-    identifier=hashlib.sha256(slot.encode()).hexdigest()[:32]
-    if ledger.path(identifier).exists():
-        return {'status':'slot_already_reserved','purchases':0}
-    try:
-        result=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/paid_news_trial.py'),'collect','--asset','ETF_MARKET'],capture_output=True,text=True,timeout=150)
-    except subprocess.TimeoutExpired:
-        stop_timer()
-        return {'status':'collection_stopped','reason':'unknown_outcome_requires_reconciliation'}
-    if result.returncode:
-        # Funding, project budget and uncertain outcomes all require operator review.
-        # Never keep automatically invoking the payment path after a failed attempt.
-        stop_timer()
-        return {'status':'collection_stopped','reason':'preflight_or_collection_failed_requires_review'}
-    data=json.loads(result.stdout)
-    publish(data['receipt_id'])
-    return {'status':'collected_and_published','receipt_id':data['receipt_id'],'reserved_usd':data['reserved_usd']}
+    for profile in PROFILE_SYMBOLS:
+        slot=now.strftime('%Y%m%d%H')+'-'+profile
+        identifier=hashlib.sha256(slot.encode()).hexdigest()[:32]
+        if ledger.path(identifier).exists():
+            continue
+        try:
+            result=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/paid_news_trial.py'),'collect','--asset',profile],capture_output=True,text=True,timeout=150)
+        except subprocess.TimeoutExpired:
+            stop_timer()
+            return {'status':'collection_stopped','reason':'unknown_outcome_requires_reconciliation','receipts':receipts}
+        if result.returncode:
+            # Funding, project budget and uncertain outcomes all require review.
+            stop_timer()
+            return {'status':'collection_stopped','reason':'preflight_or_collection_failed_requires_review','receipts':receipts}
+        data=json.loads(result.stdout)
+        publish(data['receipt_id'])
+        receipts.append({'profile':profile,'receipt_id':data['receipt_id'],'reserved_usd':data['reserved_usd']})
+    return {'status':'collected_and_published' if receipts else 'slots_already_reserved','receipts':receipts}
+
 
 
 if __name__=='__main__':

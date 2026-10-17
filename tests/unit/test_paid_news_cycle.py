@@ -47,3 +47,18 @@ def test_failed_collection_disables_recurring_attempts_and_preserves_reservation
     monkeypatch.setattr(cycle.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=1,stdout=''))
     assert cycle.cycle(now=now)['status']=='collection_stopped'
     assert stopped==[True] and ledger.read('2'*32)['status']=='delivery_unknown'
+
+
+def test_market_slot_collects_separate_fixed_market_and_company_profiles(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,15,15,tzinfo=UTC)
+    ledger.write(CONFIG,{'started_at':now.isoformat(),'expires_at':(now+timedelta(days=7)).isoformat()})
+    monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
+    collected=[];published=[]
+    def run(args,**kwargs):
+        collected.append(args[-1])
+        return SimpleNamespace(returncode=0,stdout=json.dumps({'receipt_id':str(len(collected))*32,'reserved_usd':'0.011'}))
+    monkeypatch.setattr(cycle.subprocess,'run',run);monkeypatch.setattr(cycle,'publish',published.append)
+    result=cycle.cycle(now=now)
+    assert collected==['ETF_MARKET','GOOGL'] and len(published)==2
+    assert result['status']=='collected_and_published' and len(result['receipts'])==2

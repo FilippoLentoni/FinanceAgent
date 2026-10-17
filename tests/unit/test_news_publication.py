@@ -44,3 +44,10 @@ def test_unverified_deliveries_cannot_be_published(change):
 def test_collector_never_asserts_training_rights():
     rights={**RIGHTS,'status':'research_and_training'}
     with pytest.raises(ValueError):publication(receipt(),rights=rights)
+
+
+def test_company_news_cannot_be_relabelled_as_etf_news():
+    record=receipt();record['profile']='GOOGL'
+    result=publication(record,rights=RIGHTS)
+    assert result['symbols']==['GOOGL'] and result['payload']['records'][0]['symbols']==['GOOGL']
+    with pytest.raises(ValueError):publication(record,rights=RIGHTS,symbols=('VOO',))

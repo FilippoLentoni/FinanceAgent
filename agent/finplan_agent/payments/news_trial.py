@@ -24,6 +24,7 @@ PROFILES = {
     'BTC': 'BTC cryptocurrency market news',
     'ETH': 'ETH cryptocurrency market news',
     'ETF_MARKET': 'Latest US ETF market news S&P 500 bond yields Federal Reserve inflation international equities',
+    'GOOGL': 'Latest Alphabet Google GOOGL stock financial earnings business market news',
 }
 
 

@@ -16,9 +16,16 @@ def checksum(value):
     return 'sha256:' + hashlib.sha256(canonical(value)).hexdigest()
 
 
-def publication(record, *, rights, symbols=('SPY', 'VOO')):
-    if record.get('profile') != 'ETF_MARKET' or record.get('status') != 'received_unvalidated' or record.get('http_status') != 200:
-        raise ValueError('only delivered ETF search metadata can be published')
+PROFILE_SYMBOLS={'ETF_MARKET':('SPY','VOO'),'GOOGL':('GOOGL',)}
+
+
+def publication(record, *, rights, symbols=None):
+    expected=PROFILE_SYMBOLS.get(record.get('profile'))
+    if not expected or record.get('status') != 'received_unvalidated' or record.get('http_status') != 200:
+        raise ValueError('only delivered approved financial search metadata can be published')
+    if symbols is not None and tuple(symbols)!=expected:
+        raise ValueError('publication instrument scope must match its fixed query profile')
+    symbols=expected
     response = base64.b64decode(record['response_base64'], validate=True)
     if 'sha256:' + hashlib.sha256(response).hexdigest() != record['response_checksum']:
         raise ValueError('private delivery integrity failure')
