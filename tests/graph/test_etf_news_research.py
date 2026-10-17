@@ -66,3 +66,13 @@ def test_structured_tool_request_keeps_etf_renderer():
     plan=etf_news_plan(state,SESSION)
     assert plan['workflow']['kind']=='etf_news'
     assert plan['calls'][0].arguments==args
+
+
+def test_google_company_news_uses_explicit_company_scope():
+    state={'messages':[{'role':'user','content':[{'text':'Show Google financial news state features'}]}]}
+    assert etf_news_plan(state,SESSION)['calls'][0].arguments=={'symbols':['GOOGL']}
+
+
+def test_identified_paper_recommendation_keeps_holdings_aware_route():
+    state={'messages':[{'role':'user','content':[{'text':'Recommend VOO and GOOGL with news for portfolio pf_01M53MRYN7TP1PQ8S7CH0NVE1N'}]}]}
+    assert etf_news_plan(state,SESSION) is None

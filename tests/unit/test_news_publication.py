@@ -51,3 +51,16 @@ def test_company_news_cannot_be_relabelled_as_etf_news():
     result=publication(record,rights=RIGHTS)
     assert result['symbols']==['GOOGL'] and result['payload']['records'][0]['symbols']==['GOOGL']
     with pytest.raises(ValueError):publication(record,rights=RIGHTS,symbols=('VOO',))
+
+
+def test_mixed_delivery_curation_preserves_raw_and_payment_identity():
+    from scripts.publish_paid_news import curated_subset
+    document=publication(receipt(),rights=RIGHTS)
+    document['payload']['records'].append({'title':'Unknown date','url':'https://example.org/unknown','published_at':None,'symbols':['SPY','VOO']})
+    original=copy.deepcopy(document)
+    derived=curated_subset(document)
+    assert document==original and len(document['payload']['records'])==2
+    assert len(derived['payload']['records'])==1 and derived['quality_status']=='validated'
+    assert derived['retrieved_at']==document['retrieved_at']
+    assert derived['payment_receipt']==document['payment_receipt'] and derived['receipt_checksum']==document['receipt_checksum']
+    assert derived['payload_checksum']==checksum(derived['payload'])

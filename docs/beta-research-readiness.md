@@ -8,6 +8,8 @@ The coordinated change is `complete-etf-news-and-paper-beta` in FinanceAgent, Fi
 
 The cycle repairs pending publication before buying, preserves slot reservations, and disables recurring attempts on expiry, cap exhaustion, failed preflight or uncertain collection. Operators must reconcile private receipts before manually re-enabling a stopped timer. Central publication can be replayed with `scripts/publish_paid_news.py --receipt ID` without purchasing again. Titles/URLs/publication dates are stored centrally with rights, checksums and actual availability; private signing credentials and payment proofs stay outside repositories.
 
+Mixed-quality deliveries retain the complete quarantined raw manifest. The publisher also freezes a separately identified subset containing only verified publication timestamps, linked by the original receipt checksum, transaction, query and retrieval time. Its central availability is the actual curation publication time. This is one purchase with two immutable processing records, so payment accounting uses the canonical payment ledger/transaction identity rather than summing derived manifests.
+
 ## Measured prerequisites
 
 The original and new ETF samples were each delivered for $0.011 and centrally published. Including the earlier BTC sample, total reserved spending after the separately purchased GOOGL sample is $0.044. Immutable replay, prior-availability exclusion and publisher access denial on unrelated routes passed. A closed-market cycle made zero purchases. These facts prove delivery and central storage, not predictive quality.

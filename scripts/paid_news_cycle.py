@@ -42,7 +42,7 @@ def cycle(*,now=None):
     # Retry publication from its frozen request without another merchant purchase.
     for path in sorted(DIRECTORY.glob('*.json')):
         record=json.loads(path.read_text())
-        if record.get('profile') in PROFILE_SYMBOLS and record.get('status')=='received_unvalidated' and not record.get('central_import_response'):
+        if record.get('profile') in PROFILE_SYMBOLS and record.get('status')=='received_unvalidated' and not record.get('central_publication_complete'):
             publish(path.stem)
     if not market_open(now):
         return {'status':'market_closed','purchases':0}

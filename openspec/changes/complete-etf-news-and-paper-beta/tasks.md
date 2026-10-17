@@ -3,6 +3,7 @@
 ## 1. News publication and collection
 - [x] 1.1 Publish the existing paid ETF receipt; verify central readback, immutable replay, prior-availability exclusion and publisher route isolation.
 - [x] 1.2 Harden and activate the expiring market-session collector; verify tests, installed timer, original expiry and unchanged cumulative spending cap.
+- [x] 1.3 Publish separately scoped GOOGL inputs with mixed-quality curation; verify the complete quarantined raw sample is retained, the valid subset is eligible, and both retain one payment identity without another purchase.
 
 ## 2. Deployed research and simulation
 - [ ] 2.1 Complete upstream beta dependency releases; verify new tool discovery and hosted news, optimizer, PPO and LLM readiness responses.

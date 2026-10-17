@@ -4,11 +4,11 @@ from ..providers.base import ToolCall
 from .recommendations import text_of
 
 TOOL='get_etf_research_inputs'
-SYMBOLS=('SPY','VOO','VTI','QQQ','IWM','DIA','AGG','BND','TLT','GLD','VEA','VWO')
+SYMBOLS=('SPY','VOO','VTI','QQQ','IWM','DIA','AGG','BND','TLT','GLD','VEA','VWO','GOOGL')
 
 
 def etf_news_request(text):
-    has_etf = re.search(r'\betfs?\b',text,re.I) or any(re.search(r'\b'+s+r'\b',text,re.I) for s in SYMBOLS)
+    has_etf = re.search(r'\b(?:etfs?|google|alphabet)\b',text,re.I) or any(re.search(r'\b'+s+r'\b',text,re.I) for s in SYMBOLS)
     return bool(has_etf and re.search(r'\b(?:news|information|state|features?|inputs?|models?|ppo|llm|optimization|optimizer|enrich\w*|research|recommend\w*)\b',text,re.I))
 
 
@@ -16,7 +16,12 @@ def etf_news_plan(state, session_id):
     user=next((m for m in reversed(state.get('messages',[])) if m.get('role')=='user' and any('text' in b for b in m.get('content',[]))),{})
     text=text_of(user)
     explicit=next((b['tool_request'] for b in user.get('content',[]) if isinstance(b.get('tool_request'),dict) and b['tool_request'].get('name')==TOOL),None)
+    # An identified paper-book recommendation must use its actual holdings/profile,
+    # not the standalone feature/sensitivity tool's illustrative equal weights.
+    if explicit is None and re.search(r'\bpf_[A-Z0-9]{26}\b',text) and re.search(r'\brecommend\w*\b',text,re.I):
+        return None
     symbols=[s for s in SYMBOLS if re.search(r'\b'+s+r'\b',text,re.I)]
+    if 'GOOGL' not in symbols and re.search(r'\b(?:google|alphabet)\b',text,re.I):symbols.append('GOOGL')
     if explicit is None and not etf_news_request(text):
         return None
     workflow={'kind':'etf_news','mode':'etf_news'}

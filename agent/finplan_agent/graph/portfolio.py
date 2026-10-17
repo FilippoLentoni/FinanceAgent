@@ -194,6 +194,9 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         parts.append(f"Target cash: {_number(target_cash,2)} USD / {rec['cash_weight']*100:.2f}%. Proposed trades; holdings are unchanged.")
         cfg = rec.get("settings") or rec.get("diagnostics", {}).get("settings", {})
         parts.append("Optimizer assumptions: " + json.dumps(cfg, sort_keys=True) + ".")
+        news=(rec.get('diagnostics') or {}).get('news_evidence') or {}
+        if news.get('consumed'):
+            parts.append('This recommendation incorporates the centrally stored financial-news features under the declared sentiment and uncertainty assumptions. News formation time: '+str(news.get('formation_time','unavailable'))+'. Source and feature checksums are retained in the analysis. This is not evidence of improved returns or a causal news explanation.')
     issued_explanation = doc.get("explanation") if doc.get("source_decision_ref") else None
     if issued_explanation:
         parts.append("Issued decision: " + doc["source_decision_ref"]["decision_id"] + "; status: " + doc.get("decision_status", "not_available") + ".")

@@ -19,6 +19,10 @@ The collector SHALL publish completed receipts idempotently, preserve original a
 - **WHEN** an existing paid receipt is republished
 - **THEN** no new purchase occurs and the immutable central record and availability remain unchanged
 
+#### Scenario: Mixed timestamp quality in company news
+- **WHEN** a delivered company-news sample contains both verifiable and missing publication timestamps
+- **THEN** the complete raw sample remains quarantined and a separately immutable valid subset can be published with the same payment receipt and its own actual availability
+
 #### Scenario: Trial expires or market closes
 - **WHEN** the trial expires, funding is insufficient, the cap is exhausted or the market session is closed
 - **THEN** no paid request is executed
