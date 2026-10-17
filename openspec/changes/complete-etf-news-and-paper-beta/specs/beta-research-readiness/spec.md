@@ -56,7 +56,7 @@ The conference paper SHALL identify deployed versions, verified experiments and 
 - **THEN** the paper records advisory operation and zero live executions
 
 ### Requirement: Pipeline to recommendation exit criterion
-Completion SHALL require purchased news retrieval, central persistence, authenticated hosted LangGraph payload handling and recommendations from PPO and the supported portfolio optimizers that actually consume the new features. Build success, adapter availability and readiness responses alone SHALL NOT satisfy completion.
+Completion SHALL require financial-market news purchased through the AgentCore Payments / Coinbase x402 integration, central persistence, authenticated hosted LangGraph payload handling and recommendations from PPO and all supported portfolio optimizers (minimum variance, mean variance and CVaR) that actually consume the new features. Build success, adapter availability and readiness responses alone SHALL NOT satisfy completion.
 
 #### Scenario: Verify actual model consumption
 - **WHEN** the deployed agent receives a paper recommendation payload
@@ -65,6 +65,13 @@ Completion SHALL require purchased news retrieval, central persistence, authenti
 #### Scenario: Detect a legacy policy bypass
 - **WHEN** an old actor ignores the news or has an incompatible observation space
 - **THEN** the exit criterion fails even if the agent returns an otherwise valid recommendation
+
+### Requirement: Payment-to-source correlation
+Payment receipts SHALL be correlated with actual data-provider records. Coinbase payment infrastructure SHALL NOT be represented as the publisher of third-party news.
+
+#### Scenario: News is purchased through x402
+- **WHEN** AgentCore Payments and Coinbase settle a third-party financial-news purchase
+- **THEN** stored features and recommendation evidence retain both the payment receipt and the actual publisher identity
 
 ### Requirement: Iterate until verified or explicitly blocked
 The implementation workflow SHALL repair code, data and deployment failures and rerun the exit checks until every criterion passes. Missing rights, compatible trained artifacts, funding or historical coverage SHALL remain explicit unmet criteria; the workflow SHALL NOT weaken the criteria or exceed authorized limits.
