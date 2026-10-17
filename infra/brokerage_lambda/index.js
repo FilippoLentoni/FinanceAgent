@@ -45,30 +45,37 @@ function jwt(credential,path,now){
   return message+'.'+crypto.sign('sha256',Buffer.from(message),{key,dsaEncoding:'ieee-p1363'}).toString('base64url');
 }
 async function handler(event,context){
+  let stage='input';
   try{
     if(!event||typeof event!=='object'||Object.keys(event).length!==0)throw new Error('no input arguments permitted');
+    stage='owner_header';
     const headers=context?.clientContext?.custom?.bedrockAgentCorePropagatedHeaders;
     const entries=Object.entries(headers||{}).filter(([k])=>k.toLowerCase()==='x-finplan-user-token');
     if(entries.length!==1)throw new Error('owner token required');
+    stage='owner_authentication';
     const now=Math.floor(Date.now()/1000);
     const jwks=await get(process.env.COGNITO_ISSUER+'/.well-known/jwks.json',{},65536);
     validateClaims(entries[0][1],jwks,now);
     const {SecretsManagerClient,GetSecretValueCommand}=require('@aws-sdk/client-secrets-manager');
     const sm=new SecretsManagerClient({});
+    stage='secret_read';
     const secret=await sm.send(new GetSecretValueCommand({SecretId:process.env.SECRET_ARN}));
     const credential=JSON.parse(secret.SecretString);
     const read=path=>get('https://api.coinbase.com'+path,{Authorization:'Bearer '+jwt(credential,path,now),Accept:'application/json'});
+    stage='key_permissions';
     const permissions=await read(PREFIX+'/key_permissions');
     if(permissions.can_view!==true||permissions.can_trade!==false||permissions.can_transfer!==false||permissions.portfolio_uuid!==process.env.PORTFOLIO_UUID)throw new Error('view-only scoped key required');
+    stage='account_read';
     const accounts=await read(PREFIX+'/accounts?limit=1');
     if((accounts.accounts||[]).some(a=>a.retail_portfolio_id&&a.retail_portfolio_id!==process.env.PORTFOLIO_UUID))throw new Error('account scope mismatch');
+    stage='product_read';
     const product=await read(PREFIX+'/products/'+SPY);const details=product.equity_product_details||{};
     const verified=product.product_id===SPY&&product.product_type==='EQUITY'&&details.ticker==='SPY'&&details.equity_subtype==='EQUITY_PRODUCT_SUBTYPE_ETF';
     return {status:'authenticated',authenticated:true,interface:'agentcore_gateway_advanced_trade_rest',read_tools:['get_etf_connection_status'],live_execution_enabled:false,etf_eligibility_verified:verified,
       etf_catalog:verified?[{ticker:'SPY',product_id:SPY,quote_currency:product.quote_currency_id,asset_type:'ETF',tradable:details.equity_trading_flags?.tradable===true,buy_enabled:details.equity_trading_flags?.buy_enabled===true,sell_enabled:details.equity_trading_flags?.sell_enabled===true}]:[],
       account_read_verified:true,order_permission_verified:false,
       message:verified?'Coinbase View-only brokerage access and SPY ETF catalog metadata were verified through the authenticated AgentCore Gateway. Live execution is disabled; catalog flags do not establish order permission.':'Coinbase View-only brokerage access was verified through the authenticated AgentCore Gateway; ETF classification remains unverified. Live execution is disabled.'};
-  }catch{return {status:'unavailable',authenticated:false,live_execution_enabled:false,etf_eligibility_verified:false,message:'Owner-authenticated read-only brokerage verification failed. No account holdings were inferred and no order was submitted.'};}
+  }catch{console.warn(JSON.stringify({event:'brokerage_read_failed',stage}));return {status:'unavailable',authenticated:false,live_execution_enabled:false,etf_eligibility_verified:false,message:'Owner-authenticated read-only brokerage verification failed. No account holdings were inferred and no order was submitted.'};}
 }
 exports.handler=handler;
 exports.validateClaims=validateClaims;

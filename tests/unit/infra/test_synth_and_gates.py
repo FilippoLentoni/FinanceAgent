@@ -438,3 +438,4 @@ def test_brokerage_gateway_is_beta_only_scoped_and_readonly(templates):
     payload=target['TargetConfiguration']['Mcp']['Lambda']['ToolSchema']['InlinePayload']
     assert len(payload)==1 and payload[0]['Name']=='get_etf_connection_status'
     assert beta['Resources']['Runtime']['Properties']['EnvironmentVariables']['FINPLAN_BROKERAGE_GATEWAY_URL']=={'Fn::GetAtt':['BrokerageGateway','GatewayUrl']}
+    assert beta['Resources']['BrokerageGateway']['Properties']['ProtocolConfiguration']=={'Mcp':{'SupportedVersions':['2025-11-25']}}

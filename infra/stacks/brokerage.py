@@ -36,7 +36,9 @@ def build_brokerage(stack,identity,env,cfg):
         inline_policies={'invoke-read-only':iam.PolicyDocument.from_json({'Version':'2012-10-17','Statement':[{'Effect':'Allow','Action':['lambda:InvokeFunction'],'Resource':[function.attr_arn]}]})})
     tag_role(gateway_role,'brokerage-read-gateway')
     gateway=ac.CfnGateway(stack,'BrokerageGateway',name=prefix+'-gateway',description='Owner-authenticated View-only Coinbase ETF discovery; no trading tools',
-        protocol_type='MCP',authorizer_type='CUSTOM_JWT',role_arn=gateway_role.role_arn,
+        protocol_type='MCP',
+        protocol_configuration=ac.CfnGateway.GatewayProtocolConfigurationProperty(mcp=ac.CfnGateway.MCPGatewayConfigurationProperty(supported_versions=[str((cfg.get('gateway') or {}).get('mcp_protocol_version','2025-11-25'))])),
+        authorizer_type='CUSTOM_JWT',role_arn=gateway_role.role_arn,
         authorizer_configuration=ac.CfnGateway.AuthorizerConfigurationProperty(custom_jwt_authorizer=ac.CfnGateway.CustomJWTAuthorizerConfigurationProperty(discovery_url=identity.discovery_url,allowed_clients=identity.allowed_clients)),
         tags=cfn_tags(env,'brokerage-read-gateway'))
     target=ac.CfnGatewayTarget(stack,'BrokerageReadTarget',gateway_identifier=gateway.attr_gateway_identifier,name='brokerage-read-status',
