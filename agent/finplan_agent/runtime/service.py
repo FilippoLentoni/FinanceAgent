@@ -293,6 +293,7 @@ class AgentService:
         cid = payload.get("correlation_id") if isinstance(payload, dict) and valid_correlation_id(payload.get("correlation_id")) else new_correlation_id()
         stream = not (isinstance(payload, dict) and payload.get("stream") is False)
         session_id: str | None = None
+        capture = None
         try:
             if not isinstance(payload, dict):
                 raise AgentError.validation("the request body must be a JSON object", pointer="")
@@ -300,6 +301,15 @@ class AgentService:
             if action not in ACTIONS:
                 raise AgentError.validation(f"unknown action {action!r}", pointer="/action", allowed=list(ACTIONS))
             caller = caller_from_headers(headers, self.deps.settings.environment)
+            if "capture_inputs" in payload and not isinstance(payload["capture_inputs"], bool):
+                raise AgentError.validation("capture_inputs must be boolean", pointer="/capture_inputs")
+            if payload.get("capture_inputs"):
+                if self.deps.settings.environment != "beta" or "ci_test" not in caller.roles:
+                    raise AgentError("FORBIDDEN", "Input capture is restricted to the beta machine comparison client")
+                if stream or action != "invoke":
+                    raise AgentError.validation("Input capture requires a nonstream invoke", pointer="/capture_inputs")
+                from ..modeling.capture import InputCapture
+                capture = InputCapture()
             if action == "describe":
                 return self.describe()
             session_id = validate_session_id(runtime_session_id or payload.get("session_id") or new_session_id())
@@ -310,6 +320,27 @@ class AgentService:
             open_session(self.deps.ownership, session_id, caller)  # FORBIDDEN before any checkpoint read
             graph_input = self._graph_input(action, payload, config, caller, cid)
             context = self._context(caller, session_id)
+            if capture is not None:
+                import hashlib
+                from ..modeling.capture import canonical
+                original_tools = context.tools
+
+                def persist_input(entry):
+                    result = original_tools.call_tool("record_agent_activity", {
+                        "event_kind": "modeling_input_capture", "session_id": session_id,
+                        "correlation_id": cid, "synthetic": True,
+                        "payload": entry,
+                        "idempotency_key": "input-" + hashlib.sha256(canonical([session_id, cid, len(capture.entries), entry["checksum"]])).hexdigest(),
+                    })
+                    if not result.ok:
+                        raise AgentError.dependency("Could not durably capture graph input before invocation", reason=(result.error or {}).get("code", "CAPTURE_UNAVAILABLE"))
+                    receipt = result.result or {}
+                    return {k: receipt[k] for k in ("activity_event_id", "checksum", "recorded_at") if k in receipt}
+
+                capture.sink = persist_input
+                capture.max_tool_calls = context.guard.config.max_tool_calls_turn
+                context.provider = capture.provider(context.provider)
+                context.tools = capture.tools(context.tools)
         except AgentError as exc:
             final = self._failed(exc, session_id, cid)
             return iter([final]) if stream else final
@@ -319,11 +350,16 @@ class AgentService:
             for item in graph_input:
                 self.graph.invoke(item, config, context=context)
         except AgentError as exc:
-            return self._failed(exc, session_id, cid)
+            final = self._failed(exc, session_id, cid)
         except Exception:  # noqa: BLE001 - never a stack trace to the caller
             log.exception("graph run failed (correlation_id=%s)", cid)
-            return self._failed(AgentError.internal(), session_id, cid)
-        return self._final(config, session_id, cid)
+            final = self._failed(AgentError.internal(), session_id, cid)
+        else:
+            final = self._final(config, session_id, cid)
+        if capture is not None:
+            final["captured_inputs"] = capture.entries
+            final["input_capture_status"] = "captured_at_invocation_boundary"
+        return final
 
     def _graph_input(self, action: str, payload: dict[str, Any], config: dict[str, Any], caller: Caller, cid: str) -> list[Any]:
         snap = self.graph.get_state(config)
