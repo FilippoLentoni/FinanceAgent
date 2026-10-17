@@ -109,3 +109,15 @@ def test_research_coordinates_owned_collection_then_review_and_requires_matching
     (tmp_path / "cycle-receipt.json").write_text(json.dumps({**doc, "experiment_id": "wrong"}))
     with pytest.raises(RuntimeError, match="permanent slot"):
         run_job(cfg, "research", "2026-10-17T22:30:00Z", tmp_path, execute_fn=lambda *a, **k: None)
+
+
+def test_health_rotation_retains_parseable_events_and_permanent_slot_receipts(tmp_path):
+    receipt = tmp_path / "status.json"
+    atomic_json(receipt, {"slot": "permanent", "status": "succeeded"})
+    for n in range(5):
+        jobs.append_health_event(tmp_path, {"cycle": n}, maximum_bytes=1, retained_files=2)
+    assert json.loads((tmp_path / "events.jsonl").read_text()) == {"cycle": 4}
+    assert json.loads((tmp_path / "events.jsonl.1").read_text()) == {"cycle": 3}
+    assert json.loads((tmp_path / "events.jsonl.2").read_text()) == {"cycle": 2}
+    assert not (tmp_path / "events.jsonl.3").exists()
+    assert json.loads(receipt.read_text())["slot"] == "permanent"

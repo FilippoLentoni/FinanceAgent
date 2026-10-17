@@ -57,6 +57,26 @@ def atomic_json(path, doc):
     os.replace(tmp, path)
 
 
+def append_health_event(state, record, *, maximum_bytes=8 * 1024 * 1024, retained_files=4):
+    """Bounded local operational logs; permanent financial audit stays in DynamoDB.
+
+    Separate job locks do not protect their common log, so rotation/append share
+    this lock. Never remove financial inputs, output artifacts or slot records.
+    """
+    with (state / "events.lock").open("a") as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+        target = state / "events.jsonl"
+        if target.exists() and target.stat().st_size >= maximum_bytes:
+            for index in range(retained_files, 0, -1):
+                source = target if index == 1 else state / ("events.jsonl." + str(index - 1))
+                if source.exists():
+                    os.replace(source, state / ("events.jsonl." + str(index)))
+        with target.open("a") as events:
+            events.write(json.dumps(record, sort_keys=True) + "\n")
+            events.flush()
+            os.fsync(events.fileno())
+
+
 def execute(command, *, cwd, timeout, stdin=None, final=None):
     # The headless console can contain model summaries; keep only public final
     # output and wrapper metadata. No hidden reasoning/transport/auth logs.
@@ -185,10 +205,7 @@ def main(argv=None):
             record.update(status="failed", error_code=type(exc).__name__)
         record["finished_at"] = stamp(datetime.now(UTC))
         atomic_json(status_path, record)
-        with (state / "events.jsonl").open("a") as events:
-            events.write(json.dumps(record, sort_keys=True) + "\n")
-            events.flush()
-            os.fsync(events.fileno())
+        append_health_event(state, record)
         print(json.dumps(record, sort_keys=True))
         return 0 if record["status"] == "succeeded" else 1
 
