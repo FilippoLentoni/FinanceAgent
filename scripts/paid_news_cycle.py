@@ -8,11 +8,15 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'agent')]
 from finplan_agent.payments.execution import PrivateLedger
-from finplan_agent.payments.news_trial import CONFIG
+from finplan_agent.payments.news_trial import CONFIG, CAP
 from scripts.paid_news_trial import DIRECTORY
 from scripts.publish_paid_news import publish
 
 CALENDAR_PYTHON=ROOT.parent/'FinancialPlanning/.venv/bin/python'
+
+
+def stop_timer():
+    subprocess.run(['systemctl','--user','disable','--now','finplan-etf-news.timer'],check=True,capture_output=True,timeout=15)
 
 
 def market_open(now):
@@ -32,7 +36,7 @@ def cycle(*,now=None):
     if config.get('started_at') is None:
         return {'status':'not_started'}
     if now>=datetime.fromisoformat(config['expires_at']):
-        subprocess.run(['systemctl','--user','disable','--now','finplan-etf-news.timer'],check=True,capture_output=True,timeout=15)
+        stop_timer()
         return {'status':'expired','purchases':0}
     # Retry publication from its frozen request without another merchant purchase.
     for path in sorted(DIRECTORY.glob('*.json')):
@@ -41,15 +45,25 @@ def cycle(*,now=None):
             publish(path.stem)
     if not market_open(now):
         return {'status':'market_closed','purchases':0}
+    reserved=sum(int(json.loads(path.read_text()).get('reserved_atomic',0)) for path in DIRECTORY.glob('*.json'))
+    if reserved>=CAP:
+        stop_timer()
+        return {'status':'cap_exhausted','purchases':0}
     slot=now.strftime('%Y%m%d%H')+'-ETF_MARKET'
     import hashlib
     identifier=hashlib.sha256(slot.encode()).hexdigest()[:32]
     if ledger.path(identifier).exists():
         return {'status':'slot_already_reserved','purchases':0}
-    result=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/paid_news_trial.py'),'collect','--asset','ETF_MARKET'],capture_output=True,text=True,timeout=150)
+    try:
+        result=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/paid_news_trial.py'),'collect','--asset','ETF_MARKET'],capture_output=True,text=True,timeout=150)
+    except subprocess.TimeoutExpired:
+        stop_timer()
+        return {'status':'collection_stopped','reason':'unknown_outcome_requires_reconciliation'}
     if result.returncode:
-        # Details stay in operator logs; reservations survive any interrupted child.
-        raise RuntimeError('paid collection failed; inspect private ledger and wallet before retry')
+        # Funding, project budget and uncertain outcomes all require operator review.
+        # Never keep automatically invoking the payment path after a failed attempt.
+        stop_timer()
+        return {'status':'collection_stopped','reason':'preflight_or_collection_failed_requires_review'}
     data=json.loads(result.stdout)
     publish(data['receipt_id'])
     return {'status':'collected_and_published','receipt_id':data['receipt_id'],'reserved_usd':data['reserved_usd']}

@@ -330,7 +330,7 @@ requires-dist = [
     { name = "bedrock-agentcore", specifier = ">=1.0,<2" },
     { name = "boto3", specifier = ">=1.40" },
     { name = "cryptography", specifier = ">=46,<51" },
-    { name = "finplan-contracts", path = "vendor/finplan-contracts/finplan_contracts-1.8.0-py3-none-any.whl" },
+    { name = "finplan-contracts", path = "vendor/finplan-contracts/finplan_contracts-1.9.0-py3-none-any.whl" },
     { name = "langchain-core", specifier = ">=1.0,<2" },
     { name = "langgraph", specifier = ">=1.0,<2" },
     { name = "langgraph-checkpoint-aws", specifier = ">=1.0,<2" },
@@ -347,8 +347,8 @@ dev = [
 
 [[package]]
 name = "finplan-contracts"
-version = "1.8.0"
-source = { path = "vendor/finplan-contracts/finplan_contracts-1.8.0-py3-none-any.whl" }
+version = "1.9.0"
+source = { path = "vendor/finplan-contracts/finplan_contracts-1.9.0-py3-none-any.whl" }
 dependencies = [
     { name = "jsonschema" },
     { name = "python-ulid" },
@@ -357,7 +357,7 @@ dependencies = [
     { name = "rfc8785" },
 ]
 wheels = [
-    { filename = "finplan_contracts-1.8.0-py3-none-any.whl", hash = "sha256:6533af74cb34086b3706f531d5f74657317cfa127a06dc8b5bf4a238381a5cb7" },
+    { filename = "finplan_contracts-1.9.0-py3-none-any.whl", hash = "sha256:94d3154f8b965cfcf44106c5f2aba15c0622e28cf575e92f325d34b020036911" },
 ]
 
 [package.metadata]

@@ -24,3 +24,26 @@ def test_pending_delivery_is_published_before_market_closed_exit(tmp_path,monkey
     calls=[];monkeypatch.setattr(cycle,'publish',calls.append)
     result=cycle.cycle(now=now)
     assert calls==[ident] and result=={'status':'market_closed','purchases':0}
+
+
+def test_exhausted_cap_stops_before_external_collection(tmp_path,monkeypatch):
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,15,15,tzinfo=UTC)
+    ledger.write(CONFIG,{'started_at':now.isoformat(),'expires_at':(now+timedelta(days=7)).isoformat()})
+    ledger.write('2'*32,{'reserved_atomic':cycle.CAP,'status':'delivery_unknown'})
+    monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
+    stopped=[];monkeypatch.setattr(cycle,'stop_timer',lambda:stopped.append(True))
+    monkeypatch.setattr(cycle.subprocess,'run',lambda *a,**k:(_ for _ in ()).throw(AssertionError('must not collect')))
+    assert cycle.cycle(now=now)=={'status':'cap_exhausted','purchases':0}
+    assert stopped==[True]
+
+
+def test_failed_collection_disables_recurring_attempts_and_preserves_reservation(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,15,15,tzinfo=UTC)
+    ledger.write(CONFIG,{'started_at':now.isoformat(),'expires_at':(now+timedelta(days=7)).isoformat()})
+    ledger.write('2'*32,{'reserved_atomic':11000,'status':'delivery_unknown'})
+    monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
+    stopped=[];monkeypatch.setattr(cycle,'stop_timer',lambda:stopped.append(True))
+    monkeypatch.setattr(cycle.subprocess,'run',lambda *a,**k:SimpleNamespace(returncode=1,stdout=''))
+    assert cycle.cycle(now=now)['status']=='collection_stopped'
+    assert stopped==[True] and ledger.read('2'*32)['status']=='delivery_unknown'
