@@ -32,7 +32,7 @@ completion. Closed-day reports still run and label the latest completed session.
 A new decision has no future observed outcome; absent historical plans are never
 manufactured. Report status does not establish profitability or approve a model.
 
-The operator templates in `operator/systemd/` schedule 09:45 America/New_York every
+The operator templates in `operator/systemd/` schedule 09:05 America/New_York every
 day, including Sunday 2026-10-18. Before installation, populate the private config
 with the approved paper profile's real identifier. Preserve legacy books rather
 than rewriting them to match a newly trained universe. The report reads a byte-identical checksum-pinned copy of FinancialPlanning's
@@ -54,3 +54,11 @@ collector remains research context and is not proof that this numeric actor was
 trained on or consumed same-morning headlines. Local GDELT capture markers are
 retained as operational evidence; central availability comes from the model's
 frozen source provenance.
+
+The report starts at 09:05 ET after the 08:45 numeric capture, 08:50 completed-price
+refresh and market-day 08:55 paid research collection. A measured 16-call hosted run
+took 172 seconds between first and last receipts; this is an observation, not a
+completion guarantee. Reports retain their actual completion time and next future
+exchange open. Sunday 2026-10-18's next trading open is Monday 2026-10-19.
+`method_selection_run_ids` may name genuine completed experiment results for hosted
+read-only evidence retrieval; results do not automatically declare a winning method.

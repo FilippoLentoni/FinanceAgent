@@ -26,7 +26,7 @@ through report generation.
 
 ## Requirement: market and news readiness
 
-A daily 09:45 America/New_York operator timer MUST use the pinned XNYS session
+A daily 09:05 America/New_York operator timer MUST use the pinned XNYS session
 calendar and compare served prices with its latest completed session. Regular US
 equity open is 09:30; 09:00 retrieval is premarket. Sundays and exchange holidays
 MUST produce clearly labeled latest completed-session reports with no claim of a

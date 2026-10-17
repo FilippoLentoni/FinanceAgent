@@ -1,8 +1,8 @@
 [Unit]
-Description=Daily 09:45 New York financial report including closed-day latest-data reports
+Description=Daily 09:05 New York financial report including closed-day latest-data reports
 
 [Timer]
-OnCalendar=*-*-* 09:45:00 America/New_York
+OnCalendar=*-*-* 09:05:00 America/New_York
 Persistent=false
 Unit=finplan-daily-financial-report.service
 

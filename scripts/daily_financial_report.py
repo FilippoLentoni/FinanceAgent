@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -32,7 +32,7 @@ from scripts.daily_paper_validation import token_for  # noqa: E402
 METHODS = ('ppo', 'min_variance', 'mean_variance', 'cvar')
 READ_TOOLS = frozenset({'recommend_portfolio', 'recommend_classical_portfolio', 'list_portfolio_decisions',
                         'get_portfolio_decision', 'explain_portfolio_decision', 'compare_portfolio_decisions',
-                        'evaluate_portfolio_decision', 'research_market_events'})
+                        'evaluate_portfolio_decision', 'research_market_events', 'get_job_status', 'get_experiment_result'})
 
 
 def private_json(path: Path, value: dict | list) -> None:
@@ -341,6 +341,15 @@ def markdown(report: dict) -> str:
                       item.get('answer', {}).get('narrative') or json.dumps(item.get('error'), default=str)])
     lines.extend(['', 'Pipeline readiness: ' + json.dumps(report.get('pipeline_readiness'), default=str), '',
                   report.get('constraint_comparison', ''), '', 'Explanation validation issues: ' + ', '.join(report.get('validation_issues', [])), ''])
+    if report.get('market_timing'):
+        lines.extend(['', '## Report and market timing', '', json.dumps(report['market_timing'], indent=2),
+                      'Reference prices and proposed quantities do not establish fills at any market open.', ''])
+    if report.get('method_selection_evidence'):
+        lines.extend(['', '## Recorded model comparison evidence', '',
+                      'Completed experiments are historical research evidence. Compare the same windows, costs, constraints and seeds; reused development/test history is not fresh forward validation.', ''])
+        for context in report['method_selection_evidence']:
+            lines.extend(['Run: ' + context['run_id'] + '; evidence status: ' + context['status'] + '.', '',
+                          context.get('answer', {}).get('narrative') or json.dumps(context.get('error'), default=str), ''])
     return '\n'.join(lines)
 
 
@@ -411,6 +420,44 @@ def pipeline_readiness(config: dict, now: datetime, market_date: str | None, new
             'meaning': 'Collection publication and training eligibility differ from each model actual feature consumption.'}
 
 
+def next_exchange_open(at: datetime) -> datetime:
+    from finplan_agent.core.market_calendar import calendar, session
+    document = calendar()
+    local_zone = ZoneInfo(document['timezone'])
+    day = at.astimezone(local_zone).date()
+    while True:
+        row = session(day)
+        if row['status'] in ('regular', 'early_close'):
+            opening = datetime.combine(day, time.fromisoformat(row.get('open') or document['regular_open']), tzinfo=local_zone).astimezone(UTC)
+            if opening > at:
+                return opening
+        day += timedelta(days=1)
+
+
+def market_timing(report: dict, completed_at: datetime) -> dict:
+    """Distinguish model formation from report delivery and real future opens."""
+    result = {'report_started_at': report['generated_at'], 'report_completed_at': completed_at.isoformat(),
+              'next_actual_exchange_open': next_exchange_open(completed_at).isoformat(),
+              'execution_status': 'advisory_only_no_fills', 'methods': []}
+    for item in report['methods']:
+        rec = item.get('recommendation') or {}
+        cutoff = (item.get('news_input_summary') or {}).get('decision_cutoff') or rec.get('decision_at')
+        if not cutoff:
+            continue
+        try:
+            formed = datetime.fromisoformat(cutoff.replace('Z', '+00:00'))
+            if formed.tzinfo is None:
+                raise ValueError('formation cutoff lacks timezone')
+            intended = next_exchange_open(formed)
+            result['methods'].append({'method': item['method'], 'declared_formation_cutoff': cutoff,
+                                      'next_exchange_open_after_formation': intended.isoformat(),
+                                      'report_completed_before_that_open': completed_at < intended})
+        except ValueError:
+            result['methods'].append({'method': item['method'], 'declared_formation_cutoff': cutoff,
+                                      'timing_status': 'not_verified'})
+    return result
+
+
 def main() -> int:
     import boto3
     parser = argparse.ArgumentParser(description=__doc__)
@@ -443,6 +490,11 @@ def main() -> int:
                 detail['http_status'] = error.code
             reader = UnavailableReader(detail, attempt)
         report = generate(reader, config, now)
+        report['method_selection_evidence'] = []
+        for run_id in config.get('method_selection_run_ids', []):
+            result = reader.call('source-experiment-' + run_id, 'get_experiment_result', {'run_id': run_id})
+            report['method_selection_evidence'].append({'run_id': run_id, **result})
+        report['market_timing'] = market_timing(report, datetime.now(UTC))
         report['receipts_directory'] = str(attempt)
         private_json(output / 'report.json', sanitize(report))
         (output / 'report.md').write_text(markdown(report))

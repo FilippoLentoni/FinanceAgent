@@ -164,3 +164,16 @@ def test_central_numeric_metadata_readiness_is_separate_from_paid_headline_colle
     missing_central = summarize(news())
     missing_central['central_available_at'] = None
     assert 'numeric_news_central_availability_not_verified' in pipeline_readiness(cfg, NOW, recommendation['as_of'], [missing_central])['issues']
+
+
+def test_report_market_timing_labels_sunday_and_dst_opens_without_claiming_fills():
+    from scripts.daily_financial_report import market_timing, next_exchange_open
+    assert next_exchange_open(datetime(2026, 10, 18, 13, 5, tzinfo=UTC)) == datetime(2026, 10, 19, 13, 30, tzinfo=UTC)
+    assert next_exchange_open(datetime(2026, 11, 2, 14, 5, tzinfo=UTC)) == datetime(2026, 11, 2, 14, 30, tzinfo=UTC)
+    report = {'generated_at': '2026-11-02T14:05:00Z', 'methods': [{'method': 'ppo', 'recommendation': {},
+               'news_input_summary': {'decision_cutoff': '2026-11-02T14:00:00Z'}}]}
+    timing = market_timing(report, datetime(2026, 11, 2, 15, tzinfo=UTC))
+    assert timing['next_actual_exchange_open'] == '2026-11-03T14:30:00+00:00'
+    assert timing['methods'][0]['next_exchange_open_after_formation'] == '2026-11-02T14:30:00+00:00'
+    assert timing['methods'][0]['report_completed_before_that_open'] is False
+    assert timing['execution_status'] == 'advisory_only_no_fills'

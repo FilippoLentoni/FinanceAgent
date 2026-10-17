@@ -1,6 +1,6 @@
 [Unit]
 Description=Read-only daily financial recommendation and explainability report
-After=network-online.target finplan-etf-news.service
+After=network-online.target finplan-etf-news.service finplan-gdelt-metadata.service
 Wants=network-online.target
 
 [Service]
