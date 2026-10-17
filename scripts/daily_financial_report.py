@@ -306,7 +306,7 @@ def markdown(report: dict) -> str:
         if item.get('readiness_issues'):
             lines.append('Issues: ' + ', '.join(item['readiness_issues']) + '.')
         if item.get('narrative'):
-            lines.extend(['', item['narrative'], '', 'News: ' + item['news_status'] + '.'])
+            lines.extend(['', item['narrative'], '', 'News: ' + item.get('news_status', 'not_verified') + '.'])
         else:
             lines.extend(['', json.dumps(item.get('error'), default=str)])
         for level, detail in item['explainability'].items():

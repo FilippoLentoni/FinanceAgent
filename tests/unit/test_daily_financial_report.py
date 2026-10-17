@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 
 import pytest
+from finplan_contracts.validate import validate
 
 from scripts.daily_financial_report import check_recommendation, compare_methods, generate, markdown, private_json
 from tests.unit.test_saved_portfolio_recommendations import recommendation as recommendation
@@ -19,6 +20,9 @@ class Reader:
 
     def call(self, label, tool, args):
         self.calls.append((tool, deepcopy(args)))
+        if tool.startswith('recommend'):
+            schema = 'tools/recommend-portfolio-invocation-request' if tool == 'recommend_portfolio' else 'tools/recommend-classical-portfolio-request'
+            assert validate(args, schema).valid, args
         if args.get('algorithm', 'ppo') in self.failures and tool.startswith('recommend'):
             return {'status': 'not_available', 'receipt': label + '.json', 'error': {'code': 'NOT_READY'}}
         document = {}
@@ -119,3 +123,12 @@ def test_private_receipts_do_not_inherit_permissive_file_modes(tmp_path):
     assert destination.stat().st_mode & 0o077 == 0
     with pytest.raises(ValueError):
         private_json(tmp_path / 'invalid.json', {'weight': float('nan')})
+
+
+def test_invalid_producer_state_still_renders_a_readiness_report(recommendation, tmp_path):
+    recommendation['solution_status'] = 'rejected_hold_current'
+    report = generate(Reader(recommendation), config(recommendation, tmp_path), NOW)
+    assert report['status'] == 'partial_readiness'
+    assert all(item['status'] == 'not_ready' for item in report['methods'])
+    assert 'not_verified' in markdown(report)
+    assert report['comparison']['status'] == 'not_available'
