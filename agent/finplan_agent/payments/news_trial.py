@@ -25,8 +25,17 @@ PROFILES = {
     'ETH': 'ETH cryptocurrency market news',
     'ETF_MARKET': 'Latest US ETF market news S&P 500 bond yields Federal Reserve inflation international equities',
     'GOOGL': 'Latest Alphabet Google GOOGL stock financial earnings business market news',
+    'AMZN': 'Latest Amazon AMZN stock financial earnings business market news',
+    'NVDA': 'Latest NVIDIA NVDA stock financial earnings business market news',
+    'MSFT': 'Latest Microsoft MSFT stock financial earnings business market news',
+    'AAPL': 'Latest Apple AAPL stock financial earnings business market news',
+    'META': 'Latest Meta Platforms META stock financial earnings business market news',
+    'TSLA': 'Latest Tesla TSLA stock financial earnings business market news',
+    'VOO': 'Latest Vanguard S&P 500 ETF VOO US stock market financial news',
 }
 
+
+DAILY_UNIVERSE = ('GOOGL', 'AMZN', 'NVDA', 'MSFT', 'AAPL', 'META', 'TSLA', 'VOO')
 
 def query_body(profile, start_published=None, end_published=None):
     if profile not in PROFILES:
@@ -133,9 +142,9 @@ class NewsTrial:
                 raise ValueError('daily extension requires an existing started trial')
             config.setdefault('original_expires_at', config['expires_at'])
             config['expires_at'] = '2026-10-31T03:59:59+00:00'
-            config['collection_plan'] = {'cadence': 'daily', 'profiles': ['ETF_MARKET', 'GOOGL'],
-                'expected_usd_per_trading_day': '0.022',
-                'authorization_reason': 'User authorized daily collection through October 30 market close and a two-week checkpoint; cumulative USD 10 cap unchanged'}
+            config['collection_plan'] = {'cadence': 'daily', 'profiles': list(DAILY_UNIVERSE),
+                'expected_usd_per_trading_day': '0.088',
+                'authorization_reason': 'User selected GOOGL, AMZN, NVDA, MSFT, AAPL, META, TSLA and VOO for daily collection through October 30 and a two-week checkpoint; cumulative USD 10 cap unchanged'}
             self.ledger.write(CONFIG, config)
             return config
 

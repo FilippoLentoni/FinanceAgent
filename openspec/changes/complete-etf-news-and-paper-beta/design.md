@@ -27,3 +27,17 @@ Publish the existing receipt after platform readiness, test immutable replay and
 
 ## Exit criteria and iteration
 The decisive integration check is retrieval/payment → centralized news → point-in-time model features → authenticated LangGraph payload → optimization and compatible PPO recommendations. Verify actual consumed feature/policy identities, not just tool discovery. Change only news while freezing the remaining inputs and verify that the model input evidence changes; a particular allocation need not change. A legacy actor or readiness-only response fails this check. Repair and rerun failures. Keep the change open for unavailable rights, historical data or compatible policy artifacts, recording the prerequisite and preserving spending/expiry controls.
+
+## Selected daily universe (October 17, 2026)
+The user selected GOOGL, AMZN, NVDA, MSFT, AAPL, META, TSLA and the S&P 500.
+Represent the index using VOO, not an orderable index ticker. Collect eight
+separate symbol-scoped news searches per trading day and persist raw/curated
+records centrally. Preserve the $10 cumulative data limit and current authorized
+expiry. Observed expected cost is $0.088/day, $0.88 for ten sessions; quotes
+remain authoritative. Keep old receipts and their original symbol scope.
+The existing API permits at most five symbols per response; capture the eight
+assets in two four-symbol batches. This does not constitute an eight-asset PPO
+training integration. Aligned approved price ingestion for all eight assets,
+explicit daily collection/no-news/failure status, compatible multi-batch PPO
+state integration and deployed recommendation evidence remain required. Do not
+claim an old two-asset profile or policy covers the new investment universe.

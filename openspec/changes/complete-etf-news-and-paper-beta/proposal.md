@@ -20,3 +20,17 @@ None. Existing ETF-news and Coinbase-brokerage changes retain their detailed int
 
 ## Impact
 FinanceAgent operator scripts, timers, hosted verification, brokerage Gateway infrastructure, documentation and paper. FinanceModel owns the coordinated `complete-etf-news-and-paper-beta` experiment/paper-simulation change. FinancialPlanning and FinanceLambdasTool finish their existing `add-etf-news-model-inputs` beta releases. The $100 AWS ceiling and separate $10 research ceiling remain in force. Bounded research-only PPO training is included when licensed point-in-time data permits it; no live order, funding, trading credential or automatic serving-policy promotion is included.
+
+## Selected daily universe (October 17, 2026)
+The user selected GOOGL, AMZN, NVDA, MSFT, AAPL, META, TSLA and the S&P 500.
+Represent the index using VOO, not an orderable index ticker. Collect eight
+separate symbol-scoped news searches per trading day and persist raw/curated
+records centrally. Preserve the $10 cumulative data limit and current authorized
+expiry. Observed expected cost is $0.088/day, $0.88 for ten sessions; quotes
+remain authoritative. Keep old receipts and their original symbol scope.
+The existing API permits at most five symbols per response; capture the eight
+assets in two four-symbol batches. This does not constitute an eight-asset PPO
+training integration. Aligned approved price ingestion for all eight assets,
+explicit daily collection/no-news/failure status, compatible multi-batch PPO
+state integration and deployed recommendation evidence remain required. Do not
+claim an old two-asset profile or policy covers the new investment universe.

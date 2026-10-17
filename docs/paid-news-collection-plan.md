@@ -83,3 +83,15 @@ purchases totaling USD 0.055 across the unchanged cumulative USD 10 ledger.
 Expected ten-session daily collection cost is USD 0.22 at the observed quote.
 Raw and curated current versions have no configured age expiry in beta storage;
 the seven-calendar-day API read bound is separate from storage retention.
+
+## October 17 selected universe (supersedes the two-profile plan above)
+
+Daily profiles now are GOOGL, AMZN, NVDA, MSFT, AAPL, META, TSLA and VOO.
+VOO represents the requested S&P500 exposure. Eight symbol-specific searches
+cost an observed $0.088/day, approximately $0.88 for ten sessions. The original
+ledger/cap/expiry remain preserved. Legacy ETF_MARKET receipts are still replayable
+but are no longer a scheduled daily profile. Each new publication is scoped to
+one symbol; a search association is not proof that every returned article is
+company-specific or financially useful. The checkpoint captures two four-symbol
+batches; no expanded hosted PPO model or eight-asset training result is claimed.
+Existing price ingestion does not yet cover the entire selected universe.

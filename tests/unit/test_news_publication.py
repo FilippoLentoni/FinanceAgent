@@ -100,3 +100,13 @@ def test_future_publication_rejected_even_inside_requested_window():
     record.update(response_base64=base64.b64encode(raw).decode(),response_checksum='sha256:'+hashlib.sha256(raw).hexdigest())
     result=publication(record,rights=RIGHTS)
     assert result['payload']['records'][0]['published_at'] is None and result['quality_status']=='unverified'
+
+
+@pytest.mark.parametrize('symbol',['GOOGL','AMZN','NVDA','MSFT','AAPL','META','TSLA','VOO'])
+def test_selected_company_queries_publish_only_their_own_symbol(symbol):
+    from finplan_agent.payments.news_trial import query_body
+    record=receipt();record.update(profile=symbol,request=query_body(symbol))
+    document=publication(record,rights=RIGHTS)
+    assert document['symbols']==[symbol]
+    assert all(row['symbols']==[symbol] for row in document['payload']['records'])
+    with pytest.raises(ValueError):publication(record,rights=RIGHTS,symbols=('SPY',))

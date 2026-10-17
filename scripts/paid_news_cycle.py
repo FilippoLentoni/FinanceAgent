@@ -50,9 +50,13 @@ def cycle(*,now=None):
     if reserved>=CAP:
         stop_timer()
         return {'status':'cap_exhausted','purchases':0}
+    profiles=config.get('collection_plan',{}).get('profiles',['ETF_MARKET','GOOGL'])
+    if not profiles or len(profiles)!=len(set(profiles)) or any(p not in PROFILE_SYMBOLS for p in profiles):
+        stop_timer()
+        return {'status':'collection_stopped','reason':'invalid_collection_profiles','receipts':[]}
     receipts=[]
     import hashlib
-    for profile in PROFILE_SYMBOLS:
+    for profile in profiles:
         slot=collection_slot(profile, query_body(profile), now, config)
         identifier=hashlib.sha256(slot.encode()).hexdigest()[:32]
         if ledger.path(identifier).exists():

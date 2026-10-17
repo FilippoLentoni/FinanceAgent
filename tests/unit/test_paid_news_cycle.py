@@ -77,3 +77,18 @@ def test_daily_plan_duplicate_hours_do_not_buy_again(tmp_path,monkeypatch):
     monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
     monkeypatch.setattr(cycle.subprocess,'run',lambda *a,**k:(_ for _ in ()).throw(AssertionError('duplicate purchase')))
     assert cycle.cycle(now=now+timedelta(hours=3))['status']=='slots_already_reserved'
+
+
+def test_configured_eight_asset_universe_collects_each_profile_once(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from finplan_agent.payments.news_trial import DAILY_UNIVERSE
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,19,13,35,tzinfo=UTC)
+    ledger.write(CONFIG,{'started_at':now.isoformat(),'expires_at':(now+timedelta(days=14)).isoformat(),'collection_plan':{'cadence':'daily','profiles':list(DAILY_UNIVERSE)}})
+    monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
+    collected=[];published=[]
+    def run(args,**kwargs):
+        collected.append(args[-1]);return SimpleNamespace(returncode=0,stdout=json.dumps({'receipt_id':format(len(collected),'032x'),'reserved_usd':'0.011'}))
+    monkeypatch.setattr(cycle.subprocess,'run',run);monkeypatch.setattr(cycle,'publish',published.append)
+    result=cycle.cycle(now=now)
+    assert collected==list(DAILY_UNIVERSE) and len(published)==8
+    assert result['status']=='collected_and_published'

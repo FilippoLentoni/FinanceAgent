@@ -16,7 +16,7 @@ def checksum(value):
     return 'sha256:' + hashlib.sha256(canonical(value)).hexdigest()
 
 
-PROFILE_SYMBOLS={'ETF_MARKET':('SPY','VOO'),'GOOGL':('GOOGL',)}
+PROFILE_SYMBOLS={'ETF_MARKET':('SPY','VOO'), **{s:(s,) for s in ('GOOGL','AMZN','NVDA','MSFT','AAPL','META','TSLA','VOO')}}
 
 
 def publication(record, *, rights, symbols=None):

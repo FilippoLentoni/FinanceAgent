@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'agent')]
-from finplan_agent.payments.news_trial import NewsTrial, query_body
+from finplan_agent.payments.news_trial import NewsTrial, query_body, PROFILES
 from scripts.research_payments import budget_preflight
 
 DIRECTORY = ROOT.parent / '.worktmp/paid-news-trial-v1'
@@ -16,7 +16,7 @@ STATE = ROOT.parent / '.worktmp/agentcore-payments-20261013/state.json'
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['prepare', 'preflight', 'collect', 'configure-daily-plan'])
-    parser.add_argument('--asset', choices=['BTC', 'ETH', 'ETF_MARKET', 'GOOGL'])
+    parser.add_argument('--asset', choices=list(PROFILES))
     parser.add_argument('--resume-receipt', help='Explicitly retry signing with the original reservation and idempotency token')
     parser.add_argument('--start-published')
     parser.add_argument('--end-published')
