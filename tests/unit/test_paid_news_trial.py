@@ -24,7 +24,7 @@ def test_cap_retains_unknown_reservations_and_rejects_duplicate_and_expired_slot
         r.update(status='delivery_unknown',reserved_atomic=CAP-10000);t.ledger.write(id,r)
         with pytest.raises(ValueError,match='already reserved'):t.reserve('BTC',challenge(),{},now=NOW)
         with pytest.raises(ValueError,match='cap exhausted'):t.reserve('ETH',challenge(),{},now=NOW)
-        with pytest.raises(ValueError,match='seven-day'):t.reserve('ETH',challenge(),{},now=NOW+timedelta(days=7))
+        with pytest.raises(ValueError,match='collection window'):t.reserve('ETH',challenge(),{},now=NOW+timedelta(days=7))
 
 
 @pytest.mark.parametrize('field,value',[('payTo','0x'+'1'*40),('network','eip155:84532'),('asset','0x'+'2'*40),('amount','31000'),('scheme','upto'),('maxTimeoutSeconds',True)])
@@ -101,3 +101,49 @@ def test_etf_profile_uses_original_cap_and_trial_expiry(tmp_path):
         assert t.ledger.read(etf)['profile']=='ETF_MARKET'
         assert 'ETF market news' in t.ledger.read(etf)['request']['query']
         assert sum(json.loads(p.read_text()).get('reserved_atomic',0) for p in t.ledger.directory.glob('*.json'))==22000
+
+
+@pytest.mark.parametrize('profile,start,end', [
+    ('UNKNOWN',None,None), ('GOOGL','2026-10-01T00:00:00Z',None),
+    ('GOOGL','2026-10-01T00:00:00+00:00','2026-10-02T00:00:00Z'),
+    ('GOOGL','2026-02-30T00:00:00Z','2026-03-01T00:00:00Z'),
+    ('GOOGL','2026-10-02T00:00:00Z','2026-10-01T00:00:00Z'),
+    ('GOOGL','2026-01-01T00:00:00Z','2026-10-01T00:00:00Z'),
+])
+def test_invalid_query_before_any_preflight_or_aws(tmp_path,profile,start,end):
+    t=trial(tmp_path)
+    def forbidden(): raise AssertionError('external preflight must not run')
+    with pytest.raises(ValueError):
+        t.collect(profile,management=None,execution=None,state={},project_preflight=forbidden,
+                  start_published=start,end_published=end)
+    assert t.ledger.read(CONFIG)['started_at'] is None
+
+
+def test_historical_window_reserves_once_across_hours_and_separates_live(tmp_path):
+    from finplan_agent.payments.news_trial import query_body
+    t=trial(tmp_path)
+    body=query_body('GOOGL','2026-10-01T00:00:00Z','2026-10-02T00:00:00Z')
+    with t.ledger.lock():
+        ident,_=t.reserve('GOOGL',challenge(),body,now=NOW)
+        with pytest.raises(ValueError,match='already reserved'):
+            t.reserve('GOOGL',challenge(),body,now=NOW+timedelta(hours=2))
+        live,_=t.reserve('GOOGL',challenge(),query_body('GOOGL'),now=NOW)
+    assert ident!=live and t.ledger.read(ident)['request']==body
+
+
+def test_daily_extension_preserves_start_cap_reservations_and_original_expiry(tmp_path):
+    from finplan_agent.payments.news_trial import query_body
+    t=trial(tmp_path)
+    with t.ledger.lock():
+        ident,record=t.reserve('ETF_MARKET',challenge(),query_body('ETF_MARKET'),now=NOW)
+    original=t.ledger.read(CONFIG)
+    config=t.configure_daily_plan()
+    assert config['started_at']==original['started_at'] and config['cap_atomic']==CAP
+    assert config['original_expires_at']==original['expires_at']
+    assert config['expires_at']=='2026-10-31T03:59:59+00:00'
+    assert t.ledger.read(ident)==record
+    assert t.configure_daily_plan()==config
+    with t.ledger.lock():
+        t.reserve('GOOGL',challenge(),query_body('GOOGL'),now=NOW+timedelta(hours=14))
+        with pytest.raises(ValueError,match='already reserved'):
+            t.reserve('GOOGL',challenge(),query_body('GOOGL'),now=NOW+timedelta(hours=20))

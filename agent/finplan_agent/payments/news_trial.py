@@ -28,10 +28,32 @@ PROFILES = {
 }
 
 
-def query_body(profile):
+def query_body(profile, start_published=None, end_published=None):
     if profile not in PROFILES:
         raise ValueError('unsupported research profile')
-    return {'query': PROFILES[profile], 'category': 'news', 'numResults': 5}
+    body = {'query': PROFILES[profile], 'category': 'news', 'numResults': 5}
+    if (start_published is None) != (end_published is None):
+        raise ValueError('both publication window bounds are required')
+    if start_published is not None:
+        values = []
+        for value in (start_published, end_published):
+            if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', value):
+                raise ValueError('publication bounds require ISO UTC seconds ending Z')
+            values.append(datetime.fromisoformat(value.replace('Z', '+00:00')))
+        if not timedelta(0) < values[1]-values[0] <= timedelta(days=31):
+            raise ValueError('publication window must be positive and at most 31 days')
+        body.update(startPublishedDate=start_published, endPublishedDate=end_published)
+    return body
+
+
+def collection_slot(profile, body, now, config):
+    if 'startPublishedDate' in body:
+        return 'history-' + profile + '-' + digest(body)
+    period = '%Y%m%d' if config.get('collection_plan', {}).get('cadence') == 'daily' else '%Y%m%d%H'
+    if period == '%Y%m%d':
+        from zoneinfo import ZoneInfo
+        now = now.astimezone(ZoneInfo('America/New_York'))
+    return now.strftime(period) + '-' + profile
 
 
 
@@ -101,6 +123,22 @@ class NewsTrial:
             self.ledger.write(CONFIG, config)
             return config
 
+    def configure_daily_plan(self):
+        """Explicit operator authorization; retain original cumulative trial history."""
+        with self.ledger.lock():
+            config = self.ledger.read(CONFIG)
+            if config.get('cap_atomic') != CAP or config.get('endpoint') != ENDPOINT or config.get('recipient') != RECIPIENT:
+                raise ValueError('trial configuration changed')
+            if not config.get('started_at') or not config.get('expires_at'):
+                raise ValueError('daily extension requires an existing started trial')
+            config.setdefault('original_expires_at', config['expires_at'])
+            config['expires_at'] = '2026-10-31T03:59:59+00:00'
+            config['collection_plan'] = {'cadence': 'daily', 'profiles': ['ETF_MARKET', 'GOOGL'],
+                'expected_usd_per_trading_day': '0.022',
+                'authorization_reason': 'User authorized daily collection through October 30 market close and a two-week checkpoint; cumulative USD 10 cap unchanged'}
+            self.ledger.write(CONFIG, config)
+            return config
+
     def reserve(self, asset, challenge, body, *, now):
         """Caller holds the lock across funding, reservation, signing and delivery."""
         if asset not in PROFILES:
@@ -112,8 +150,8 @@ class NewsTrial:
             config.update(started_at=now.isoformat(), expires_at=(now + timedelta(days=7)).isoformat(), status='active')
             self.ledger.write(CONFIG, config)
         if now < datetime.fromisoformat(config['started_at']) or now >= datetime.fromisoformat(config['expires_at']):
-            raise ValueError('trial is outside its authorized seven-day window')
-        slot = now.strftime('%Y%m%d%H') + '-' + asset
+            raise ValueError('trial is outside its authorized collection window')
+        slot = collection_slot(asset, body, now, config)
         identifier = hashlib.sha256(slot.encode()).hexdigest()[:32]
         if self.ledger.path(identifier).exists():
             raise ValueError('hourly slot already reserved; reconcile without another purchase')
@@ -127,9 +165,9 @@ class NewsTrial:
         self.ledger.write(identifier, record)
         return identifier, record
 
-    def collect(self, asset, *, management, execution, state, project_preflight, now=None, transport=fetch, resume_id=None):
+    def collect(self, asset, *, management, execution, state, project_preflight, now=None, transport=fetch, resume_id=None, start_published=None, end_published=None):
         now = now or datetime.now(UTC)
-        body = query_body(asset)
+        body = query_body(asset, start_published, end_published)
         with self.ledger.lock():
             # Fail before activating, reserving or creating any paid session.
             project_preflight()
@@ -158,7 +196,7 @@ class NewsTrial:
                 record = self.ledger.read(identifier)
                 config = self.ledger.read(CONFIG)
                 if not datetime.fromisoformat(config['started_at']) <= now < datetime.fromisoformat(config['expires_at']):
-                    raise ValueError('trial is outside its authorized seven-day window')
+                    raise ValueError('trial is outside its authorized collection window')
                 challenge = record['challenge']
                 if (record['status'] not in ('reserved', 'signing_unknown')
                         or record['request'] != body or record['request_checksum'] != digest(body)

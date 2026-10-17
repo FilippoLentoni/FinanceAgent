@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT),str(ROOT/'agent')]
 from finplan_agent.payments.execution import PrivateLedger
-from finplan_agent.payments.news_trial import CONFIG, CAP
+from finplan_agent.payments.news_trial import CONFIG, CAP, query_body, collection_slot
 from finplan_agent.payments.news_publication import PROFILE_SYMBOLS
 from scripts.paid_news_trial import DIRECTORY
 from scripts.publish_paid_news import publish
@@ -53,7 +53,7 @@ def cycle(*,now=None):
     receipts=[]
     import hashlib
     for profile in PROFILE_SYMBOLS:
-        slot=now.strftime('%Y%m%d%H')+'-'+profile
+        slot=collection_slot(profile, query_body(profile), now, config)
         identifier=hashlib.sha256(slot.encode()).hexdigest()[:32]
         if ledger.path(identifier).exists():
             continue

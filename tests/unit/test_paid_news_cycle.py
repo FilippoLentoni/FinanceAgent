@@ -62,3 +62,18 @@ def test_market_slot_collects_separate_fixed_market_and_company_profiles(tmp_pat
     result=cycle.cycle(now=now)
     assert collected==['ETF_MARKET','GOOGL'] and len(published)==2
     assert result['status']=='collected_and_published' and len(result['receipts'])==2
+
+
+def test_daily_plan_duplicate_hours_do_not_buy_again(tmp_path,monkeypatch):
+    import hashlib
+    from finplan_agent.payments.news_trial import collection_slot,query_body
+    ledger=PrivateLedger(tmp_path);now=datetime(2026,10,15,15,tzinfo=UTC)
+    config={'started_at':now.isoformat(),'expires_at':(now+timedelta(days=14)).isoformat(),
+            'collection_plan':{'cadence':'daily'}}
+    ledger.write(CONFIG,config)
+    for profile in ('ETF_MARKET','GOOGL'):
+        slot=collection_slot(profile,query_body(profile),now,config)
+        ledger.write(hashlib.sha256(slot.encode()).hexdigest()[:32],{'profile':profile,'status':'delivery_unknown','reserved_atomic':11000})
+    monkeypatch.setattr(cycle,'DIRECTORY',tmp_path);monkeypatch.setattr(cycle,'market_open',lambda _:True)
+    monkeypatch.setattr(cycle.subprocess,'run',lambda *a,**k:(_ for _ in ()).throw(AssertionError('duplicate purchase')))
+    assert cycle.cycle(now=now+timedelta(hours=3))['status']=='slots_already_reserved'

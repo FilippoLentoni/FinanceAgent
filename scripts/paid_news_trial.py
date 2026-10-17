@@ -6,7 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'agent')]
-from finplan_agent.payments.news_trial import NewsTrial
+from finplan_agent.payments.news_trial import NewsTrial, query_body
 from scripts.research_payments import budget_preflight
 
 DIRECTORY = ROOT.parent / '.worktmp/paid-news-trial-v1'
@@ -15,11 +15,19 @@ STATE = ROOT.parent / '.worktmp/agentcore-payments-20261013/state.json'
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'preflight', 'collect'])
+    parser.add_argument('action', choices=['prepare', 'preflight', 'collect', 'configure-daily-plan'])
     parser.add_argument('--asset', choices=['BTC', 'ETH', 'ETF_MARKET', 'GOOGL'])
     parser.add_argument('--resume-receipt', help='Explicitly retry signing with the original reservation and idempotency token')
+    parser.add_argument('--start-published')
+    parser.add_argument('--end-published')
     args = parser.parse_args()
+    if args.action == 'collect':
+        query_body(args.asset, args.start_published, args.end_published)
+    elif args.start_published or args.end_published:
+        parser.error('publication bounds require collect')
     trial = NewsTrial(DIRECTORY)
+    if args.action == 'configure-daily-plan':
+        print(json.dumps(trial.configure_daily_plan())); return
     if args.action == 'prepare':
         print(json.dumps(trial.prepare())); return
     import boto3
@@ -41,7 +49,7 @@ def main():
         print(json.dumps({'status':'balance_observed','chain':token['chain'],'token':token['token'],'amount_atomic':token['amount'],'decimals':token['decimals']})); return
     if not args.asset:
         parser.error('collect requires --asset')
-    print(json.dumps(trial.collect(args.asset, management=management, execution=client('Execution'), state=state, project_preflight=lambda: budget_preflight(s), resume_id=args.resume_receipt)))
+    print(json.dumps(trial.collect(args.asset, management=management, execution=client('Execution'), state=state, project_preflight=lambda: budget_preflight(s), resume_id=args.resume_receipt, start_published=args.start_published, end_published=args.end_published)))
 
 
 if __name__ == '__main__':
