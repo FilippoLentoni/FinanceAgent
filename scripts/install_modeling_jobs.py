@@ -46,6 +46,7 @@ Environment=HOME=/home/ec2-user
 Environment=AWS_REGION=us-east-2
 Environment=AWS_DEFAULT_REGION=us-east-2
 Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=FINPLAN_MODEL_SOURCE_COMMIT={versions['financemodel']}
 Environment=FINPLAN_PLATFORM_SOURCE_COMMIT={versions['financialplanning']}
 Environment=FINPLAN_AGENT_SOURCE_COMMIT={versions['financeagent']}

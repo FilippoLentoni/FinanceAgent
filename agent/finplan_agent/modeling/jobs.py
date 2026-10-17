@@ -192,7 +192,7 @@ def main(argv=None):
                     if templates and isinstance(templates[0], str):
                         templates = [templates]
                     for template in templates:
-                        if "finplan_model.forward.hourly" not in template:
+                        if not any(module in template for module in ("finplan_model.forward.hourly", "finplan_model.forward.crypto_hourly")):
                             continue
                         command = [s.replace("{slot}", missed).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(missed_dir)) for s in template]
                         execute(command + ["--account-missed"], cwd=cfg["runtime_root"], timeout=300)

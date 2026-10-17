@@ -40,7 +40,7 @@ def invoke_graph(arguments: dict[str, Any], capture_before: Callable[[dict[str, 
     sid = "modeling_comparison_" + uuid.uuid4().hex
     url = "https://bedrock-agentcore.us-east-2.amazonaws.com/runtimes/" + urllib.parse.quote(runtime, safe="") + "/invocations?qualifier=DEFAULT"
     capture_before({"framework": "langgraph", "runtime_session_id": sid, "payload": payload,
-                    "numerical_policy": "served PPO via recommend_portfolio", "news": "News not consumed by the graph request unless the served policy explicitly reports news features"})
+                    "numerical_policy": "FinanceModel served policy via recommend_portfolio; identity verified against the returned artifact", "news": "News not consumed by the graph request unless the served policy explicitly reports news features"})
     req = urllib.request.Request(url, data=json.dumps(payload).encode(), headers={
         "Authorization": "Bearer " + token, "Content-Type": "application/json",
         "X-Amzn-Bedrock-AgentCore-Runtime-Session-Id": sid})

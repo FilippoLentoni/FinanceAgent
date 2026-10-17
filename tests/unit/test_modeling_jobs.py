@@ -80,6 +80,7 @@ def test_actual_restart_path_accounts_each_cohort_without_historical_inference(t
     cfg = {"environment": "beta", "region": "us-east-2", "state_dir": str(state), "experiment_id": "test", "runtime_root": str(tmp_path),
            "commands": {"hourly": [["python", "-m", "finplan_model.forward.hourly", "--slot", "{slot}"],
                                     ["python", "-m", "finplan_model.forward.hourly", "--cohort", "eight_assets", "--slot", "{slot}"],
+                                    ["python", "-m", "finplan_model.forward.crypto_hourly", "--slot", "{slot}"],
                                     ["python", "modeling_report.py"]]}}
     config = tmp_path / "config.json"
     config.write_text(json.dumps(cfg))
@@ -87,7 +88,7 @@ def test_actual_restart_path_accounts_each_cohort_without_historical_inference(t
     monkeypatch.setattr(jobs, "execute", lambda command, **kwargs: calls.append(command))
     monkeypatch.setattr(jobs, "run_job", lambda *a: {"completed": True})
     assert jobs.main(["hourly", "--config", str(config), "--slot", "2026-10-18T00:00:00Z"]) == 0
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert all("--account-missed" in c and "2026-10-17T23:00:00Z" in c for c in calls)
     assert json.loads((state / "hourly-last-completed.json").read_text())["slot"] == "2026-10-18T00:00:00Z"
 
