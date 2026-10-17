@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from ..core.news_evidence import render as render_news
 from ..providers.base import ToolCall, text_of
 from ..skills import CLASSICAL_SKILLS
 from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
@@ -195,8 +196,9 @@ def render_classical(doc: dict) -> tuple[str, list[dict]]:
         cfg = rec.get("settings") or rec.get("diagnostics", {}).get("settings", {})
         parts.append("Optimizer assumptions: " + json.dumps(cfg, sort_keys=True) + ".")
         news=(rec.get('diagnostics') or {}).get('news_evidence') or {}
-        if news.get('consumed'):
-            parts.append('This recommendation incorporates the centrally stored financial-news features under the declared sentiment and uncertainty assumptions. News formation time: '+str(news.get('formation_time','unavailable'))+'. Source and feature checksums are retained in the analysis. This is not evidence of improved returns or a causal news explanation.')
+        parts.append(render_news(news))
+        if rec.get('news_timing') == 'eligible_news_at_decision_with_completed_prices':
+            parts.append('Current eligible news is evaluated at its declared decision cutoff; reference prices remain the latest completed session rather than live intraday prices.')
     issued_explanation = doc.get("explanation") if doc.get("source_decision_ref") else None
     if issued_explanation:
         parts.append("Issued decision: " + doc["source_decision_ref"]["decision_id"] + "; status: " + doc.get("decision_status", "not_available") + ".")

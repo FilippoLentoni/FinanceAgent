@@ -46,7 +46,7 @@ class Reader:
 
 def config(rec, tmp_path):
     return {'portfolio_id': rec['portfolio_state']['portfolio_id'], 'expected_instruments': [row['instrument_id'] for row in rec['target_weights']],
-            'require_news_features': False, 'news_status_dir': str(tmp_path),
+            'require_news_features': False, 'news_status_dir': str(tmp_path), 'gdelt_status_dir': str(tmp_path / 'numeric'),
             'classical_settings': {'lookback_days': 60, 'max_weight': .6},
             '_calendar_context': {'is_trading_session': False, 'expected_completed_session': rec['as_of'], 'session_status': 'weekend'}}
 
@@ -146,3 +146,21 @@ def test_explanation_transport_failure_prevents_complete_status(recommendation, 
     assert all(item['status'] == 'available' for item in report['methods'])
     assert report['status'] == 'partial_readiness'
     assert len(report['validation_issues']) == 4
+
+
+def test_central_numeric_metadata_readiness_is_separate_from_paid_headline_collection(recommendation, tmp_path):
+    from finplan_agent.core.news_evidence import summarize
+    from scripts.daily_financial_report import pipeline_readiness
+    from tests.unit.test_news_evidence import news
+    cfg = config(recommendation, tmp_path)
+    cfg['_calendar_context']['is_trading_session'] = True
+    numeric_now = datetime(2026, 10, 8, 13, 45, tzinfo=UTC)
+    result = pipeline_readiness(cfg, numeric_now, recommendation['as_of'], [summarize(news())])
+    assert result['issues'] == []
+    assert result['numeric_model_inputs'][0]['source_day'] == '2026-10-07'
+    assert result['numeric_collection_marker'] is None
+    assert 'Local capture only' in result['numeric_marker_scope']
+    assert 'Separate research collection' in result['paid_headline_scope']
+    missing_central = summarize(news())
+    missing_central['central_available_at'] = None
+    assert 'numeric_news_central_availability_not_verified' in pipeline_readiness(cfg, NOW, recommendation['as_of'], [missing_central])['issues']

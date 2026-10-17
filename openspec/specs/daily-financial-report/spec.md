@@ -44,3 +44,14 @@ MUST NOT impersonate a human, reset credentials, confirm decisions, change holdi
 place orders, launch training or promote models. Configuration, credentials and
 portfolio-bearing reports MUST remain private. Hosted transport/authentication
 failure MUST generate a durable readiness result without exposing credentials.
+
+## Requirement: actual numeric news provenance
+
+When the served policy consumes GDELT numeric metadata, the report/runtime MUST
+state its feature protocol, actual UTC archive source day, source and central
+availability, and current decision cutoff separately from latest completed prices.
+Derived source lag MUST use the returned timestamps. A local collector marker MUST
+NOT establish central availability. Daily machine-metadata archives MUST NOT be
+presented as same-morning breaking headlines or calibrated stock sentiment; VOO
+Vanguard mentions MUST NOT be described as a constituent-weighted news basket.
+Separately collected paid research headlines retain their own rights and readiness.

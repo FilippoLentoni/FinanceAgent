@@ -14,7 +14,7 @@ Run with the FinanceAgent environment:
 ```
 
 The private configuration supplies `environment: beta`, `region`, `portfolio_id`,
-`expected_instruments`, `methods`, `output_dir`, `news_status_dir`,
+`expected_instruments`, `methods`, `output_dir`, `news_status_dir`, `gdelt_status_dir`,
 `require_news_features` and the complete `classical_settings`. Use
 `auth_mode: ci_client_credentials` for the existing read-only machine client. The
 runner resolves its secret through the existing SSM references without persisting
@@ -46,3 +46,11 @@ approved snapshot with a long enough point-in-time price/feature panel can conta
 many training transitions. Daily raw/curated retention supports future training,
 but news retrieved today cannot be backdated as previously known evidence. See the
 workspace cross-repository data/training specification for promotion requirements.
+
+Numeric GDELT models report their actual feature protocol, UTC archive source day,
+release/central availability and source-age lag. Their current cutoff combines
+these eligible archives with completed-session prices. The separate paid-headline
+collector remains research context and is not proof that this numeric actor was
+trained on or consumed same-morning headlines. Local GDELT capture markers are
+retained as operational evidence; central availability comes from the model's
+frozen source provenance.

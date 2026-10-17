@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'agent')]
 from finplan_agent.config.settings import SsmNames  # noqa: E402
+from finplan_agent.core.news_evidence import summarize as summarize_news  # noqa: E402
 from finplan_agent.graph.activity import sanitize  # noqa: E402
 from scripts.beta_login import NoRedirect, validate_metadata  # noqa: E402
 from scripts.daily_paper_validation import token_for  # noqa: E402
@@ -237,6 +238,7 @@ def generate(reader, config: dict, now: datetime) -> dict:
         news = (rec.get('diagnostics') or {}).get('news_evidence') or {}
         item['model_assumptions'] = {'settings': rec.get('settings') or (rec.get('diagnostics') or {}).get('settings'), 'constraint_outcome': rec.get('constraint_outcome'), 'diagnostics': {key: value for key, value in (rec.get('diagnostics') or {}).items() if key in ('action_smoothing', 'environment', 'constraints', 'action_transform', 'horizon_sessions', 'feature_window_sessions', 'input_features')}, 'target_cash_weight': rec.get('cash_weight'), 'estimated_turnover': rec.get('estimated_turnover')}
         item['news_evidence'] = news
+        item['news_input_summary'] = summarize_news(news)
         item['news_status'] = 'consumed_under_declared_cutoff' if news.get('consumed') else 'not_consumed'
         if config.get('require_news_features', True) and not news.get('consumed'):
             issues.append('approved_news_features_not_consumed')
@@ -273,7 +275,7 @@ def generate(reader, config: dict, now: datetime) -> dict:
                       **reader.call(first['method'] + '-versus-' + item['method'], 'compare_portfolio_decisions', {
                           'portfolio_id': pid, 'previous_decision_id': first['decision_id'], 'current_decision_id': item['decision_id']})})
     report['cross_method_explanations'] = cross
-    report['pipeline_readiness'] = pipeline_readiness(config, now, report['reference_market_date'])
+    report['pipeline_readiness'] = pipeline_readiness(config, now, report['reference_market_date'], [item.get('news_input_summary', {}) for item in report['methods']])
     validation_issues = [] if history['status'] == 'available' else ['history_tool_unavailable']
     for item in report['methods']:
         if not item.get('decision_id'):
@@ -317,7 +319,8 @@ def markdown(report: dict) -> str:
         if item.get('readiness_issues'):
             lines.append('Issues: ' + ', '.join(item['readiness_issues']) + '.')
         if item.get('narrative'):
-            lines.extend(['', item['narrative'], '', 'News: ' + item.get('news_status', 'not_verified') + '.'])
+            lines.extend(['', item['narrative'], '', 'News: ' + item.get('news_status', 'not_verified') + '.', '',
+                          'Actual model news input: ' + json.dumps(item.get('news_input_summary', {}), indent=2, default=str)])
         else:
             lines.extend(['', json.dumps(item.get('error'), default=str)])
         for level, detail in item['explainability'].items():
@@ -346,7 +349,7 @@ def calendar_evidence(now: datetime) -> dict:
     return evidence(now)
 
 
-def pipeline_readiness(config: dict, now: datetime, market_date: str | None) -> dict:
+def pipeline_readiness(config: dict, now: datetime, market_date: str | None, news_inputs: list[dict] | None = None) -> dict:
     calendar = config.get('_calendar_context') or {}
     issues = []
     if not calendar:
@@ -365,13 +368,42 @@ def pipeline_readiness(config: dict, now: datetime, market_date: str | None) -> 
                 break
         except (OSError, ValueError):
             continue
-    if calendar.get('is_trading_session'):
+    numeric = [row for row in news_inputs or [] if row.get('source_kind') == 'GDELT_released_numeric_machine_metadata' and row.get('consumed')]
+    gdelt_markers = sorted(Path(config.get('gdelt_status_dir', ROOT.parent / '.worktmp/gdelt-daily-v1/daily-status')).expanduser().glob('*/*.json'))
+    gdelt_marker = None
+    for path in reversed(gdelt_markers):
+        try:
+            document = json.loads(path.read_text())
+            if document.get('decision_session', '') <= day:
+                gdelt_marker = {'path': str(path), **document}
+                break
+        except (OSError, ValueError):
+            continue
+    for row in numeric:
+        if not row.get('central_available_at') or row.get('availability_mode') != 'platform':
+            issues.append('numeric_news_central_availability_not_verified')
+        try:
+            formed = datetime.fromisoformat(str(row.get('decision_cutoff') or '').replace('Z', '+00:00'))
+            if formed.tzinfo is None or formed.astimezone(UTC).date() != now.astimezone(UTC).date():
+                issues.append('numeric_news_decision_cutoff_not_current')
+            central = datetime.fromisoformat(str(row.get('central_available_at') or '').replace('Z', '+00:00'))
+            if central.tzinfo is None or central > formed:
+                issues.append('numeric_news_central_availability_after_decision')
+        except (KeyError, TypeError, ValueError):
+            issues.append('numeric_news_timestamps_not_verified')
+        lag = row.get('source_availability_lag_hours')
+        if lag is None or lag < 0 or lag > 48:
+            issues.append('numeric_news_source_lag_outside_declared_limit')
+    if calendar.get('is_trading_session') and not numeric:
         if not marker or marker.get('decision_session') != day:
             issues.append('today_news_collector_marker_missing')
         elif not marker.get('all_profiles_published'):
             issues.append('today_news_profiles_not_all_published')
     return {'exchange_calendar': calendar, 'served_completed_session': market_date, 'news_collection': marker,
-            'new_collection_expected': calendar.get('is_trading_session'), 'issues': issues,
+            'numeric_model_inputs': numeric, 'numeric_collection_marker': gdelt_marker,
+            'numeric_marker_scope': 'Local capture only; model provenance.central_available_at establishes central availability.',
+            'paid_headline_scope': 'Separate research collection, not proof of numeric GDELT actor input.',
+            'new_collection_expected': calendar.get('is_trading_session'), 'issues': sorted(set(issues)),
             'meaning': 'Collection publication and training eligibility differ from each model actual feature consumption.'}
 
 

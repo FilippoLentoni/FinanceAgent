@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..core.news_evidence import render as render_news
 from ..providers.base import text_of
 
 _RECOMMENDATION = re.compile(
@@ -127,7 +128,10 @@ def render_recommendation(rec: dict[str, Any]) -> str:
         parts.append(f"Portfolio: {state['portfolio_id']}; revision {state.get('revision', 'not supplied')}.")
     if state.get("portfolio_value") is not None:
         parts.append(f"Marked portfolio value: {_figure(state['portfolio_value'], 2)} {state.get('base_currency', 'USD')}; high watermark: {_figure(state['high_watermark'], 2)}.")
-    parts.append(f"Market session: {rec.get('as_of', 'not supplied')}. Decisions use the completed close for the next session.")
+    if rec.get('news_timing') == 'eligible_news_at_decision_with_completed_prices':
+        parts.append(f"Reference price session: {rec.get('as_of', 'not supplied')}. The policy uses current eligible news at its declared decision cutoff with latest completed-session reference prices; these are not live intraday prices.")
+    else:
+        parts.append(f"Market session: {rec.get('as_of', 'not supplied')}. Decisions use the completed close for the next session.")
     decisions = {d["instrument_id"]: d for d in rec["decisions"]}
     rows = ["| Instrument | Action | Current shares | Target shares | Change in shares | Change in value | Target weight |",
             "|---|---|---:|---:|---:|---:|---:|"]
@@ -152,6 +156,7 @@ def render_recommendation(rec: dict[str, Any]) -> str:
     if provenance:
         parts.append("Provenance: " + "; ".join(provenance) + ".")
     parts.append("These are proposed trades, not executions. Asking again revalues the saved holdings; previous recommendations do not change them until you explicitly accept a stored decision through the paper approval workflow." if saved else "These are proposed trades, not executions. The supplied state has not been saved as holdings.")
+    parts.append(render_news((rec.get('diagnostics') or {}).get('news_evidence') or {}))
     if (rec.get('forecast') or {}).get('status') == 'not_available':
         parts.append("No calibrated return forecast is available.")
     if rec.get('limitations'):
