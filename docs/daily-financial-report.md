@@ -35,8 +35,8 @@ manufactured. Report status does not establish profitability or approve a model.
 The operator templates in `operator/systemd/` schedule 09:45 America/New_York every
 day, including Sunday 2026-10-18. Before installation, populate the private config
 with the approved paper profile's real identifier. Preserve legacy books rather
-than rewriting them to match a newly trained universe. The report reads the
-versioned XNYS calendar from the installed FinancialPlanning environment and the
+than rewriting them to match a newly trained universe. The report reads a byte-identical checksum-pinned copy of FinancialPlanning's
+versioned XNYS calendar packaged with FinanceAgent and the
 collector's `.worktmp/news-backfill/daily-status/YYYY-MM-DD/<attempt>.json` markers.
 The timer's ordering follows collection on this host; the marker and expected
 completed-session checks remain authoritative when a job fails or runs late.

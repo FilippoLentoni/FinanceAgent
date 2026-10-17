@@ -14,7 +14,6 @@ from finplan_agent.payments.news_publication import PROFILE_SYMBOLS
 from scripts.paid_news_trial import DIRECTORY
 from scripts.publish_paid_news import publish
 
-CALENDAR_PYTHON=ROOT.parent/'FinancialPlanning/.venv/bin/python'
 
 
 def stop_timer():
@@ -22,19 +21,11 @@ def stop_timer():
 
 
 def market_open(now):
-    # Research starts before the 09:00 price pipeline. The core exchange session
-    # opens at 09:30; requiring an already-open market silently skipped 08:55.
-    # Use the pipeline's shipped, versioned XNYS artifact (including early closes).
-    code="""from datetime import datetime,time
-import sys
-from finplan_platform.core.calendar import xnys_calendar
-cal=xnys_calendar();t=datetime.fromisoformat(sys.argv[1]);day=cal.local_date(t)
-cal.require_covered(day)
-local=t.astimezone(__import__('zoneinfo').ZoneInfo(cal.timezone))
-print('yes' if cal.status(day) in ('regular','early_close') and local.time()>=time(8,45) and t<cal.session_close_utc(day) else 'no')
-"""
-    result=subprocess.run([str(CALENDAR_PYTHON),'-c',code,now.isoformat()],capture_output=True,text=True,check=True,timeout=30)
-    return result.stdout.strip()=='yes'
+    # Exact pinned artifact is packaged locally so CI and operator hosts use the
+    # same holiday/early-close/DST rules without a sibling checkout or environment.
+    from finplan_agent.core.market_calendar import research_collection_open
+    return research_collection_open(now)
+
 
 
 def readiness(*, now, outcome, directory=None):

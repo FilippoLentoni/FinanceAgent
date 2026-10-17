@@ -342,17 +342,8 @@ def markdown(report: dict) -> str:
 
 
 def calendar_evidence(now: datetime) -> dict:
-    code = """from datetime import datetime
-import json,sys
-from finplan_platform.core.calendar import xnys_calendar
-cal=xnys_calendar();now=datetime.fromisoformat(sys.argv[1]);day=cal.local_date(now)
-print(json.dumps({'calendar_version':cal.version,'session_status':cal.status(day),
- 'expected_completed_session':cal.latest_closed_session(now).day.isoformat(),
- 'is_trading_session':cal.is_session(day)}))
-"""
-    result = subprocess.run([str(ROOT.parent / 'FinancialPlanning/.venv/bin/python'), '-c', code, now.isoformat()],
-                            capture_output=True, text=True, timeout=30, check=True)
-    return json.loads(result.stdout)
+    from finplan_agent.core.market_calendar import evidence
+    return evidence(now)
 
 
 def pipeline_readiness(config: dict, now: datetime, market_date: str | None) -> dict:
