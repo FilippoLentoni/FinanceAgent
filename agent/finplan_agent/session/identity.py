@@ -84,7 +84,8 @@ def caller_from_headers(headers: Mapping[str, str] | None, environment: str) -> 
         groups = [groups]
     role_set = {g for g in groups if isinstance(g, str) and _ROLE_RE.match(g)}
     # Cognito client-credentials (machine) tokens carry sub == client_id and no user groups: the only
-    # machine client of the pool is the environment's ci_test client (design D2).
+    # machine clients of the pool (the ci_test client and the modeling runner client) all hold only the
+    # ci_test scope and act as the ci_test role (design D2).
     if claims.get("client_id") and claims.get("client_id") == sub and "username" not in claims:
         role_set.add("ci_test")
     roles = tuple(sorted(role_set))

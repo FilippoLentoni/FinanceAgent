@@ -246,6 +246,7 @@ def stage_role_statements(env: str, store_bucket_arn: str, *, partition: str = P
                 p(f"{own}/release/*"),
                 p(f"{own}/agent/*"),
                 p(f"{own}/secret-ref/ci-test-client"),
+                p(f"{own}/secret-ref/modeling-runner-client"),
                 p(f"{own}/config/explanation-provider"),
                 p(f"{own}/config/explanation-model-id"),
                 p(f"{own}/config/explanation-guards"),

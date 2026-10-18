@@ -29,7 +29,7 @@ The resolved values are exported as pipeline variables (never an artifact, never
 (:func:`finplan_contracts.ssm.check_write` on every write):
 
 * ``agent/user-pool-ref``, ``agent/authorizer-metadata-ref`` (JSON ``discovery_url``, ``issuer``,
-  ``allowed_clients``, ``token_endpoint``, ``scopes``), ``secret-ref/ci-test-client`` (secret NAME),
+  ``allowed_clients``, ``token_endpoint``, ``scopes``), ``secret-ref/ci-test-client`` and ``secret-ref/modeling-runner-client`` (secret NAMEs),
   ``agent/runtime-ref``, ``agent/gateway-endpoint-ref``, ``agent/gateway-principal-ref``,
   ``agent/policy-digest``, ``agent/gateway-targets``, ``agent/runtime-image``; corresponding separate
   ``agent/classical-gateway-endpoint-ref``, ``agent/classical-gateway-principal-ref``,
@@ -388,7 +388,7 @@ def stack_outputs(cfn: Any, env: str) -> dict[str, str]:
     return out
 
 
-REQUIRED_OUTPUTS = ("UserPoolId", "PkceClientId", "CiTestClientId", "DiscoveryUrl", "Issuer", "TokenEndpoint", "RuntimeArn", "GatewayUrl", "PolicyDigest", "ClassicalGatewayUrl", "ClassicalPolicyDigest")
+REQUIRED_OUTPUTS = ("UserPoolId", "PkceClientId", "CiTestClientId", "ModelingRunnerClientId", "DiscoveryUrl", "Issuer", "TokenEndpoint", "RuntimeArn", "GatewayUrl", "PolicyDigest", "ClassicalGatewayUrl", "ClassicalPolicyDigest")
 
 
 def explanation_guards(cfg: Mapping[str, Any], existing: str | None) -> str:
@@ -414,7 +414,7 @@ def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], 
     meta = {
         "discovery_url": outputs["DiscoveryUrl"],
         "issuer": outputs["Issuer"],
-        "allowed_clients": [outputs["PkceClientId"], outputs["CiTestClientId"]],
+        "allowed_clients": [outputs["PkceClientId"], outputs["CiTestClientId"], outputs["ModelingRunnerClientId"]],
         "public_client_id": outputs["PkceClientId"],
         "token_endpoint": outputs["TokenEndpoint"],
         "authorize_endpoint": outputs["TokenEndpoint"].replace("/oauth2/token", "/oauth2/authorize"),
@@ -429,6 +429,7 @@ def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], 
     add("user-pool-ref", "agent", "user-pool-ref", outputs["UserPoolId"])
     add("authorizer-metadata-ref", "agent", "authorizer-metadata-ref", json.dumps(meta, sort_keys=True, separators=(",", ":")))
     add("ci-test-client-secret-ref", "secret-ref", "ci-test-client", outputs.get("CiTestClientSecretName") or n.secret_name(env, "ci-test-client"))
+    add("modeling-runner-client-secret-ref", "secret-ref", "modeling-runner-client", outputs.get("ModelingRunnerClientSecretName") or n.secret_name(env, "modeling-runner-client"))
     add("runtime-ref", "agent", "runtime-ref", outputs["RuntimeArn"])
     add("gateway-endpoint-ref", "agent", "gateway-endpoint-ref", outputs["GatewayUrl"])
     add("gateway-principal-ref", "agent", "gateway-principal-ref", n.gateway_role_name(env))

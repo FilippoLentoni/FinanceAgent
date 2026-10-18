@@ -114,9 +114,30 @@ def test_clients_pkce_public_and_ci_client_credentials_with_secret_by_name(templ
     assert ci["GenerateSecret"] is True and ci["AllowedOAuthFlows"] == ["client_credentials"]
     assert any("/ci_test" in json.dumps(s) for s in ci["AllowedOAuthScopes"]) and len(ci["AllowedOAuthScopes"]) == 1
     assert not any("ci_test" in json.dumps(s) for s in pkce["AllowedOAuthScopes"])
-    secret = next(iter(resources(t, "AWS::SecretsManager::Secret").values()))["Properties"]
-    assert secret["Name"] == "finplan/beta/financeagent/ci-test-client"
-    assert "ClientSecret" in json.dumps(secret["SecretString"])  # deploy-time GetAtt, never a literal
+    secrets = {r["Properties"]["Name"]: r["Properties"] for r in resources(t, "AWS::SecretsManager::Secret").values()}
+    assert set(secrets) == {"finplan/beta/financeagent/ci-test-client", "finplan/beta/financeagent/modeling-runner-client"}
+    for secret in secrets.values():
+        assert "ClientSecret" in json.dumps(secret["SecretString"])  # deploy-time GetAtt, never a literal
+        assert "KmsKeyId" not in secret  # AWS-managed aws/secretsmanager key, like the ci_test secret
+
+
+def test_modeling_runner_client_has_the_ci_scope_its_own_secret_and_is_authorized(templates):
+    t = templates["identity:beta"]
+    clients = {r["Properties"]["ClientName"]: (lid, r) for lid, r in resources(t, "AWS::Cognito::UserPoolClient").items()}
+    lid, mr = clients["finplan-beta-financeagent-modeling-runner-client"]
+    props = mr["Properties"]
+    assert props["GenerateSecret"] is True and props["AllowedOAuthFlows"] == ["client_credentials"]
+    assert len(props["AllowedOAuthScopes"]) == 1 and "/ci_test" in json.dumps(props["AllowedOAuthScopes"])
+    assert mr["Metadata"]["logical-role"] == "modeling-runner-client"
+    secret = next(r for r in resources(t, "AWS::SecretsManager::Secret").values() if r["Properties"]["Name"] == "finplan/beta/financeagent/modeling-runner-client")
+    assert lid in json.dumps(secret["Properties"]["SecretString"])
+    assert {"Key": "logical-role", "Value": "modeling-runner-client"} in secret["Properties"]["Tags"]
+    assert t["Outputs"]["ModelingRunnerClientSecretName"]["Value"] == "finplan/beta/financeagent/modeling-runner-client"
+    # every JWT authorizer of the agent stack (primary and classical Gateways, Runtime) admits the client
+    agent = templates["agent:beta"]
+    allow_lists = [json.dumps(r["Properties"]["AuthorizerConfiguration"]["CustomJWTAuthorizer"]["AllowedClients"]) for r in agent["Resources"].values() if "CustomJWTAuthorizer" in json.dumps(r.get("Properties", {}).get("AuthorizerConfiguration", {}))]
+    assert len(allow_lists) >= 3
+    assert all(lid in a for a in allow_lists)
 
 
 @pytest.mark.parametrize("env", ENVS)

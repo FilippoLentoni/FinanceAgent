@@ -309,10 +309,12 @@ class FakeCfn:
                 "UserPoolId": f"{REGION}_FAKEPOOL",
                 "PkceClientId": "fakepkceclient",
                 "CiTestClientId": "fakeciclient",
+                "ModelingRunnerClientId": "fakemodelingclient",
                 "DiscoveryUrl": f"https://cognito-idp.{REGION}.amazonaws.com/{REGION}_FAKEPOOL/.well-known/openid-configuration",
                 "Issuer": f"https://cognito-idp.{REGION}.amazonaws.com/{REGION}_FAKEPOOL",
                 "TokenEndpoint": TOKEN_URL,
                 "CiTestClientSecretName": f"finplan/{self.env}/financeagent/ci-test-client",
+                "ModelingRunnerClientSecretName": f"finplan/{self.env}/financeagent/modeling-runner-client",
             }
         else:
             outs = {
@@ -368,6 +370,9 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     assert get("/finplan/beta/financeagent/secret-ref/ci-test-client") == "finplan/beta/financeagent/ci-test-client"
     meta = json.loads(get("/finplan/beta/financeagent/agent/authorizer-metadata-ref"))
     assert set(meta) >= {"discovery_url", "issuer", "allowed_clients", "token_endpoint"}
+    assert meta["allowed_clients"] == ["fakepkceclient", "fakeciclient", "fakemodelingclient"]
+    assert get("/finplan/beta/financeagent/secret-ref/modeling-runner-client") == "finplan/beta/financeagent/modeling-runner-client"
+    assert m["outputs"]["modeling-runner-client-secret-ref"] == "/finplan/beta/financeagent/secret-ref/modeling-runner-client"
     assert get("/finplan/beta/financeagent/config/budget-enforced-role-names").split(",")[0] == "finplan-beta-financeagent-runtime-role"
     assert json.loads(get("/finplan/beta/financeagent/agent/gateway-targets"))["describe_capabilities"].endswith(":current")
     assert get("/finplan/beta/financeagent/agent/classical-gateway-endpoint-ref") != get("/finplan/beta/financeagent/agent/gateway-endpoint-ref")
@@ -395,7 +400,7 @@ def test_prod_needs_approval_and_unknown_beta_provider_is_rejected(ssm):
         rel.planned_parameters(
             "beta",
             _info(),
-            {"UserPoolId": "p", "DiscoveryUrl": "d", "Issuer": "i", "PkceClientId": "a", "CiTestClientId": "b", "TokenEndpoint": TOKEN_URL, "RuntimeArn": "r", "GatewayUrl": "g", "PolicyDigest": "sha256:" + "0" * 64},
+            {"UserPoolId": "p", "DiscoveryUrl": "d", "Issuer": "i", "PkceClientId": "a", "CiTestClientId": "b", "ModelingRunnerClientId": "c", "TokenEndpoint": TOKEN_URL, "RuntimeArn": "r", "GatewayUrl": "g", "PolicyDigest": "sha256:" + "0" * 64},
             cfg,
             targets={},
             existing_guards=None,

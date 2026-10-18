@@ -44,6 +44,8 @@ KNOWN_GAPS: tuple[ContractGap, ...] = (
     ContractGap("FA-GAP-COGNITO-GROUPS", "oidc-identity-provider", "AWS::Cognito::UserPoolGroup", "oidc-identity-provider", "roles are Cognito groups (design D2); the row lists no AWS::Cognito::UserPoolGroup"),
     ContractGap("FA-GAP-COGNITO-GROUPS", "oidc-identity-provider", "AWS::Cognito::UserPoolGroup", "ci-test-client", "the ci_test group"),
     ContractGap("FA-GAP-CI-SECRET", "oidc-identity-provider", "AWS::SecretsManager::Secret", "ci-test-client", "the ci_test client secret lives in Secrets Manager (design D2/D7); the row lists no AWS::SecretsManager::Secret"),
+    ContractGap("FA-GAP-MODELING-CLIENT", "oidc-identity-provider", "AWS::Cognito::UserPoolClient", "modeling-runner-client", "the FinanceModel modeling runner's own client-credentials client (same ci_test scope); the row lists only the ci-test-client machine role"),
+    ContractGap("FA-GAP-MODELING-CLIENT", "oidc-identity-provider", "AWS::SecretsManager::Secret", "modeling-runner-client", "the modeling runner client secret lives in Secrets Manager like the ci_test one; the row lists no AWS::SecretsManager::Secret"),
     ContractGap("FA-GAP-PIPELINE-LOGS", "pipeline-financeagent", "AWS::Logs::LogGroup", "pipeline-build-project", "explicit 30-day CodeBuild log groups (lesson L6), as contracts 0.2.1/1.0.0 added for FinancialPlanning and FinanceModel"),
 )
 

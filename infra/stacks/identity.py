@@ -14,7 +14,20 @@ environment's Gateway and Runtime:
   (Claude Code, Codex): no secret;
 * the ``ci_test`` client-credentials client; its id and secret are stored in Secrets Manager under
   ``finplan/<env>/financeagent/ci-test-client`` (JSON ``{"client_id", "client_secret"}``) and the
-  pipeline publishes only that NAME at ``/finplan/<env>/financeagent/secret-ref/ci-test-client``.
+  pipeline publishes only that NAME at ``/finplan/<env>/financeagent/secret-ref/ci-test-client``;
+* the ``modeling-runner-client`` client-credentials client of the FinanceModel modeling runner
+  (role ``finplan-<env>-financemodel-forward-runner-role``): the same ``ci_test`` scope (the Gateway
+  policies admit the read-only modeling tools ``recommend_portfolio``,
+  ``recommend_classical_portfolio`` and ``query_market_data`` by that scope), its own credentials in
+  ``finplan/<env>/financeagent/modeling-runner-client`` (same JSON, same AWS-managed
+  ``aws/secretsmanager`` encryption as the ci_test secret), NAME published at
+  ``/finplan/<env>/financeagent/secret-ref/modeling-runner-client``. Like the ci_test secret it has
+  no resource policy: the consumer role (same account) needs an identity policy allowing
+  ``secretsmanager:GetSecretValue`` on ``finplan/<env>/financeagent/modeling-runner-client-*`` and
+  ``ssm:GetParameter`` on the secret-ref and ``agent/authorizer-metadata-ref`` /
+  ``agent/runtime-ref``; no ``kms:Decrypt`` grant is needed for the AWS-managed key.
+
+Every client is in the Gateway and Runtime JWT authorizer allow-list (:attr:`IdentityStack.allowed_clients`).
 
 Nothing here names a pool, client, issuer or account: every value is a deploy-time token, published
 by the stage runner from the stack outputs (``user-pool-ref``, ``authorizer-metadata-ref``).
@@ -39,6 +52,8 @@ __all__ = ["GROUPS", "IdentityStack"]
 GROUPS = ("viewer", "researcher", "plan_editor", "plan_publisher", "ci_test")
 LOGICAL = "oidc-identity-provider"
 CI_LOGICAL = "ci-test-client"
+MODELING_LOGICAL = "modeling-runner-client"
+MODELING_RUNNER_ROLE = "finplan-{env}-financemodel-forward-runner-role"
 
 
 class IdentityStack(EnvStack):
@@ -49,7 +64,7 @@ class IdentityStack(EnvStack):
             construct_id,
             env_name=env_name,
             region=region,
-            description=f"FinanceAgent {env_name}: Cognito user pool (the Gateway and Runtime identity provider), app clients, ci_test client secret",
+            description=f"FinanceAgent {env_name}: Cognito user pool (the Gateway and Runtime identity provider), app clients, ci_test and modeling runner client secrets",
             stack_name=n.identity_stack_name(env_name),
             **kwargs,
         )
@@ -122,6 +137,28 @@ class IdentityStack(EnvStack):
             self, "CiTestClientSecret", name=n.secret_name(env, "ci-test-client"), description=f"FinanceAgent {env} ci_test client credentials (read by the {env} pipeline stage role only)", secret_string=secret_value
         )
         tag_role(self.ci_secret, CI_LOGICAL)
+        # Dedicated machine client of the FinanceModel modeling runner (same scope, own credentials).
+        self.modeling_client = self.pool.add_client(
+            "ModelingRunnerClient",
+            user_pool_client_name=n.env_name(env, MODELING_LOGICAL),
+            generate_secret=True,
+            auth_flows=cognito.AuthFlow(user_srp=False, user_password=False, custom=False, admin_user_password=False),
+            o_auth=cognito.OAuthSettings(flows=cognito.OAuthFlows(client_credentials=True), scopes=[cognito.OAuthScope.resource_server(self.resource_server, ci_scope)]),
+            access_token_validity=Duration.minutes(60),
+            enable_token_revocation=True,
+            prevent_user_existence_errors=True,
+        )
+        mr_cfn = self.modeling_client.node.default_child
+        mr_cfn.add_metadata("logical-role", MODELING_LOGICAL)
+        mr_value = Fn.join("", ['{"client_id":"', mr_cfn.attr_client_id, '","client_secret":"', mr_cfn.attr_client_secret, '"}'])
+        self.modeling_secret = sm.CfnSecret(
+            self,
+            "ModelingRunnerClientSecret",
+            name=n.secret_name(env, MODELING_LOGICAL),
+            description=f"FinanceAgent {env} modeling runner client credentials (read by {MODELING_RUNNER_ROLE.format(env=env)})",
+            secret_string=mr_value,
+        )
+        tag_role(self.modeling_secret, MODELING_LOGICAL)
 
         self.discovery_url = Fn.join("", ["https://cognito-idp.", Aws.REGION, ".amazonaws.com/", self.pool.user_pool_id, "/.well-known/openid-configuration"])
         self.issuer = Fn.join("", ["https://cognito-idp.", Aws.REGION, ".amazonaws.com/", self.pool.user_pool_id])
@@ -131,14 +168,16 @@ class IdentityStack(EnvStack):
             "UserPoolArn": self.pool.user_pool_arn,
             "PkceClientId": self.pkce_client.user_pool_client_id,
             "CiTestClientId": self.ci_client.user_pool_client_id,
+            "ModelingRunnerClientId": self.modeling_client.user_pool_client_id,
             "DiscoveryUrl": self.discovery_url,
             "Issuer": self.issuer,
             "TokenEndpoint": self.token_endpoint,
             "CiTestClientSecretName": n.secret_name(env, "ci-test-client"),
+            "ModelingRunnerClientSecretName": n.secret_name(env, MODELING_LOGICAL),
         }
         for k, v in outputs.items():
             cdk.CfnOutput(self, k, value=v)
 
     @property
     def allowed_clients(self) -> list[str]:
-        return [self.pkce_client.user_pool_client_id, self.ci_client.user_pool_client_id]
+        return [self.pkce_client.user_pool_client_id, self.ci_client.user_pool_client_id, self.modeling_client.user_pool_client_id]

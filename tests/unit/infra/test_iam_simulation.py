@@ -148,4 +148,5 @@ def test_stage_and_build_roles_never_invoke_bedrock_or_tools_directly():
     assert _allowed(stage, "secretsmanager:GetSecretValue", f"arn:aws:secretsmanager:{R}:{A}:secret:finplan/beta/financeagent/ci-test-client-AbCdEf")
     assert not _allowed(stage, "secretsmanager:GetSecretValue", f"arn:aws:secretsmanager:{R}:{A}:secret:finplan/gamma/financeagent/ci-test-client-AbCdEf")
     assert _allowed(stage, "ssm:PutParameter", f"arn:aws:ssm:{R}:{A}:parameter/finplan/beta/financeagent/agent/runtime-ref")
+    assert _allowed(stage, "ssm:PutParameter", f"arn:aws:ssm:{R}:{A}:parameter/finplan/beta/financeagent/secret-ref/modeling-runner-client")
     assert not _allowed(stage, "ssm:PutParameter", f"arn:aws:ssm:{R}:{A}:parameter/finplan/beta/financelambdastool/lambda/x-arn")

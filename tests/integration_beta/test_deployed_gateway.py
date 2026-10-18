@@ -43,7 +43,7 @@ def test_authorizer_metadata_points_to_this_environments_pool():
     meta = json.loads(env.param(env.names.authorizer_metadata_ref))
     pool = env.param(env.names.user_pool_ref)
     assert meta["issuer"].endswith("/" + pool) and pool in meta["discovery_url"]
-    assert len(meta["allowed_clients"]) == 2 and meta["token_endpoint"].endswith("/oauth2/token")
+    assert len(meta["allowed_clients"]) == 3 and meta["token_endpoint"].endswith("/oauth2/token")
 
 
 def test_beta_runs_the_configured_hosted_provider():
