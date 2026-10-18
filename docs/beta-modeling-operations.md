@@ -87,6 +87,11 @@ activations cannot exhaust an hourly start limit. The other services retain a
 three-start hourly bound. Start-limit failures remain visible in the journal;
 never fabricate snapshot files for missed activations.
 
+The weekly service admits 1850 seconds for its two sequential read-only report
+commands: the closed seven-day window first, then the current provisional window.
+Each command still has its 900-second deadline. This aligns the service with both
+windows and leaves model, paid-provider and managed-compute limits unchanged.
+
 Initial deployment verification is deliberately separate from recurring proof.
 The manual primary slot before the declared experiment horizon remains visible
 as original evidence, and is excluded from automatic comparison execution. The

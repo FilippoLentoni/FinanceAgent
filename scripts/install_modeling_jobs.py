@@ -20,7 +20,10 @@ CALENDARS = {
     "eod": "*-*-* 17:00:00 America/New_York",
     "weekly": "*-*-* 17:10:00 America/New_York",
 }
-TIMEOUTS = {"snapshot": 70, "research": 1550, "hourly": 3400, "eod": 950, "weekly": 950}
+# Weekly renders the closed window, then the current provisional window. Each
+# read-only report command retains its 900-second child deadline; admit both plus
+# wrapper shutdown time without changing any model/managed-compute approval cap.
+TIMEOUTS = {"snapshot": 70, "research": 1550, "hourly": 3400, "eod": 950, "weekly": 1850}
 START_LIMIT_INTERVALS = {"snapshot": 60, "research": 3600, "hourly": 3600, "eod": 3600, "weekly": 3600}
 
 
