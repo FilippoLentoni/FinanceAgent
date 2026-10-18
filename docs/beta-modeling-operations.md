@@ -72,7 +72,7 @@ does not stop these jobs, but stopping EC2 does.
 | research | Every thirty minutes: real headless Codex invokes retrieval swarm and review |
 | hourly | At :05 UTC: permanent hourly slot accounting, all cohorts, forecasts and report |
 | eod | 17:00 America/New_York daily, including closed-market days |
-| weekly | 17:10 America/New_York daily, rolling seven-calendar-day window |
+| weekly | 17:25 America/New_York daily, rolling seven-calendar-day window |
 
 Each prefix has a `.service` and `.timer`. Jobs use independent non-overlap locks,
 bounded subprocess/process-group deadlines, retries with the original permanent
@@ -87,10 +87,27 @@ activations cannot exhaust an hourly start limit. The other services retain a
 three-start hourly bound. Start-limit failures remain visible in the journal;
 never fabricate snapshot files for missed activations.
 
-The weekly service admits 1850 seconds for its two sequential read-only report
-commands: the closed seven-day window first, then the current provisional window.
-Each command still has its 900-second deadline. This aligns the service with both
-windows and leaves model, paid-provider and managed-compute limits unchanged.
+The weekly service admits 3050 seconds for its two sequential read-only report
+windows (closed, then provisional). Only the exact configured interpreter and
+`platform_root/scripts/modeling_report.py` with `--weekly` or
+`--repair-weekly-from-queue` receive a 1500-second child deadline. Ordinary daily
+reports, model/native/provider commands and their retry budgets retain 900 seconds;
+research retains 1500 seconds and the hourly service retains 3400 seconds. Paid/GPU
+approval, vendor caps, artifact/transport limits and environment isolation are
+unchanged.
+
+A controlled 169-hour DST-fallback corpus on 2026-10-18 exceeded the former
+900-second report deadline: aggregation/consolidation took 384.49 seconds and
+original-byte packing 497.97 seconds, leaving no time for encoding/publication.
+The original failed evidence is retained. The report-only 1500-second bound is a
+runtime allowance, not proof of weekly capacity; acceptance still requires an
+actual complete build under that bound plus exact original-input browser checks.
+
+The weekly timer runs at 17:25 America/New_York to usually follow the 17:05
+hourly report. Reports share a per-output process lock before heavy aggregation;
+contention remains inside the same bounded retry deadline. Model, research and
+snapshot jobs remain independent. EOD remains at 17:00; the hourly cadence is
+unchanged. A delayed or failed publication stays visible in job health.
 
 An explicit `report_cache_dir` in the private EC2 configuration enables the
 reporter's disposable checksum-verified original-byte cache for hourly, EOD and
