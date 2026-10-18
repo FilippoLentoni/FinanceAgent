@@ -8,9 +8,9 @@ from finplan_agent.modeling.jobs import atomic_json, missed_hours, run_job, slot
 from finplan_agent.modeling import jobs
 
 
-def test_independent_minute_six_hour_hour_slots_and_ny_calendar():
+def test_independent_hourly_six_hour_slots_and_ny_calendar():
     at = datetime(2026, 10, 18, 0, 31, 42, tzinfo=UTC)
-    assert slot_for("snapshot", at) == "2026-10-18T00:31:00Z"
+    assert slot_for("snapshot", at) == "2026-10-18T00:00:00Z"
     assert slot_for("research", at) == "2026-10-18T00:00:00Z"
     assert slot_for("research", datetime(2026, 10, 18, 17, 59, tzinfo=UTC)) == "2026-10-18T12:00:00Z"
     assert slot_for("hourly", at) == "2026-10-18T00:00:00Z"
