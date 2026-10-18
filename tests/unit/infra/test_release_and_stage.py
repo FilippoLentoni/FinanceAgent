@@ -371,8 +371,7 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     meta = json.loads(get("/finplan/beta/financeagent/agent/authorizer-metadata-ref"))
     assert set(meta) >= {"discovery_url", "issuer", "allowed_clients", "token_endpoint"}
     assert meta["allowed_clients"] == ["fakepkceclient", "fakeciclient", "fakemodelingclient"]
-    assert get("/finplan/beta/financeagent/secret-ref/modeling-runner-client") == "finplan/beta/financeagent/modeling-runner-client"
-    assert m["outputs"]["modeling-runner-client-secret-ref"] == "/finplan/beta/financeagent/secret-ref/modeling-runner-client"
+    assert "modeling-runner-client-secret-ref" not in m["outputs"]
     assert get("/finplan/beta/financeagent/config/budget-enforced-role-names").split(",")[0] == "finplan-beta-financeagent-runtime-role"
     assert json.loads(get("/finplan/beta/financeagent/agent/gateway-targets"))["describe_capabilities"].endswith(":current")
     assert get("/finplan/beta/financeagent/agent/classical-gateway-endpoint-ref") != get("/finplan/beta/financeagent/agent/gateway-endpoint-ref")

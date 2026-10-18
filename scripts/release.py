@@ -429,7 +429,8 @@ def planned_parameters(env: str, info: ReleaseInfo, outputs: Mapping[str, str], 
     add("user-pool-ref", "agent", "user-pool-ref", outputs["UserPoolId"])
     add("authorizer-metadata-ref", "agent", "authorizer-metadata-ref", json.dumps(meta, sort_keys=True, separators=(",", ":")))
     add("ci-test-client-secret-ref", "secret-ref", "ci-test-client", outputs.get("CiTestClientSecretName") or n.secret_name(env, "ci-test-client"))
-    add("modeling-runner-client-secret-ref", "secret-ref", "modeling-runner-client", outputs.get("ModelingRunnerClientSecretName") or n.secret_name(env, "modeling-runner-client"))
+    # The modeling-runner secret NAME is deterministic (finplan/<env>/financeagent/modeling-runner-client);
+    # its secret-ref is not published until a bootstrap re-run grants the stage role that PutParameter.
     add("runtime-ref", "agent", "runtime-ref", outputs["RuntimeArn"])
     add("gateway-endpoint-ref", "agent", "gateway-endpoint-ref", outputs["GatewayUrl"])
     add("gateway-principal-ref", "agent", "gateway-principal-ref", n.gateway_role_name(env))
