@@ -127,6 +127,23 @@ def execute(command, *, cwd, timeout, stdin=None, final=None):
     return process.returncode
 
 
+def command_deadline(cfg, command):
+    """Longer read-only weekly reports never expand model/provider deadlines."""
+    platform_root=cfg.get("platform_root")
+    runtime_python=cfg.get("runtime_python")
+    if not platform_root or not runtime_python or len(command)<2:
+        return 900
+    expected=Path(platform_root)/"scripts"/"modeling_report.py"
+    # Match the actual configured interpreter and script positions. An arbitrary
+    # command containing a weekly flag, module name or matching basename cannot
+    # obtain the report-only deadline.
+    if command[0]!=runtime_python or command[1]!=str(expected):
+        return 900
+    if "--weekly" in command[2:] or "--repair-weekly-from-queue" in command[2:]:
+        return 1500
+    return 900
+
+
 def run_job(cfg, job, slot, directory, *, execute_fn=execute):
     root = Path(cfg["project_root"])
     if job == "snapshot":
@@ -174,12 +191,13 @@ def run_job(cfg, job, slot, directory, *, execute_fn=execute):
     failures = []
     for template in commands:
         command = [s.replace("{slot}", slot).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(directory)).replace("{previous_day}", prior_day or "") for s in template]
+        deadline=command_deadline(cfg,command)
         try:
-            retry=execute_with_retry(command,cwd=cfg["runtime_root"],timeout=900,execute_fn=execute_fn)
-            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "succeeded", **retry})
+            retry=execute_with_retry(command,cwd=cfg["runtime_root"],timeout=deadline,execute_fn=execute_fn)
+            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "succeeded", "deadline_seconds": deadline, **retry})
         except Exception as exc:
             failures.append(type(exc).__name__)
-            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "failed", "error_code": type(exc).__name__})
+            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "failed", "deadline_seconds": deadline, "error_code": type(exc).__name__})
             # Still generate the report exposing the failed approach/cohort.
     atomic_json(directory / "command-results.json", {"commands": records})
     if failures:
