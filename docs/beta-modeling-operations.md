@@ -123,3 +123,12 @@ renders the previous calendar day using `{previous_day}` before the current-day
 commands. This incorporates late evening and 23:30 interim recommendations into
 a new immutable dated revision while leaving the original 17:00 archive intact.
 The current-day render runs last and restores the current `latest.html` alias.
+
+An hourly runtime exit75 means a permanent slot remains incomplete, commonly
+because the original invocation's600-second lease has not expired. The wrapper
+keeps the same command and slot under its existing job lock, waits at most30
+seconds between attempts, and retries only this explicit condition within one
+900-second command deadline. It never advances the successful-hour checkpoint
+while work is incomplete. Generic command failures are not retried by this path.
+After lease expiry the runtime recovers the captured attempt without repeating
+model invocation. Expired deadlines remain failed health events for later repair.
