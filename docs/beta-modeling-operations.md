@@ -98,6 +98,14 @@ weekly jobs. Snapshot/research jobs do not receive that setting. DynamoDB heads
 are always read fresh; deleting only this cache forces verified S3 reads and
 does not delete authoritative evidence or reset any run, forecast or portfolio.
 
+`report_refresh_dir` retains small operational tasks for late managed-model cost
+receipts. The importer writes a task before acknowledging its Model outbox entry;
+the report clears it only after archiving the exact authoritative observation.
+Historical daily revisions run before the current daily view. A separate read-only
+hourly command repairs at most one queued historical weekly window, preserving a
+newer weekly latest alias. These tasks contain record references, not another
+portfolio ledger. Leave failed or overflowing tasks visible for recovery.
+
 Initial deployment verification is deliberately separate from recurring proof.
 The manual primary slot before the declared experiment horizon remains visible
 as original evidence, and is excluded from automatic comparison execution. The

@@ -56,18 +56,20 @@ def test_atomic_health_state_does_not_lose_retry_slot(tmp_path):
 @pytest.mark.parametrize("job", ["hourly", "eod", "weekly", "research", "snapshot"])
 def test_configured_evidence_cache_is_enabled_only_for_report_jobs(tmp_path, monkeypatch, job):
     cache = tmp_path / "private-original-byte-cache"
+    queue = tmp_path / "pending-report-revisions"
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"environment": "beta", "region": "us-east-2",
-        "state_dir": str(tmp_path / "state"), "report_cache_dir": str(cache)}))
+        "state_dir": str(tmp_path / "state"), "report_cache_dir": str(cache), "report_refresh_dir": str(queue)}))
     monkeypatch.delenv("FINPLAN_REPORT_CACHE_DIR", raising=False)
+    monkeypatch.delenv("FINPLAN_REPORT_REFRESH_DIR", raising=False)
     observed = []
     def worker(*args):
-        observed.append(jobs.os.environ.get("FINPLAN_REPORT_CACHE_DIR"))
+        observed.append((jobs.os.environ.get("FINPLAN_REPORT_CACHE_DIR"), jobs.os.environ.get("FINPLAN_REPORT_REFRESH_DIR")))
         return {"completed": True}
     monkeypatch.setattr(jobs, "run_job", worker)
     slot = "2026-10-18T02:00:00Z" if job in ("hourly", "research", "snapshot") else "2026-10-17"
     assert jobs.main([job, "--config", str(config), "--slot", slot]) == 0
-    assert observed == [str(cache) if job in ("hourly", "eod", "weekly") else None]
+    assert observed == [(str(cache), str(queue)) if job in ("hourly", "eod", "weekly") else (None, None)]
 
 
 def test_failed_slot_retries_then_duplicate_is_a_noop(tmp_path, monkeypatch):

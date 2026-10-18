@@ -196,10 +196,13 @@ def main(argv=None):
     cfg = json.loads(args.config.read_text())
     if cfg.get("environment") != "beta" or cfg.get("region") != "us-east-2":
         parser.error("only beta/us-east-2 is authorized")
-    if args.job in ("hourly", "eod", "weekly") and cfg.get("report_cache_dir"):
-        # Disposable verified original-byte cache; authoritative heads stay in
-        # DynamoDB. Do not add report settings to the separate Codex workflows.
-        os.environ["FINPLAN_REPORT_CACHE_DIR"] = str(Path(cfg["report_cache_dir"]).resolve())
+    if args.job in ("hourly", "eod", "weekly"):
+        # Disposable byte cache and durable operational refresh tasks; financial
+        # evidence stays authoritative in DynamoDB/S3. Keep Codex jobs separate.
+        for setting, variable in (("report_cache_dir", "FINPLAN_REPORT_CACHE_DIR"),
+                                  ("report_refresh_dir", "FINPLAN_REPORT_REFRESH_DIR")):
+            if cfg.get(setting):
+                os.environ[variable] = str(Path(cfg[setting]).resolve())
     state = Path(cfg["state_dir"])
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     slot = args.slot or slot_for(args.job, datetime.now(UTC))
