@@ -92,6 +92,12 @@ commands: the closed seven-day window first, then the current provisional window
 Each command still has its 900-second deadline. This aligns the service with both
 windows and leaves model, paid-provider and managed-compute limits unchanged.
 
+An explicit `report_cache_dir` in the private EC2 configuration enables the
+reporter's disposable checksum-verified original-byte cache for hourly, EOD and
+weekly jobs. Snapshot/research jobs do not receive that setting. DynamoDB heads
+are always read fresh; deleting only this cache forces verified S3 reads and
+does not delete authoritative evidence or reset any run, forecast or portfolio.
+
 Initial deployment verification is deliberately separate from recurring proof.
 The manual primary slot before the declared experiment horizon remains visible
 as original evidence, and is excluded from automatic comparison execution. The
