@@ -35,6 +35,12 @@ normalization; price-only actors say news not consumed. Model weights are immuta
 versioned model artifacts, separate from the exact decision observation payload.
 Never capture credentials or hidden model reasoning.
 
+The explicit recommendation route can execute deterministic planning, the
+`recommend_portfolio` tool and deterministic narration without a Bedrock model
+call. The first live capture followed this route and returned the served PPO
+allocation. Label the allocation origin and actual captured boundaries; a
+configured Nova model is not evidence that Nova ran or consumed the news.
+
 Automatic execution applies only to newly isolated synthetic experiment books.
 Existing user portfolio acceptance still requires explicit confirmation. The
 common evaluator enforces eligible prices, costs, cash and positions; policy
@@ -76,6 +82,14 @@ inference. DynamoDB conditional writes, invocation leases, permanent execution
 receipts and optimistic holdings revisions prevent duplicate fills after retries.
 Snapshot work cannot invoke the financial workflow. Preserve unrelated schedules;
 the legacy Claude snapshot timer must remain disabled.
+
+Initial deployment verification is deliberately separate from recurring proof.
+The manual primary slot before the declared experiment horizon remains visible
+as original evidence, and is excluded from automatic comparison execution. The
+first declared hourly slot may be accounted as missed if installation completes
+after its timer; retain that declared horizon and never relabel a manual run as a
+scheduled invocation. Check actual `systemd_scheduled` receipts and permanent
+run IDs for acceptance.
 
 Use these commands as ec2-user:
 
@@ -123,6 +137,19 @@ renders the previous calendar day using `{previous_day}` before the current-day
 commands. This incorporates late evening and 23:30 interim recommendations into
 a new immutable dated revision while leaving the original 17:00 archive intact.
 The current-day render runs last and restores the current `latest.html` alias.
+
+## Host supervision
+
+The existing IDE exhausted the host's inotify watch allowance during live
+verification. The additive host setting
+`/etc/sysctl.d/90-finplan-beta-modeling-inotify.conf` sets
+`fs.inotify.max_user_watches=262144`; it preserves existing IDE processes and
+does not change cloud resources or financial spending limits. Original value and
+rollback evidence are in `.worktmp/beta-modeling/inotify-adjustment.json`. Inspect
+`/proc/sys/fs/inotify/max_user_watches` and the user journal if systemd reports
+inotify `ENOSPC`. To roll this host change back, first check that the file still
+contains the task-owned setting, remove only that file, and restore the recorded
+previous value with `sudo sysctl -w`; preserve any subsequent administrator edits.
 
 An hourly runtime exit75 means a permanent slot remains incomplete, commonly
 because the original invocation's600-second lease has not expired. The wrapper
