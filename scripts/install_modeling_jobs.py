@@ -24,7 +24,14 @@ CALENDARS = {
 # exact configured read-only weekly report has a 1500-second child deadline; admit both plus
 # wrapper shutdown time without changing any model/managed-compute approval cap.
 TIMEOUTS = {"snapshot": 70, "research": 1550, "hourly": 3400, "eod": 950, "weekly": 3050}
+# Units still installed (manual runs/re-enable) but never enabled by --enable.
+# The Codex snapshot test is off at the user's request (2026-10-18) to save Codex quota.
+DISABLED_TIMERS = frozenset({"snapshot"})
 START_LIMIT_INTERVALS = {"snapshot": 60, "research": 3600, "hourly": 3600, "eod": 3600, "weekly": 3600}
+
+
+def enabled_timers():
+    return [job for job in CALENDARS if job not in DISABLED_TIMERS]
 
 
 def units(job, cfg, config_path, python):
@@ -103,8 +110,10 @@ def main(argv=None):
         (unit_dir / f"finplan-beta-modeling-{job}.timer").write_text(timer)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     if args.enable:
-        subprocess.run(["systemctl", "--user", "enable", "--now", *[f"finplan-beta-modeling-{job}.timer" for job in CALENDARS]], check=True)
-    print(json.dumps({"installed": list(CALENDARS), "enabled": args.enable, "unit_dir": str(unit_dir)}))
+        subprocess.run(["systemctl", "--user", "enable", "--now", *[f"finplan-beta-modeling-{job}.timer" for job in enabled_timers()]], check=True)
+        for job in sorted(DISABLED_TIMERS):
+            subprocess.run(["systemctl", "--user", "disable", "--now", f"finplan-beta-modeling-{job}.timer"], check=False)
+    print(json.dumps({"installed": list(CALENDARS), "enabled": enabled_timers() if args.enable else [], "unit_dir": str(unit_dir)}))
     return 0
 
 

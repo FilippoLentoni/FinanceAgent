@@ -53,3 +53,9 @@ def test_weekly_service_admits_both_bounded_report_windows(tmp_path, monkeypatch
     assert elapsed[0] + 50 <= parsed.getint("Service", "TimeoutStartSec")
     assert calls == ["closed", "current"]
     assert all(r["status"] == "succeeded" for r in result["commands"])
+
+
+def test_codex_snapshot_timer_is_installed_but_not_enabled():
+    from scripts.install_modeling_jobs import CALENDARS, enabled_timers
+    assert "snapshot" in CALENDARS
+    assert enabled_timers() == ["research", "hourly", "eod", "weekly"]
