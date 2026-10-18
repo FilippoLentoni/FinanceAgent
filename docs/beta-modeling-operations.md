@@ -82,6 +82,10 @@ inference. DynamoDB conditional writes, invocation leases, permanent execution
 receipts and optimistic holdings revisions prevent duplicate fills after retries.
 Snapshot work cannot invoke the financial workflow. Preserve unrelated schedules;
 the legacy Claude snapshot timer must remain disabled.
+The snapshot service admits three starts per minute so its ordinary minute
+activations cannot exhaust an hourly start limit. The other services retain a
+three-start hourly bound. Start-limit failures remain visible in the journal;
+never fabricate snapshot files for missed activations.
 
 Initial deployment verification is deliberately separate from recurring proof.
 The manual primary slot before the declared experiment horizon remains visible

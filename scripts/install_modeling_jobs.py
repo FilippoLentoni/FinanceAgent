@@ -21,6 +21,7 @@ CALENDARS = {
     "weekly": "*-*-* 17:10:00 America/New_York",
 }
 TIMEOUTS = {"snapshot": 70, "research": 1550, "hourly": 3400, "eod": 950, "weekly": 950}
+START_LIMIT_INTERVALS = {"snapshot": 60, "research": 3600, "hourly": 3600, "eod": 3600, "weekly": 3600}
 
 
 def units(job, cfg, config_path, python):
@@ -35,7 +36,7 @@ def units(job, cfg, config_path, python):
 Description=Beta modeling {job} workflow (isolated paper only)
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=3600
+StartLimitIntervalSec={START_LIMIT_INTERVALS[job]}
 StartLimitBurst=3
 
 [Service]
