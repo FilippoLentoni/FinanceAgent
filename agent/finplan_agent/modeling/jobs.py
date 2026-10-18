@@ -77,6 +77,34 @@ def append_health_event(state, record, *, maximum_bytes=8 * 1024 * 1024, retaine
             os.fsync(events.fileno())
 
 
+class RetryableIncomplete(RuntimeError):
+    """Exit75 means permanent slot work remains leased; it is not success."""
+
+
+def execute_with_retry(command, *, cwd, timeout=900, execute_fn=None, clock=None, sleep=None):
+    """Retry only explicit incomplete slots within one bounded command deadline.
+
+    A dead owner's600second lease outlives systemd's short restart burst. Keep the
+    same command/slot under the service lock until recovery is eligible, without
+    treating generic failures as permission to repeat model invocation.
+    """
+    execute_fn=execute_fn or execute;clock=clock or time.monotonic;sleep=sleep or time.sleep
+    deadline=clock()+timeout;attempts=0
+    while True:
+        remaining=deadline-clock()
+        if remaining<=0:raise TimeoutError('incomplete slot exceeded bounded command deadline')
+        attempts+=1
+        try:
+            code=execute_fn(command,cwd=cwd,timeout=remaining)
+            if code==75:raise RetryableIncomplete('permanent slot still incomplete')
+            if code not in (None,0):raise RuntimeError('job exited with code '+str(code))
+            return {'attempts':attempts,'deferred_incomplete_retries':attempts-1}
+        except RetryableIncomplete:
+            remaining=deadline-clock()
+            if remaining<=0:raise TimeoutError('incomplete slot exceeded bounded command deadline') from None
+            sleep(min(30.,remaining))
+
+
 def execute(command, *, cwd, timeout, stdin=None, final=None):
     # The headless console can contain model summaries; keep only public final
     # output and wrapper metadata. No hidden reasoning/transport/auth logs.
@@ -92,6 +120,8 @@ def execute(command, *, cwd, timeout, stdin=None, final=None):
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
         raise TimeoutError("bounded job deadline exceeded") from None
+    if process.returncode==75:
+        raise RetryableIncomplete('permanent slot still incomplete')
     if process.returncode:
         raise RuntimeError("job exited with code " + str(process.returncode))
     return process.returncode
@@ -145,8 +175,8 @@ def run_job(cfg, job, slot, directory, *, execute_fn=execute):
     for template in commands:
         command = [s.replace("{slot}", slot).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(directory)).replace("{previous_day}", prior_day or "") for s in template]
         try:
-            execute_fn(command, cwd=cfg["runtime_root"], timeout=900)
-            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "succeeded"})
+            retry=execute_with_retry(command,cwd=cfg["runtime_root"],timeout=900,execute_fn=execute_fn)
+            records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "succeeded", **retry})
         except Exception as exc:
             failures.append(type(exc).__name__)
             records.append({"command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(), "status": "failed", "error_code": type(exc).__name__})
@@ -203,7 +233,7 @@ def main(argv=None):
                         if not any(module in template for module in ("finplan_model.forward.hourly", "finplan_model.forward.crypto_hourly")):
                             continue
                         command = [s.replace("{slot}", missed).replace("{experiment}", cfg["experiment_id"]).replace("{output}", str(missed_dir)) for s in template]
-                        execute(command + ["--account-missed"], cwd=cfg["runtime_root"], timeout=300)
+                        execute_with_retry(command + ["--account-missed"], cwd=cfg["runtime_root"], timeout=900)
                     atomic_json(missed_dir / "status.json", {"job": "hourly", "slot": missed, "status": "accounted_missing", "trigger": "restart_recovery"})
             details = run_job(cfg, args.job, slot, directory)
             record.update(status="succeeded", details=details)

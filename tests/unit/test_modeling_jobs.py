@@ -136,3 +136,52 @@ def test_midnight_calendar_revision_precedes_current_latest(tmp_path, slot, expe
     run_job(cfg, "hourly", slot, tmp_path,
             execute_fn=lambda command, **kwargs: calls.append(command[-1]))
     assert calls == expected
+
+
+class ControlledClock:
+    def __init__(self):self.at=0.;self.sleeps=[]
+    def clock(self):return self.at
+    def sleep(self,seconds):self.sleeps.append(seconds);self.at+=seconds
+
+
+def test_incomplete_exit75_waits_original600second_lease_and_retries_same_slot():
+    clock=ControlledClock();calls=[];command=['python','-m','hourly','--slot','permanent']
+    def worker(actual,**kwargs):
+        assert actual==command;calls.append(clock.at)
+        if clock.at<600:raise jobs.RetryableIncomplete('controlled original lease')
+        return 0
+    result=jobs.execute_with_retry(command,cwd='.',timeout=900,execute_fn=worker,clock=clock.clock,sleep=clock.sleep)
+    assert calls[-1]==600 and result['deferred_incomplete_retries']==20
+    assert max(clock.sleeps)<=30 and result['attempts']==21
+
+
+def test_generic_errors_never_enter_incomplete_retry_loop():
+    clock=ControlledClock();calls=[]
+    def worker(*args,**kwargs):calls.append(True);raise RuntimeError('genuine failure')
+    with pytest.raises(RuntimeError,match='genuine failure'):
+        jobs.execute_with_retry(['command'],cwd='.',execute_fn=worker,clock=clock.clock,sleep=clock.sleep)
+    assert len(calls)==1 and clock.sleeps==[]
+
+
+def test_incomplete_deadline_is_bounded_and_never_returns_success():
+    clock=ControlledClock()
+    with pytest.raises(TimeoutError,match='incomplete'):
+        jobs.execute_with_retry(['command'],cwd='.',timeout=65,execute_fn=lambda *a,**k:75,clock=clock.clock,sleep=clock.sleep)
+    assert clock.at==65 and clock.sleeps==[30.,30.,5.]
+
+
+def test_hourly_checkpoint_not_advanced_while_incomplete_command_is_waiting(tmp_path,monkeypatch):
+    state=tmp_path/'state';state.mkdir();clock=ControlledClock();calls=[]
+    cfg={'environment':'beta','region':'us-east-2','state_dir':str(state),'project_root':str(tmp_path),
+         'runtime_root':str(tmp_path),'experiment_id':'controlled','commands':{'hourly':[['worker','{slot}']]}}
+    config=tmp_path/'config.json';config.write_text(json.dumps(cfg))
+    monkeypatch.setattr(jobs.time,'monotonic',clock.clock);monkeypatch.setattr(jobs.time,'sleep',clock.sleep)
+    def worker(command,**kwargs):
+        assert not (state/'hourly-last-completed.json').exists()
+        calls.append(command)
+        if clock.at<600:raise jobs.RetryableIncomplete('controlled original lease')
+    original=jobs.run_job
+    monkeypatch.setattr(jobs,'run_job',lambda c,j,s,d:original(c,j,s,d,execute_fn=worker))
+    assert jobs.main(['hourly','--config',str(config),'--slot','2026-10-18T00:00:00Z'])==0
+    assert json.loads((state/'hourly-last-completed.json').read_text())['slot']=='2026-10-18T00:00:00Z'
+    assert len(calls)==21 and all(call==calls[0] for call in calls)
