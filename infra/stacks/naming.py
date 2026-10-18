@@ -49,6 +49,8 @@ __all__ = [
     "memory_name",
     "own_ssm",
     "pipeline_store_bucket_name",
+    "recommendation_runs_table_name",
+    "recommendation_trigger_name",
     "policy_engine_name",
     "policy_name",
     "role_name",
@@ -181,6 +183,16 @@ def pipeline_store_bucket_name(account: str) -> str:
 
 
 PIPELINE_NAME = shared_name("pipeline")
+
+
+def recommendation_runs_table_name(env: str) -> str:
+    """Run-log table of the recommendation trigger (``recommendation_trigger`` in ``config/<env>.json``)."""
+    return env_name(env, "recommendation-runs")
+
+
+def recommendation_trigger_name(env: str) -> str:
+    """The trigger Lambda and its EventBridge Scheduler schedule share this name."""
+    return env_name(env, "recommendation-trigger")
 
 
 def deploy_role_name(env: str) -> str:

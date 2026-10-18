@@ -46,7 +46,11 @@ def load_shared(root: Path = ROOT) -> dict[str, Any]:
 def load_config(env: str, root: Path = ROOT) -> dict[str, Any]:
     if env not in n.ENVIRONMENTS:
         raise ValueError(f"unknown environment {env!r}")
-    return {**load_shared(root), **json.loads((root / "config" / f"{env}.json").read_text(encoding="utf-8"))}
+    from infra.stacks.recommendation_runs import trigger_config
+
+    cfg = {**load_shared(root), **json.loads((root / "config" / f"{env}.json").read_text(encoding="utf-8"))}
+    trigger_config(env, cfg)  # fail closed on an invalid recommendation_trigger block
+    return cfg
 
 
 def build_app(app: cdk.App | None = None, envs: Iterable[str] | None = None, *, pipeline: bool = True) -> cdk.App:

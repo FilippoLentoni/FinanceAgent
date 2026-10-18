@@ -264,6 +264,11 @@ class AgentStack(EnvStack):
         )
         bedrock_policy.cfn_options.condition = has_bedrock
 
+        # ------------------------------------------------------------- recommendation trigger + run log (beta, config flag)
+        from .recommendation_runs import build_recommendation_runs
+
+        self.recommendation_runs = build_recommendation_runs(self, env, cfg, self.runtime_role)
+
         # ------------------------------------------------------------- runtime
         life = agentcore.CfnRuntime.LifecycleConfigurationProperty(idle_runtime_session_timeout=int(session.get("idle_runtime_session_timeout_seconds", 900)), max_lifetime=int(session.get("max_lifetime_seconds", 28800)))
         self.runtime = agentcore.CfnRuntime(

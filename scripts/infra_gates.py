@@ -29,6 +29,11 @@ environment-binding    FA-POL-07 / FA-GW-01: one pool per identity template; two
 memory                 FA-SS-04: no long-term memory strategy; expiry 7-365 days
 budget-roles           FA-PRV-09 / L6: the published budget-enforced role names include the
                        Runtime role of every environment
+recommendation-trigger the beta-only recommendation trigger is all-or-nothing (table, SSM name, Lambda,
+                       schedule, Runtime read grant); its code is the content-addressed package built
+                       from the current source (non-empty, handler present, never empty inline code);
+                       its roles grant no wildcard action or resource; the Runtime grant is read-only on
+                       the run table, its ``recent`` index and the table-name parameter only
 template-leaks         ``finplan_contracts.leak_scan`` over the synthesized templates (no account
                        IDs, ARNs with accounts, pool/client IDs)
 template-size          exact packaged template bytes fit CloudFormation's 1 MB S3 limit
@@ -391,6 +396,71 @@ def gate_budget_roles(ctx: GateContext) -> list[str]:
     return [f"{env}: the budget-enforced role names do not include the Runtime role" for env in n.ENVIRONMENTS if n.runtime_role_name(env) not in n.budget_enforced_role_names(env)]
 
 
+_TRIGGER_RESOURCES = {
+    "RecommendationRunsTable": "AWS::DynamoDB::Table",
+    "RecommendationRunsTableParameter": "AWS::SSM::Parameter",
+    "RecommendationTriggerFunction": "AWS::Lambda::Function",
+    "RecommendationSchedule": "AWS::Scheduler::Schedule",
+    "RuntimeRecommendationRunsRead": "AWS::IAM::Policy",
+}
+
+
+def recommendation_trigger_problems(t: dict[str, Any], name: str, env: str) -> list[str]:
+    import zipfile
+    from io import BytesIO
+
+    from infra.stacks.recommendation_runs import HANDLER, LOGICAL_ROLE, code_key, lambda_package
+
+    res = t.get("Resources") or {}
+    present = {lid for lid, rtype in _TRIGGER_RESOURCES.items() if (res.get(lid) or {}).get("Type") == rtype}
+    if not present:
+        return []
+    out = [] if present == set(_TRIGGER_RESOURCES) else [f"{name}: recommendation trigger is partial (has {sorted(present)})"]
+    if env != "beta":
+        out.append(f"{name}: the recommendation trigger is beta-only")
+    fn = (res.get("RecommendationTriggerFunction") or {}).get("Properties") or {}
+    code = fn.get("Code") or {}
+    data, digest = lambda_package()
+    with zipfile.ZipFile(BytesIO(data)) as zf:
+        trigger = zf.read("recommendation_runs/trigger.py").decode() if "recommendation_runs/trigger.py" in zf.namelist() else ""
+    if not data or "def handler(" not in trigger or fn.get("Handler") != HANDLER:
+        out.append(f"{name}: recommendation trigger handler code is missing")
+    if "ZipFile" in code or code.get("S3Key") != code_key(digest) or "pipeline-store" not in json.dumps(code.get("S3Bucket")):
+        out.append(f"{name}: recommendation trigger code must be the store package built from the current source ({code_key(digest)})")
+    if fn.get("Runtime") != "python3.12" or fn.get("Timeout") != 900:
+        out.append(f"{name}: recommendation trigger must run python3.12 with a 900 s timeout")
+    sched = ((res.get("RecommendationSchedule") or {}).get("Properties")) or {}
+    target = sched.get("Target") or {}
+    if (sched.get("FlexibleTimeWindow") or {}).get("Mode") != "OFF" or int((target.get("RetryPolicy") or {}).get("MaximumRetryAttempts", 99)) > 1 or target.get("Arn") != {"Fn::GetAtt": ["RecommendationTriggerFunction", "Arn"]}:
+        out.append(f"{name}: recommendation schedule must target the trigger with flexible window OFF and at most one retry")
+    docs = []
+    for lid, r in _resources(t, "AWS::IAM::Role").items():
+        props = r.get("Properties") or {}
+        if {"Key": "logical-role", "Value": LOGICAL_ROLE} in (props.get("Tags") or []):
+            docs += [(lid, pol.get("PolicyDocument")) for pol in props.get("Policies") or []]
+    read = (res.get("RuntimeRecommendationRunsRead") or {}).get("Properties") or {}
+    docs.append(("RuntimeRecommendationRunsRead", read.get("PolicyDocument")))
+    for lid, doc in docs:
+        for st in _statements(doc):
+            if any("*" in a for a in _actions(st)) or st.get("Resource") in ("*", ["*"]):
+                out.append(f"{name}: {lid} grants a wildcard action or resource ({st.get('Sid')})")
+    allowed = {"dynamodb:Query", "dynamodb:GetItem", "ssm:GetParameter"}
+    table = n.recommendation_runs_table_name(env)
+    expected = {f"table/{table}", f"table/{table}/index/recent", f"parameter/finplan/{env}/{n.REPO}/config/recommendation-runs-table"}
+    for st in _statements(read.get("PolicyDocument")):
+        listed = st.get("Resource") if isinstance(st.get("Resource"), list) else [st.get("Resource")]
+        paths = [m[2:-1] for m in re.findall(r'":(?:table|parameter)/[^"]*"', json.dumps(listed))]
+        if st.get("Effect") != "Allow" or not set(_actions(st)) <= allowed or len(paths) != len(listed) or not set(paths) <= expected:
+            out.append(f"{name}: Runtime recommendation-runs grant must be read-only on the run table, its recent index and its name parameter")
+    if read.get("Roles") != [{"Ref": next((lid for lid, r in _resources(t, "AWS::IAM::Role").items() if "-runtime-role" in json.dumps((r.get("Properties") or {}).get("RoleName"))), "")}]:
+        out.append(f"{name}: the recommendation-runs read grant must attach to the Runtime role only")
+    return out
+
+
+def gate_recommendation_trigger(ctx: GateContext) -> list[str]:
+    return [p for path in templates_of(ctx.assembly) if _kind(path).startswith("agent:") for p in recommendation_trigger_problems(_load(path), path.name, _kind(path).split(":")[1])]
+
+
 def gate_template_leaks(ctx: GateContext) -> list[str]:
     from finplan_contracts.leak_scan import scan_text
 
@@ -415,6 +485,7 @@ GATES: list[Gate] = [
     ("environment-binding", gate_environment_binding),
     ("memory", gate_memory),
     ("budget-roles", gate_budget_roles),
+    ("recommendation-trigger", gate_recommendation_trigger),
     ("template-leaks", gate_template_leaks),
     ("template-size", gate_template_size),
 ]

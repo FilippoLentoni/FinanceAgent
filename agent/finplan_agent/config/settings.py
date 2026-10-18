@@ -85,6 +85,12 @@ class SsmNames:
         # Not a registered contract key (CONTRACT GAP): explanation request limits (design E7).
         return f"/finplan/{self.environment}/{REPO}/config/explanation-limits"
 
+    @property
+    def recommendation_runs_table_ref(self) -> str:
+        """Name of the recommendation run-log table (published only where the trigger is enabled;
+        absent means the run-log query route reports the log as unavailable)."""
+        return f"/finplan/{self.environment}/{REPO}/config/recommendation-runs-table"
+
     # Published FinanceAgent references (written by the pipeline; read by clients and deployed suites).
     @property
     def runtime_ref(self) -> str:

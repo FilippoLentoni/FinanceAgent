@@ -113,6 +113,8 @@ class AgentContext:
     explanations: Any = None
     #: Optional independently authenticated brokerage reader; never checkpointed.
     brokerage: Any = None
+    #: Optional read-only recommendation run-log reader (``graph.runs_query.RunLogReader``).
+    run_log: Any = None
     _offered: list[ToolSpec] | None = field(default=None, repr=False)
 
     def offered_tools(self) -> list[ToolSpec]:

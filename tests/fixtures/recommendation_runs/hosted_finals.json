@@ -1,0 +1,524 @@
+{
+ "$comment": "Minimal sanitized excerpts of recorded hosted receipts (2026-10-17 beta manual-news-ppo-verification attempt acc78d25 and formation-not-due 20261017T080021Z): status, evidence rows, claim check, usage, decision ids and provenance identities only; narratives truncated, positions and model identifiers removed.",
+ "ppo": {
+  "status": "completed",
+  "error": null,
+  "usage": {
+   "estimated_cost_usd": 0.0,
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "tool_calls": 1
+  },
+  "answer": {
+   "narrative": "Saved paper portfolio; advisory recommendation from the selected **ppo** strategy.\n\nPortfolio: pf_01M547WFC8S9W35652YX87Z204; revision 1.\n\nMarked portfolio value: 100.00 USD; high watermark: 100.00.\n\nReference price session: 2026-10-16. The policy uses current eligible news at it",
+   "claim_check": {
+    "passed": true,
+    "checked_figures": 71,
+    "removed_figures": []
+   },
+   "evidence": [
+    {
+     "id": "recommend-1",
+     "tool": "recommend_portfolio",
+     "ok": true,
+     "error": null,
+     "gateway": "primary"
+    }
+   ],
+   "recommendation": {
+    "strategy": "ppo",
+    "as_of": "2026-10-16",
+    "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+    "decision_at": "2026-10-17T13:00:00+00:00",
+    "export_run_id": "run_01M54FS2EHXVXWVRRZ54JDS5MJ",
+    "policy_artifact_checksum": "sha256:63314a57a6775869b4107404d11efc38b8affe9adc5f3aeea39288b842d042b5",
+    "cash_weight": 0.7776468924764537,
+    "solution_status": "feasible",
+    "portfolio_state": {
+     "source": "saved_paper",
+     "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+     "revision": 1,
+     "as_of": "2026-10-16"
+    },
+    "target_weights": [
+     {
+      "instrument_id": "AAPL",
+      "weight": 0.03460650975439359
+     },
+     {
+      "instrument_id": "AMZN",
+      "weight": 0.022857509822408573
+     },
+     {
+      "instrument_id": "GOOGL",
+      "weight": 0.029670911034424586
+     }
+    ],
+    "diagnostics": {
+     "news_evidence": {
+      "consumed": true,
+      "decision_time": "2026-10-17T13:00:00+00:00",
+      "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+      "provenance": {
+       "source_day": "2026-10-17",
+       "window_start": "2026-10-17T11:45:00Z",
+       "window_end": "2026-10-17T12:45:00Z",
+       "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+       "quality_status": "complete"
+      }
+     }
+    }
+   },
+   "portfolio_decisions": [
+    {
+     "decision_id": "pd_01M5550RV3QJHNCC3CVDF9STEA",
+     "recommendation": {
+      "strategy": "ppo",
+      "as_of": "2026-10-16",
+      "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+      "decision_at": "2026-10-17T13:00:00+00:00",
+      "export_run_id": "run_01M54FS2EHXVXWVRRZ54JDS5MJ",
+      "policy_artifact_checksum": "sha256:63314a57a6775869b4107404d11efc38b8affe9adc5f3aeea39288b842d042b5",
+      "cash_weight": 0.7776468924764537,
+      "solution_status": "feasible",
+      "portfolio_state": {
+       "source": "saved_paper",
+       "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+       "revision": 1,
+       "as_of": "2026-10-16"
+      },
+      "target_weights": [
+       {
+        "instrument_id": "AAPL",
+        "weight": 0.03460650975439359
+       },
+       {
+        "instrument_id": "AMZN",
+        "weight": 0.022857509822408573
+       },
+       {
+        "instrument_id": "GOOGL",
+        "weight": 0.029670911034424586
+       }
+      ],
+      "diagnostics": {
+       "news_evidence": {
+        "consumed": true,
+        "decision_time": "2026-10-17T13:00:00+00:00",
+        "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+        "provenance": {
+         "source_day": "2026-10-17",
+         "window_start": "2026-10-17T11:45:00Z",
+         "window_end": "2026-10-17T12:45:00Z",
+         "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+         "quality_status": "complete"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "portfolio_analyses": []
+  }
+ },
+ "min_variance": {
+  "status": "completed",
+  "error": null,
+  "usage": {
+   "estimated_cost_usd": 0.0,
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "tool_calls": 1
+  },
+  "answer": {
+   "narrative": "Issued decision: pd_01M54ZNTV2HQB0S8S7B3RQ9R1D. Review this decision before accepting it into the paper portfolio.\n\nmin_variance paper allocation on 2026-10-16; exact model attribution against unchanged holdings\n\nAnalysis: ca_a0c5a0b085a5b630f9631836e690475c; kind: recommendation",
+   "claim_check": {
+    "passed": true,
+    "checked_figures": 336,
+    "removed_figures": []
+   },
+   "evidence": [
+    {
+     "id": "portfolio-1-0",
+     "tool": "recommend_classical_portfolio",
+     "ok": true,
+     "error": null,
+     "gateway": "classical"
+    }
+   ],
+   "recommendation": {
+    "strategy": "min_variance",
+    "as_of": "2026-10-16",
+    "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+    "decision_at": "2026-10-17T13:00:00+00:00",
+    "cash_weight": 0,
+    "solution_status": "optimal",
+    "portfolio_state": {
+     "source": "saved_paper",
+     "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+     "revision": 1,
+     "as_of": "2026-10-16"
+    },
+    "target_weights": [
+     {
+      "instrument_id": "AAPL",
+      "weight": 0.25881446953587994
+     },
+     {
+      "instrument_id": "AMZN",
+      "weight": 0.09104633844503314
+     },
+     {
+      "instrument_id": "GOOGL",
+      "weight": 0.09554842391157373
+     }
+    ],
+    "diagnostics": {
+     "news_evidence": {
+      "consumed": true,
+      "decision_time": "2026-10-17T13:00:00+00:00",
+      "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+      "provenance": {
+       "source_day": "2026-10-17",
+       "window_start": "2026-10-17T11:45:00Z",
+       "window_end": "2026-10-17T12:45:00Z",
+       "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+       "quality_status": "complete"
+      }
+     }
+    }
+   },
+   "portfolio_decisions": [
+    {
+     "decision_id": "pd_01M54ZNTV2HQB0S8S7B3RQ9R1D",
+     "recommendation": {
+      "strategy": "min_variance",
+      "as_of": "2026-10-16",
+      "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+      "decision_at": "2026-10-17T13:00:00+00:00",
+      "cash_weight": 0,
+      "solution_status": "optimal",
+      "portfolio_state": {
+       "source": "saved_paper",
+       "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+       "revision": 1,
+       "as_of": "2026-10-16"
+      },
+      "target_weights": [
+       {
+        "instrument_id": "AAPL",
+        "weight": 0.25881446953587994
+       },
+       {
+        "instrument_id": "AMZN",
+        "weight": 0.09104633844503314
+       },
+       {
+        "instrument_id": "GOOGL",
+        "weight": 0.09554842391157373
+       }
+      ],
+      "diagnostics": {
+       "news_evidence": {
+        "consumed": true,
+        "decision_time": "2026-10-17T13:00:00+00:00",
+        "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+        "provenance": {
+         "source_day": "2026-10-17",
+         "window_start": "2026-10-17T11:45:00Z",
+         "window_end": "2026-10-17T12:45:00Z",
+         "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+         "quality_status": "complete"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "portfolio_analyses": []
+  }
+ },
+ "mean_variance": {
+  "status": "completed",
+  "error": null,
+  "usage": {
+   "estimated_cost_usd": 0.0,
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "tool_calls": 1
+  },
+  "answer": {
+   "narrative": "Issued decision: pd_01M54ZQHV4ECE8WTDPB81N2206. Review this decision before accepting it into the paper portfolio.\n\nmean_variance paper allocation on 2026-10-16; exact model attribution against unchanged holdings\n\nAnalysis: ca_c6443ab8c3121877242527cab928df86; kind: recommendatio",
+   "claim_check": {
+    "passed": true,
+    "checked_figures": 273,
+    "removed_figures": []
+   },
+   "evidence": [
+    {
+     "id": "portfolio-1-0",
+     "tool": "recommend_classical_portfolio",
+     "ok": true,
+     "error": null,
+     "gateway": "classical"
+    }
+   ],
+   "recommendation": {
+    "strategy": "mean_variance",
+    "as_of": "2026-10-16",
+    "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+    "decision_at": "2026-10-17T13:00:00+00:00",
+    "cash_weight": 0,
+    "solution_status": "optimal",
+    "portfolio_state": {
+     "source": "saved_paper",
+     "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+     "revision": 1,
+     "as_of": "2026-10-16"
+    },
+    "target_weights": [
+     {
+      "instrument_id": "AAPL",
+      "weight": 0
+     },
+     {
+      "instrument_id": "AMZN",
+      "weight": 0
+     },
+     {
+      "instrument_id": "GOOGL",
+      "weight": 0
+     }
+    ],
+    "diagnostics": {
+     "news_evidence": {
+      "consumed": true,
+      "decision_time": "2026-10-17T13:00:00+00:00",
+      "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+      "provenance": {
+       "source_day": "2026-10-17",
+       "window_start": "2026-10-17T11:45:00Z",
+       "window_end": "2026-10-17T12:45:00Z",
+       "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+       "quality_status": "complete"
+      }
+     }
+    }
+   },
+   "portfolio_decisions": [
+    {
+     "decision_id": "pd_01M54ZQHV4ECE8WTDPB81N2206",
+     "recommendation": {
+      "strategy": "mean_variance",
+      "as_of": "2026-10-16",
+      "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+      "decision_at": "2026-10-17T13:00:00+00:00",
+      "cash_weight": 0,
+      "solution_status": "optimal",
+      "portfolio_state": {
+       "source": "saved_paper",
+       "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+       "revision": 1,
+       "as_of": "2026-10-16"
+      },
+      "target_weights": [
+       {
+        "instrument_id": "AAPL",
+        "weight": 0
+       },
+       {
+        "instrument_id": "AMZN",
+        "weight": 0
+       },
+       {
+        "instrument_id": "GOOGL",
+        "weight": 0
+       }
+      ],
+      "diagnostics": {
+       "news_evidence": {
+        "consumed": true,
+        "decision_time": "2026-10-17T13:00:00+00:00",
+        "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+        "provenance": {
+         "source_day": "2026-10-17",
+         "window_start": "2026-10-17T11:45:00Z",
+         "window_end": "2026-10-17T12:45:00Z",
+         "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+         "quality_status": "complete"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "portfolio_analyses": []
+  }
+ },
+ "cvar": {
+  "status": "completed",
+  "error": null,
+  "usage": {
+   "estimated_cost_usd": 0.0,
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "tool_calls": 1
+  },
+  "answer": {
+   "narrative": "Issued decision: pd_01M54ZS9MQ40P36HTT8QVC280H. Review this decision before accepting it into the paper portfolio.\n\ncvar paper allocation on 2026-10-16; exact model attribution against unchanged holdings\n\nAnalysis: ca_56e7da224422efe02155b882eb078633; kind: recommendation.\n\nStrat",
+   "claim_check": {
+    "passed": true,
+    "checked_figures": 333,
+    "removed_figures": []
+   },
+   "evidence": [
+    {
+     "id": "portfolio-1-0",
+     "tool": "recommend_classical_portfolio",
+     "ok": true,
+     "error": null,
+     "gateway": "classical"
+    }
+   ],
+   "recommendation": {
+    "strategy": "cvar",
+    "as_of": "2026-10-16",
+    "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+    "decision_at": "2026-10-17T13:00:00+00:00",
+    "cash_weight": 0,
+    "solution_status": "optimal",
+    "portfolio_state": {
+     "source": "saved_paper",
+     "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+     "revision": 1,
+     "as_of": "2026-10-16"
+    },
+    "target_weights": [
+     {
+      "instrument_id": "AAPL",
+      "weight": 0.25795525187456153
+     },
+     {
+      "instrument_id": "AMZN",
+      "weight": 0
+     },
+     {
+      "instrument_id": "GOOGL",
+      "weight": 0.048517855529040685
+     }
+    ],
+    "diagnostics": {
+     "news_evidence": {
+      "consumed": true,
+      "decision_time": "2026-10-17T13:00:00+00:00",
+      "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+      "provenance": {
+       "source_day": "2026-10-17",
+       "window_start": "2026-10-17T11:45:00Z",
+       "window_end": "2026-10-17T12:45:00Z",
+       "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+       "quality_status": "complete"
+      }
+     }
+    }
+   },
+   "portfolio_decisions": [
+    {
+     "decision_id": "pd_01M54ZS9MQ40P36HTT8QVC280H",
+     "recommendation": {
+      "strategy": "cvar",
+      "as_of": "2026-10-16",
+      "input_snapshot_id": "snap_01M547TJR0SK9X502NE1N4GRJ3",
+      "decision_at": "2026-10-17T13:00:00+00:00",
+      "cash_weight": 0,
+      "solution_status": "optimal",
+      "portfolio_state": {
+       "source": "saved_paper",
+       "portfolio_id": "pf_01M547WFC8S9W35652YX87Z204",
+       "revision": 1,
+       "as_of": "2026-10-16"
+      },
+      "target_weights": [
+       {
+        "instrument_id": "AAPL",
+        "weight": 0.25795525187456153
+       },
+       {
+        "instrument_id": "AMZN",
+        "weight": 0
+       },
+       {
+        "instrument_id": "GOOGL",
+        "weight": 0.048517855529040685
+       }
+      ],
+      "diagnostics": {
+       "news_evidence": {
+        "consumed": true,
+        "decision_time": "2026-10-17T13:00:00+00:00",
+        "feature_protocol": "gdelt-gkg-v2-premarket-organization-tone-v1",
+        "provenance": {
+         "source_day": "2026-10-17",
+         "window_start": "2026-10-17T11:45:00Z",
+         "window_end": "2026-10-17T12:45:00Z",
+         "document_checksum": "sha256:b6b54e833432e7ff928d7636aad111335b9539145232377607c9a7950431d49f",
+         "quality_status": "complete"
+        }
+       }
+      }
+     }
+    }
+   ],
+   "portfolio_analyses": []
+  }
+ },
+ "not_due": {
+  "status": "failed",
+  "error": {
+   "code": "PRECONDITION_FAILED",
+   "message": "today morning portfolio formation is not due before 09:00 New York",
+   "retryable": false,
+   "details": {
+    "reason": "morning_formation_not_due"
+   },
+   "correlation_id": "lt-f67b1fafe36542ce8903ea9a0096e00c"
+  },
+  "usage": {
+   "estimated_cost_usd": 0.0,
+   "input_tokens": 0,
+   "output_tokens": 0,
+   "tool_calls": 1
+  },
+  "answer": {
+   "narrative": "recommend_classical_portfolio failed: PRECONDITION_FAILED: today morning portfolio formation is not due before [unsupported figure removed]:[unsupported figure removed] New York.",
+   "claim_check": {
+    "passed": false,
+    "checked_figures": 2,
+    "removed_figures": [
+     "09",
+     "00"
+    ]
+   },
+   "evidence": [
+    {
+     "id": "portfolio-1-0",
+     "tool": "recommend_classical_portfolio",
+     "ok": false,
+     "error": {
+      "code": "PRECONDITION_FAILED",
+      "message": "today morning portfolio formation is not due before 09:00 New York",
+      "retryable": false,
+      "details": {
+       "reason": "morning_formation_not_due"
+      },
+      "correlation_id": "lt-f67b1fafe36542ce8903ea9a0096e00c"
+     },
+     "gateway": "classical"
+    }
+   ],
+   "recommendation": null,
+   "portfolio_decisions": [],
+   "portfolio_analyses": []
+  }
+ }
+}

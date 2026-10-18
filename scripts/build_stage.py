@@ -41,7 +41,7 @@ for _p in (ROOT, ROOT / "agent"):
 
 from scripts.release import ReleaseInfo, assembly_digest, contract_pin, fetch_build_output, image_uri, mint_release_id, store_build_output, write_variables  # noqa: E402
 
-__all__ = ["PACKAGE_PATHS", "BuildFailed", "config_problems", "main", "pre_gates", "run_build", "run_rollback"]
+__all__ = ["PACKAGE_PATHS", "BuildFailed", "config_problems", "main", "pre_gates", "publish_lambda_code", "run_build", "run_rollback"]
 
 #: Copied into BuildOutput for the post-deploy actions (they never read the source checkout).
 PACKAGE_PATHS = ("pyproject.toml", "uv.lock", "README.md", "contracts-pin.json", "cdk.json", "vendor", "agent", "config", "policy", "skills", "scripts", "tests", "infra")
@@ -108,6 +108,26 @@ def _post_gates(assembly: Path, log: Callable[[str], None]) -> list[str]:
     for p in problems:
         log(f"FAIL post-gate: {p}")
     return problems
+
+
+def publish_lambda_code(s3: Any, store: str, log: Callable[[str], None] = print) -> str:
+    """Upload the recommendation-trigger Lambda package to its content-addressed key (idempotent).
+
+    The agent template references ``releases/lambda-code/recommendation-trigger-<sha256>.zip`` (no CDK
+    file assets; CloudFormation inline code is limited to 4096 bytes). The key lives under the release
+    ledger prefix: the Build role may write it, the CloudFormation execution role may read it, and it
+    has no lifecycle expiry, so rollbacks keep their code.
+    """
+    import base64
+    import hashlib
+
+    from infra.stacks.recommendation_runs import code_key, lambda_package
+
+    data, digest = lambda_package()
+    key = code_key(digest)
+    s3.put_object(Bucket=store, Key=key, Body=data, ContentType="application/zip", ChecksumSHA256=base64.b64encode(hashlib.sha256(data).digest()).decode())
+    log(f"lambda code s3://{store}/{key} ({len(data)} bytes)")
+    return key
 
 
 def _served_majors(root: Path) -> list[int]:
@@ -182,6 +202,7 @@ def run_build(
         if s3 is not None:
             if not store:
                 raise BuildFailed("the release ledger needs the pipeline store name")
+            publish_lambda_code(s3, store, log)
             store_build_output(s3, store, info, work)
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(work), str(out))

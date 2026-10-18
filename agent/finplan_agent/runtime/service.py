@@ -81,6 +81,8 @@ class Deps:
     durable_activity: bool = False
     #: Approved per-caller brokerage reader; absent until separate OAuth activation.
     brokerage_client_factory: Callable[[Caller], Any] | None = None
+    #: Read-only recommendation run-log reader (``graph.runs_query.RunLogReader``); None: unavailable.
+    run_log: Any = None
 
 
 class AgentService:
@@ -156,6 +158,7 @@ class AgentService:
             provider_loader=lambda: _load_provider(settings.environment, ssm),
             durable_activity=True,
             brokerage_client_factory=(lambda caller: BrokerageGatewayReader(brokerage_url,lambda:caller.bearer)) if brokerage_url else None,
+            run_log=_run_log_reader(settings, ssm),
         )
         return cls(deps)
 
@@ -231,6 +234,7 @@ class AgentService:
             explanations=self.deps.explanation_settings,
             durable_activity=self.deps.durable_activity,
             brokerage=self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None,
+            run_log=self.deps.run_log,
         )
 
     def _final(self, config: dict[str, Any], session_id: str, correlation_id: str) -> dict[str, Any]:
@@ -428,3 +432,19 @@ class AgentService:
 def _load_provider(environment: str, ssm: Any) -> tuple[ProviderConfig, ExplanationProvider]:
     config = load_provider_config(environment, ssm)
     return config, make_provider(config)
+
+
+def _run_log_reader(settings: Settings, ssm: Any) -> Any:
+    """Lazy read-only run-log reader: the table name comes from SSM on first use, so a missing
+    parameter or denied table yields an explicit "unavailable" answer instead of a startup failure."""
+    from ..graph.runs_query import RunLogReader, ssm_table_resolver
+
+    def table(name: str) -> Any:
+        import boto3
+        from botocore.config import Config
+
+        resource = boto3.session.Session(region_name=settings.region).resource(
+            "dynamodb", region_name=settings.region, config=Config(retries={"mode": "standard", "max_attempts": 3}, read_timeout=10, connect_timeout=5))
+        return resource.Table(name)
+
+    return RunLogReader(settings.environment, ssm_table_resolver(ssm, settings.ssm.recommendation_runs_table_ref, table))
