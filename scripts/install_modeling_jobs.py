@@ -15,7 +15,7 @@ import sys
 
 CALENDARS = {
     "snapshot": "*-*-* *:*:00 UTC",
-    "research": "*-*-* *:00,30:00 UTC",
+    "research": "*-*-* 00,06,12,18:00:00 UTC",  # every 6h: bounds headless Codex usage
     "hourly": "*-*-* *:05:00 UTC",
     "eod": "*-*-* 17:00:00 America/New_York",
     "weekly": "*-*-* 17:25:00 America/New_York",

@@ -29,7 +29,7 @@ def slot_for(job, at):
     if job == "snapshot":
         return stamp(at.replace(second=0, microsecond=0))
     if job == "research":
-        return stamp(at.replace(minute=30 * (at.minute // 30), second=0, microsecond=0))
+        return stamp(at.replace(hour=6 * (at.hour // 6), minute=0, second=0, microsecond=0))
     if job == "hourly":
         return stamp(at.replace(minute=0, second=0, microsecond=0))
     ny = at.astimezone(ZoneInfo("America/New_York"))

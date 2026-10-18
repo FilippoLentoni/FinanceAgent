@@ -8,7 +8,7 @@ from scripts.install_modeling_jobs import units
 from finplan_agent.modeling import jobs
 
 
-@pytest.mark.parametrize("job,period", [("snapshot", 60), ("research", 1800), ("hourly", 3600), ("eod", 86400), ("weekly", 86400)])
+@pytest.mark.parametrize("job,period", [("snapshot", 60), ("research", 21600), ("hourly", 3600), ("eod", 86400), ("weekly", 86400)])
 def test_start_limiter_allows_consecutive_calendar_runs_and_bounded_retry(job, period, tmp_path):
     cfg = {"runtime_pythonpath": "/runtime/src", "storage_pythonpath": "/platform/src",
            "scratch_dir": str(tmp_path), "runtime_python": "/runtime/.venv/bin/python",

@@ -49,5 +49,5 @@ def test_weekly_timer_moves_after_hourly_without_changing_other_cadences():
     assert CALENDARS['weekly']=='*-*-* 17:25:00 America/New_York'
     assert CALENDARS['eod']=='*-*-* 17:00:00 America/New_York'
     assert CALENDARS['hourly']=='*-*-* *:05:00 UTC'
-    assert CALENDARS['research']=='*-*-* *:00,30:00 UTC'
+    assert CALENDARS['research']=='*-*-* 00,06,12,18:00:00 UTC'
     assert CALENDARS['snapshot']=='*-*-* *:*:00 UTC'
