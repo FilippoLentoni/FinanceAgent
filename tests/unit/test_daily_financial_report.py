@@ -20,19 +20,19 @@ class Reader:
 
     def call(self, label, tool, args):
         self.calls.append((tool, deepcopy(args)))
-        if tool.startswith('recommend'):
-            schema = 'tools/recommend-portfolio-invocation-request' if tool == 'recommend_portfolio' else 'tools/recommend-classical-portfolio-request'
-            assert validate(args, schema).valid, args
-        if args.get('algorithm', 'ppo') in self.failures and tool.startswith('recommend'):
+        method = tool.removeprefix('generate_portfolio_recommendation_') if tool.startswith('generate_portfolio_recommendation_') else None
+        if method:
+            assert validate(args, 'tools/' + tool.replace('_', '-') + '-request').valid, args
+        if method in self.failures:
             return {'status': 'not_available', 'receipt': label + '.json', 'error': {'code': 'NOT_READY'}}
         document = {}
         if tool == 'list_portfolio_decisions':
             document = {'decisions': list(self.previous)}
-        elif tool.startswith('recommend'):
+        elif method:
             rec = deepcopy(self.rec)
-            rec['strategy'] = args.get('algorithm', 'ppo')
+            rec['strategy'] = method
             # Keep market/state identical while proving the actions can differ by method.
-            if rec['strategy'] == 'mean_variance':
+            if rec['strategy'] == 'cvar':
                 rec['target_weights'][0]['weight'] += .01
                 rec['cash_weight'] -= .01
             document = {'recommendation': rec, 'decision_id': 'decision-' + rec['strategy']}
@@ -61,10 +61,10 @@ def test_all_methods_pin_snapshot_holdings_and_settings_and_explain_three_levels
     assert report['training_distribution_status'] == 'outside_regular_exchange_session_training_distribution'
     assert report['comparison']['recommendations_differ'] is True
     assert report['comparison']['winner'] == 'not_established'
-    assert len(report['cross_method_explanations']) == 3
+    assert len(report['cross_method_explanations']) == 2  # three served methods (mean-variance retired in contracts 1.14.0)
     for tool, args in reader.calls:
         assert tool not in {'resolve_portfolio_decision', 'submit_experiment', 'create_override_version'}
-        if tool == 'recommend_classical_portfolio':
+        if tool in ('generate_portfolio_recommendation_min_variance', 'generate_portfolio_recommendation_cvar'):
             assert 'input_snapshot_id' not in args  # Schema couples snapshot and historical as_of.
             assert 'as_of' not in args  # Do not backdate morning news to yesterday's close.
             assert args['portfolio_id'] == recommendation['portfolio_state']['portfolio_id']
@@ -85,7 +85,7 @@ def test_unavailable_ppo_keeps_classical_outputs_and_missing_levels(recommendati
     assert report['methods'][0]['status'] == 'not_available'
     assert all(row['status'] == 'available' for row in report['methods'][1:])
     assert all(level['status'] == 'not_available' for level in report['methods'][0]['explainability'].values())
-    assert len(report['cross_method_explanations']) == 2
+    assert len(report['cross_method_explanations']) == 1
 
 
 def test_prior_decision_explanation_uses_actual_distinct_date(recommendation, tmp_path):
@@ -147,7 +147,7 @@ def test_explanation_transport_failure_prevents_complete_status(recommendation, 
     report = generate(reader, config(recommendation, tmp_path), NOW)
     assert all(item['status'] == 'available' for item in report['methods'])
     assert report['status'] == 'partial_readiness'
-    assert len(report['validation_issues']) == 4
+    assert len(report['validation_issues']) == 3
 
 
 def test_central_numeric_metadata_readiness_is_separate_from_paid_headline_collection(recommendation, tmp_path):

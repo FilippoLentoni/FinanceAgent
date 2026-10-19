@@ -16,9 +16,11 @@ def connection_plan(state, client=None):
         return None
     try:
         result=readiness(client)
-    except Exception:
-        result={'status':'unavailable','authenticated':False,'live_execution_enabled':False,
-                'message':'Coinbase brokerage authentication or capability discovery failed. Reconnect the independently authorized brokerage client; no account holdings were inferred.'}
+    except Exception as exc:  # noqa: BLE001 - the typed reason is reported, never a stack trace
+        reason=getattr(exc,'reason',None) or type(exc).__name__
+        result={'status':'unavailable','authenticated':False,'live_execution_enabled':False,'reason':str(reason)[:120],
+                **({'error_code':exc.code} if getattr(exc,'code',None) else {}),
+                'message':'Coinbase brokerage authentication or capability discovery failed (reason: '+str(reason)[:120]+'). Reconnect the independently authorized brokerage client; only the brokerage owner can read its status. No account holdings were inferred.'}
     return {'portfolio_workflow':{'kind':'etf_connection','mode':'read_only'},'draft_text':result['message'],
             'tool_results':[{'id':'etf-connection-readiness','tool':'get_etf_connection_status','ok':True,'result':result,'summary':{'status':result['status']},'error':None}],
             'pending_calls':[]}

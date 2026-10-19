@@ -16,10 +16,18 @@ def etf_news_plan(state, session_id):
     user=next((m for m in reversed(state.get('messages',[])) if m.get('role')=='user' and any('text' in b for b in m.get('content',[]))),{})
     text=text_of(user)
     explicit=next((b['tool_request'] for b in user.get('content',[]) if isinstance(b.get('tool_request'),dict) and b['tool_request'].get('name')==TOOL),None)
+    if explicit is None and any(isinstance(b.get('tool_request'),dict) for b in user.get('content',[])):
+        return None  # an explicit request for another tool runs exactly that tool
     # An identified paper-book recommendation must use its actual holdings/profile,
     # not the standalone feature/sensitivity tool's illustrative equal weights.
     if explicit is None and re.search(r'\bpf_[A-Z0-9]{26}\b',text) and re.search(r'\brecommend\w*\b',text,re.I):
         return None
+    # A recommendation that names a model or an instrument list runs that model tool
+    # (generate_portfolio_recommendation_*), unless it asks about news/feature inputs.
+    if explicit is None and not re.search(r'\b(?:news|information|features?|inputs?|enrich\w*|research)\b',text,re.I):
+        from .model_tools import requested_instruments, requested_model
+        if requested_model(text) or len(requested_instruments(text))>=2:
+            return None
     symbols=[s for s in SYMBOLS if re.search(r'\b'+s+r'\b',text,re.I)]
     if 'GOOGL' not in symbols and re.search(r'\b(?:google|alphabet)\b',text,re.I):symbols.append('GOOGL')
     if explicit is None and not etf_news_request(text):

@@ -8,17 +8,19 @@ from typing import Any
 from ..core.news_evidence import render as render_news
 from ..providers.base import ToolCall, text_of
 from ..skills import CLASSICAL_SKILLS
-from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
+from ..tools.portfolio import CLASSICAL_RECOMMENDATION_TOOLS, CLASSICAL_TOOLS, LIFECYCLE_TOOLS, MODEL_TOOLS, PPO_TOOL, RECOMMENDATION_TOOLS
 from .lifecycle import render_lifecycle
 from .recommendations import _SUPPLIED_STATE, INSTRUMENT_ALIASES, render_recommendation, saved_portfolio_reference
 
-_CLASSICAL = re.compile(r"\b(?:traditional|classical|optimizer|optimisation|optimization|min(?:imum)?[ -]?variance|mean[ -]?variance|cvar)\b", re.I)
+_CLASSICAL = re.compile(r"\b(?:traditional|classical|optimizer|optimisation|optimization|min(?:imum)?[ _-]?variance|mean[ _-]?variance|c[ _-]?var)\b", re.I)
 _WHY = re.compile(r"\b(?:why|explain|reason|rationale)\b", re.I)
 _COMPARE = re.compile(r"\b(?:compare|comparison|yesterday|previous|changed|changes|plan.over.plan)\b", re.I)
 _PERFORMANCE = re.compile(r"\b(?:green|red|perform\w*|actuals?|realized|realised|discrepancy|trending|return gap)\b", re.I)
 _RESEARCH = re.compile(r"\b(?:literature|research|retraining|retrain|improve|improvement|modeling approach|modelling approach)\b", re.I)
 _PPO = re.compile(r"\b(?:ppo|reinforcement|rl)\b", re.I)
 _ID = re.compile(r"\bca_[0-9a-f]{32}\b")
+_LIST = re.compile(r"\b(?:list|show|display)\b[^.!?]{0,60}\b(?:analys[ie]s|stored|previous|past|issued|saved|history)\b"
+                   r"|\b(?:stored|past|issued|saved)\b[^.!?]{0,40}\b(?:analys[ie]s|recommendations)\b", re.I)
 _INSTRUMENTS = INSTRUMENT_ALIASES
 
 
@@ -44,7 +46,7 @@ def _latest_recommendation_family(messages: list[dict]) -> tuple[str | None, boo
     for message in reversed(messages):
         for block in reversed(message.get("content", [])):
             result = block.get("tool_result", {})
-            if result.get("name") in ("recommend_classical_portfolio", "recommend_portfolio"):
+            if result.get("name") in RECOMMENDATION_TOOLS:
                 return result["name"], result.get("status") == "success"
     return None, False
 
@@ -98,17 +100,27 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
             return None
     history = _history(messages)
     family, successful = _latest_recommendation_family(messages)
-    latest = _reference(history, "recommendation") if family == "recommend_classical_portfolio" and successful else None
+    latest = _reference(history, "recommendation") if family in CLASSICAL_RECOMMENDATION_TOOLS and successful else None
     research = _reference(history, "research")
     ids = _ID.findall(text)
     classical = bool(_CLASSICAL.search(text))
     both = classical and bool(_PPO.search(text))
     current = latest["analysis_id"] if latest else None
     launch = bool(re.search(r"\b(?:run|launch|trigger|estimate)\b[^.!?]{0,80}\b(?:experiment|sandbox|research)\b", text, re.I))
-    relevant = classical or bool(ids) or bool(family == "recommend_classical_portfolio" and not _PPO.search(text)) or bool(research and launch)
+    relevant = classical or bool(ids) or bool(family in CLASSICAL_RECOMMENDATION_TOOLS and not _PPO.search(text)) or bool(research and launch)
     if not relevant and not _RESEARCH.search(text):
         return None
-    if re.search(r"\b(?:feedback|record my feedback|note my feedback)\b", text, re.I):
+    # Listing stored analyses is a read; it must never fall through to issuing a new recommendation.
+    if _LIST.search(text) and not _WHY.search(text) and not re.search(r"\b(?:compare|comparison|changed|changes)\b", text, re.I):
+        args: dict[str, Any] = {"limit": 10}
+        kind = "recommendation" if re.search(r"\brecommend\w*\b", text, re.I) else "research" if _RESEARCH.search(text) else None
+        if kind:
+            args["kind"] = kind
+        portfolio = saved_portfolio_reference(text)
+        args.update(portfolio)
+        return {"workflow": {"mode": "list"}, "calls": [_call("list_classical_analyses", args, turn)]}
+    # Only an explicit instruction submits feedback (and the plan node asks for confirmation first).
+    if re.search(r"\b(?:record|submit|note|log|save|send|add)\b[^.!?]{0,40}\bfeedback\b|^\s*feedback\s*:", text, re.I):
         from ..core.ids import idempotency_key
         aid = ids[0] if ids else current
         if not aid:
@@ -156,11 +168,19 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
     if classical and re.search(r"\b(?:recommend\w*|invest\w*|allocat\w*|buy|sell|plan\w*)\b", text, re.I):
         if _SUPPLIED_STATE.search(text):
             return {"workflow": {"mode": "recommend"}, "calls": [], "clarification": "Please supply your complete portfolio state and approved snapshot/date in structured tool arguments. I will not replace your stated holdings with the saved paper book."}
-        algorithm = "mean_variance" if re.search(r"\bmean[ -]?variance\b", text, re.I) else "cvar" if re.search(r"\bcvar\b", text, re.I) else "min_variance"
+        from .model_tools import requested_instruments, requested_models
+        models = requested_models(text)
+        if "mean_variance" in models:
+            return {"workflow": {"mode": "recommend"}, "calls": [], "clarification": "Mean-variance recommendations are no longer served. Ask for model min_variance, cvar or ppo; I have not substituted another objective."}
+        algorithm = next((m for m in models if m in ("min_variance", "cvar")), "min_variance")
         portfolio = saved_portfolio_reference(text)
-        calls = [_call("recommend_classical_portfolio", {"algorithm": algorithm, **portfolio}, turn)]
+        instruments = requested_instruments(text)
+        if instruments:
+            portfolio = {**portfolio, "instruments": instruments}
+        # The default universe (holdings, else the saved book) is resolved before the call by the plan node.
+        calls = [_call(MODEL_TOOLS[algorithm], portfolio, turn)]
         if both:
-            calls.insert(0, _call("recommend_portfolio", portfolio, turn, 1))
+            calls.insert(0, _call(PPO_TOOL, portfolio, turn, 1))
         return {"workflow": {"mode": "both" if both else "recommend"}, "calls": calls}
     if ids:
         return {"workflow": {"mode": "retrieve"}, "calls": [_call("get_classical_analysis", {"analysis_id": ids[0]}, turn)]}
@@ -168,7 +188,8 @@ def portfolio_plan(state: dict, session_id: str) -> dict[str, Any] | None:
 
 
 def selected_portfolio_skills(calls: list[ToolCall], inventory: tuple) -> list[dict]:
-    names = {CLASSICAL_SKILLS.get(c.name, "recommend-portfolio" if c.name == "recommend_portfolio" else "") for c in calls}
+    from ..skills import PPO_SKILL
+    names = {CLASSICAL_SKILLS.get(c.name, PPO_SKILL if c.name == PPO_TOOL else "") for c in calls}
     return [dict(skill) for skill in inventory if skill["name"] in names]
 
 
@@ -307,8 +328,10 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
     parts, derived = [], []
     for row in state.get("tool_results") or []:
         name = row["tool"]
-        if name not in CLASSICAL_TOOLS and name not in LIFECYCLE_TOOLS and name not in {"recommend_portfolio", "submit_experiment"}:
+        if name not in CLASSICAL_TOOLS and name not in LIFECYCLE_TOOLS and name not in {PPO_TOOL, "submit_experiment"}:
             continue
+        if str(row.get("id", "")).startswith("universe-") and row.get("ok"):
+            continue  # the saved book's universe lookup only feeds the model call's instruments
         if not row.get("ok"):
             if row.get("declined"):
                 parts.append("The requested paper decision resolution was cancelled at confirmation. Saved holdings are unchanged."
@@ -323,10 +346,14 @@ def render_portfolio_results(state: dict) -> tuple[str, list[dict]]:
             continue
         if doc.get("decision_id") and doc.get("recommendation"):
             parts.append("Issued decision: " + doc["decision_id"] + ". Review this decision before accepting it into the paper portfolio.")
-        if name == "recommend_portfolio":
+        if name == PPO_TOOL:
             parts.append(render_recommendation(doc["recommendation"]))
             value = doc["recommendation"].get("portfolio_state", {}).get("portfolio_value")
             derived.append({"computed_target_cash": None if value is None else value*doc["recommendation"]["cash_weight"]})
+        elif name == "list_classical_analyses" and isinstance(doc.get("analyses"), list) and (state.get("portfolio_workflow") or {}).get("mode") == "list":
+            rows = [{k: r[k] for k in ("analysis_id", "analysis_kind", "created_at", "portfolio_id") if k in r} | ({"strategy": (r.get("recommendation") or {}).get("strategy")} if (r.get("recommendation") or {}).get("strategy") else {}) for r in doc["analyses"] if isinstance(r, dict)]
+            parts.append(f"Stored traditional analyses: {len(rows)} in this page.\n```json\n" + json.dumps(rows, indent=2, sort_keys=True) + "\n```" + ("\n\nMore analyses are available with the continuation token in the structured response." if doc.get("next_token") else ""))
+            derived.append({"returned_record_count": len(rows)})
         elif doc.get("analysis_id"):
             text, figures = render_classical(doc)
             parts.append(text)

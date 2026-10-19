@@ -17,8 +17,9 @@ environment's Gateway and Runtime:
   pipeline publishes only that NAME at ``/finplan/<env>/financeagent/secret-ref/ci-test-client``;
 * the ``modeling-runner-client`` client-credentials client of the FinanceModel modeling runner
   (role ``finplan-<env>-financemodel-forward-runner-role``): the same ``ci_test`` scope (the Gateway
-  policies admit the read-only modeling tools ``recommend_portfolio``,
-  ``recommend_classical_portfolio`` and ``query_market_data`` by that scope), its own credentials in
+  policies admit the read-only modeling tools ``generate_portfolio_recommendation_ppo``,
+  ``generate_portfolio_recommendation_min_variance``, ``generate_portfolio_recommendation_cvar`` and
+  ``query_market_data`` by that scope), its own credentials in
   ``finplan/<env>/financeagent/modeling-runner-client`` (same JSON, same AWS-managed
   ``aws/secretsmanager`` encryption as the ci_test secret), NAME published at
   ``/finplan/<env>/financeagent/secret-ref/modeling-runner-client``. Like the ci_test secret it has

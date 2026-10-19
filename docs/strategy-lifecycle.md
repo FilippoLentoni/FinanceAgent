@@ -41,7 +41,7 @@ deployed target set against resolution. See [the Tooling update runbook](bootstr
 flowchart LR
     U[User] --> A[Beta LangGraph agent in AgentCore]
     A --> G[Beta MCP Gateway]
-    G --> T[Beta recommend_portfolio Lambda adapter]
+    G --> T[Beta generate_portfolio_recommendation_* Lambda adapters]
     T --> S[Beta strategy inference Lambda]
     S --> P[Beta approved input snapshots]
     S --> B[Beta saved paper portfolio]
@@ -66,7 +66,8 @@ flowchart LR
 4. Check serving parity, data coverage and eligibility. An export is not an automatic promotion.
    An explicit selected-strategy reference identifies the artifact, source experiment and configuration.
    The current PPO can be selected for beta advisory/paper use while remaining ineligible for production.
-5. A normal recommendation request calls `recommend_portfolio` with `{}` through MCP. Inference
+5. A normal recommendation request calls `generate_portfolio_recommendation_ppo` (or the named
+   model's tool) with the saved book's `instruments` through MCP. Inference
    reads the saved paper quantities/cash and latest approved snapshot, marks them to completed actual
    closes, reconstructs high watermark since the book date, and applies the frozen policy and
    constraints. It returns current/target shares, indicative buy/sell quantities, cash and provenance.
@@ -74,7 +75,8 @@ flowchart LR
 6. The agent explains the deterministic result. It does not invent weights, treat realized backtest
    returns as a calibrated forecast, or infer that a recommendation executed in a brokerage account.
 
-`recommend_portfolio` stays the same when switching between supported PPO, SAC and classical strategies.
+Since contracts 1.14.0 each model has its own tool (`generate_portfolio_recommendation_{min_variance,cvar,ppo}`)
+and every request names its `instruments`; the PPO tool serves only a frozen policy trained on exactly that universe.
 Changing trained weights or supported optimizer parameters updates the selected artifact and reference.
 Adding an unsupported algorithm or changing feature semantics requires a FinanceModel code release and
 parity tests; a breaking public interface also requires a contracts/consumer release. The agent does

@@ -7,6 +7,7 @@ from typing import Any
 
 from ..core.news_evidence import render as render_news
 from ..providers.base import text_of
+from ..tools.portfolio import PPO_TOOL
 
 _RECOMMENDATION = re.compile(
     r"\b(?:how|where|should|what)\b[^.!?]{0,100}\binvest\w*\b"
@@ -25,7 +26,7 @@ _SUPPLIED_STATE = re.compile(
     re.I,
 )
 _EXPLANATION = re.compile(
-    r"\b(?:why|explain|reasoning|rationale)\b[^.!?]{0,100}\b(?:recommend\w*|allocation|buys?|sells?|trades?|policy)\b"
+    r"\b(?:why|explain|reasoning|rationale)\b[^.!?]{0,100}\b(?:recommend\w*|allocation|buys?|sells?|trades?|policy|risks?|risky|drivers?|driven|weights?)\b"
     r"|\b(?:recommend\w*|allocation|policy)\b[^.!?]{0,100}\b(?:why|reasoning|rationale)\b"
     r"|^(?:why|why is that|tell me why)[?.!\s]*$", re.I,
 )
@@ -64,7 +65,7 @@ def recommendation_reference(messages: list[dict[str, Any]]) -> dict[str, Any] |
     for message in reversed(history):
         for block in reversed(message.get("content", [])):
             result = block.get("tool_result", {})
-            if result.get("name") != "recommend_portfolio":
+            if result.get("name") != PPO_TOOL:
                 continue
             rec = result.get("content", {}).get("recommendation") if isinstance(result.get("content"), dict) else None
             if result.get("status") != "success" or not isinstance(rec, dict):
@@ -72,10 +73,13 @@ def recommendation_reference(messages: list[dict[str, Any]]) -> dict[str, Any] |
             if _SUPPLIED_STATE.search(text_of(messages[boundary])):
                 return None
             state = rec.get("portfolio_state") or {}
+            original = next((b["tool_use"].get("input") for m in reversed(history) for b in m.get("content", []) if b.get("tool_use", {}).get("id") == result.get("id")), None)
             if state.get("source") == "saved_paper" and state.get("portfolio_id"):
-                arguments = {"portfolio_id": state["portfolio_id"], "input_snapshot_id": rec["input_snapshot_id"], "as_of": rec["as_of"]}
+                # Pin the original snapshot/date, saved book and instrument universe.
+                instruments = (original or {}).get("instruments") if isinstance(original, dict) else None
+                instruments = instruments or [t["instrument_id"] for t in rec.get("target_weights") or [] if isinstance(t, dict) and t.get("instrument_id")]
+                arguments = {"portfolio_id": state["portfolio_id"], "input_snapshot_id": rec["input_snapshot_id"], "as_of": rec["as_of"], "instruments": list(instruments)}
             else:
-                original = next((b["tool_use"].get("input") for m in reversed(history) for b in m.get("content", []) if b.get("tool_use", {}).get("id") == result.get("id")), None)
                 if not isinstance(original, dict) or not isinstance(original.get("holdings"), dict):
                     return None
                 arguments = dict(original)
@@ -99,12 +103,18 @@ def recommendation_arguments(messages: list[dict[str, Any]]) -> dict[str, Any] |
     for block in user.get("content", []):
         request = block.get("tool_request")
         if isinstance(request, dict):
-            return dict(request.get("arguments") or {}) if request.get("name") == "recommend_portfolio" else None
+            return dict(request.get("arguments") or {}) if request.get("name") == PPO_TOOL else None
     text = text_of(user)
     reference = recommendation_reference(messages)
     if reference:
         return reference["arguments"]
-    return saved_portfolio_reference(text) if _RECOMMENDATION.search(text) and not _SUPPLIED_STATE.search(text) else None
+    if not _RECOMMENDATION.search(text) or _SUPPLIED_STATE.search(text):
+        return None
+    from .model_tools import requested_instruments
+    arguments = saved_portfolio_reference(text)
+    instruments = requested_instruments(text)
+    # Without named symbols the plan node resolves the saved book's universe before the call.
+    return {**arguments, "instruments": instruments} if instruments else arguments
 
 
 def supplied_state_recommendation(messages: list[dict[str, Any]]) -> bool:

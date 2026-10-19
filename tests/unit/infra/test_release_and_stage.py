@@ -95,17 +95,17 @@ def test_registration_from_the_environments_released_references(ssm):
 
 
 def test_read_only_execution_history_is_registered(ssm):
-    _seed(ssm, "beta", ["list_executions", "recommend_portfolio"])
+    _seed(ssm, "beta", ["list_executions", "generate_portfolio_recommendation_ppo"])
     targets, _, notes = rel.resolve_targets(ssm, "beta", account=ACCOUNT, tools=contract_tools(), pinned_major=1)
     assert targets["list_executions"] == _arn("beta", "list_executions")
-    assert targets["recommend_portfolio"] == _arn("beta", "recommend_portfolio")
+    assert targets["generate_portfolio_recommendation_ppo"] == _arn("beta", "generate_portfolio_recommendation_ppo")
     assert not notes
 
 
 def test_stale_pipeline_target_handoff_cannot_publish_a_successful_release():
-    expected = {"describe_capabilities": _arn("beta", "describe_capabilities"), "recommend_portfolio": _arn("beta", "recommend_portfolio")}
+    expected = {"describe_capabilities": _arn("beta", "describe_capabilities"), "generate_portfolio_recommendation_ppo": _arn("beta", "generate_portfolio_recommendation_ppo")}
     with pytest.raises(rel.DependencyMissing, match="shared pipeline wiring"):
-        stage_runner.verify_target_handoff(expected, expected | {"recommend_portfolio": "none"})
+        stage_runner.verify_target_handoff(expected, expected | {"generate_portfolio_recommendation_ppo": "none"})
     stage_runner.verify_target_handoff(expected, expected)
 
 
@@ -113,7 +113,7 @@ def test_enabled_classical_deploy_refuses_an_older_producer_catalog_before_deplo
     from infra.stacks.tool_schemas import CLASSICAL_ONLY_TOOLS
 
     with pytest.raises(rel.DependencyMissing, match="FinanceModel and FinanceLambdasTool"):
-        stage_runner.verify_classical_dependencies("beta", {"recommend_portfolio": _arn("beta", "recommend_portfolio")})
+        stage_runner.verify_classical_dependencies("beta", {"generate_portfolio_recommendation_ppo": _arn("beta", "generate_portfolio_recommendation_ppo")})
     stage_runner.verify_classical_dependencies("beta", {t: _arn("beta", t) for t in CLASSICAL_ONLY_TOOLS})
     # Higher environments are not opted into this deployment yet.
     stage_runner.verify_classical_dependencies("gamma", {})
@@ -176,7 +176,7 @@ def test_registered_gateway_audit_checks_actual_aliases_catalogs_and_identity():
     with pytest.raises(rel.DependencyMissing, match="resolved Lambda alias"):
         stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
     bad = deepcopy(control)
-    bad.catalogs["classical"].append("recommend_portfolio")
+    bad.catalogs["classical"].append("generate_portfolio_recommendation_ppo")
     with pytest.raises(rel.DependencyMissing, match="unexpected target"):
         stage_runner.verify_registered_gateways(bad, Cfn(), "beta", targets)
     bad = deepcopy(control)
@@ -459,3 +459,24 @@ def test_suite_counts(tmp_path):
 class FakeBedrock:
     def get_inference_profile(self, **kwargs):
         return {"status":"ACTIVE", "inferenceProfileArn":f"arn:aws:bedrock:{REGION}:{ACCOUNT}:inference-profile/test", "models":[{"modelArn":f"arn:aws:bedrock:{REGION}::foundation-model/test"}]}
+
+
+def test_retired_tool_variables_stay_defined_for_the_bootstrap_buildspec():
+    res = rel.Resolution(env="beta", targets={"generate_portfolio_recommendation_ppo": _arn("beta", "generate_portfolio_recommendation_ppo")}, bedrock_arns=[])
+    variables = res.variables()
+    assert variables["TARGET_RECOMMEND_PORTFOLIO"] == "none" and variables["TARGET_RECOMMEND_CLASSICAL_PORTFOLIO"] == "none"
+    assert variables["TARGET_GENERATE_PORTFOLIO_RECOMMENDATION_PPO"].startswith("arn:aws:lambda:")
+
+
+def test_per_model_tools_resolve_from_financelambdastool_short_function_names(ssm):
+    # FinanceLambdasTool keeps the full tool name in the SSM reference but shortens the function name
+    # (64-character limit): finplan-<env>-financelambdastool-gen-portfolio-rec-<model>:current.
+    tools = ["generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar", "generate_portfolio_recommendation_ppo"]
+    _seed(ssm, "beta", tools)
+    for tool in tools:
+        short = "gen-portfolio-rec-" + tool.removeprefix("generate_portfolio_recommendation_").replace("_", "-")
+        ssm.put_parameter(Name=f"/finplan/beta/{FLT}/lambda/{tool.replace('_', '-')}-arn", Value=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:finplan-beta-{FLT}-{short}:current", Type="String", Overwrite=True)
+    targets, _, notes = rel.resolve_targets(ssm, "beta", account=ACCOUNT, tools=contract_tools(), pinned_major=1)
+    assert targets["generate_portfolio_recommendation_min_variance"].endswith(":function:finplan-beta-financelambdastool-gen-portfolio-rec-min-variance:current")
+    assert targets["generate_portfolio_recommendation_ppo"].endswith("gen-portfolio-rec-ppo:current") and not notes
+    assert "recommend_portfolio" not in targets and "recommend_classical_portfolio" not in targets

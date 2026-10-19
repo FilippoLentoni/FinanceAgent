@@ -29,7 +29,8 @@ def test_independent_gateway_discovery_and_packaged_skill_parity(classical):
     unrestricted = {tool for tool, limit in ci_grants.items() if limit is None}
     assert unrestricted <= set(offered) <= set(ci_grants)
     assert 'record_agent_activity' in offered and 'resolve_portfolio_decision' not in offered
-    assert 'recommend_portfolio' not in offered
+    assert 'generate_portfolio_recommendation_ppo' not in offered and 'recommend_classical_portfolio' not in offered
+    assert {'generate_portfolio_recommendation_min_variance', 'generate_portfolio_recommendation_cvar'} <= set(offered)
     inventory, _ = load_skills()
     by_name = {s['name']: s for s in inventory}
     for name in set(CLASSICAL_SKILLS) & set(offered):
@@ -40,8 +41,9 @@ def test_independent_gateway_discovery_and_packaged_skill_parity(classical):
 
 def test_classical_recommendation_is_persisted_and_reproduced(classical):
     _, client = classical
-    issued = client.call_tool('recommend_classical_portfolio', {'algorithm':'min_variance'})
+    issued = client.call_tool('generate_portfolio_recommendation_min_variance', {'instruments': ['AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'VOO']})
     assert issued.ok, issued.error
+    assert {w['instrument_id'] for w in issued.result['recommendation']['target_weights']} <= {'AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'VOO'}
     aid = issued.result['analysis_id']
     retrieved = client.call_tool('get_classical_analysis', {'analysis_id':aid})
     assert retrieved.ok and retrieved.result == issued.result
@@ -62,8 +64,8 @@ def test_hosted_agent_uses_both_gateways_with_skill_traces(classical):
     answer = result['answer']
     assert answer['recommendation']['strategy'] == 'ppo'
     assert answer['portfolio_analyses'][0]['recommendation']['strategy'] == 'min_variance'
-    assert {(e['tool'],e['gateway']) for e in answer['evidence']} == {('recommend_portfolio','primary'),('recommend_classical_portfolio','classical')}
-    assert {s['name'] for s in answer['skills_used']} == {'recommend-portfolio','recommend-classical-portfolio'}
+    assert {(e['tool'],e['gateway']) for e in answer['evidence']} == {('get_portfolio_history','primary'),('generate_portfolio_recommendation_ppo','primary'),('generate_portfolio_recommendation_min_variance','classical')}
+    assert {s['name'] for s in answer['skills_used']} >= {'generate-portfolio-recommendation-ppo','generate-portfolio-recommendation-classical'}
     assert answer['claim_check']['passed'], answer['claim_check']
     assert result['usage']['invocations'] == 0
 

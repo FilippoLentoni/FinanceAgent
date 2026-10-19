@@ -1,0 +1,5 @@
+name: generate-portfolio-recommendation-classical
+version: 0.3.0
+purpose: Obtain an immutable traditional optimizer plan (minimum variance or CVaR) over an explicit instrument universe, independently of the PPO policy.
+tools: [generate_portfolio_recommendation_min_variance, generate_portfolio_recommendation_cvar, get_classical_analysis, list_classical_analyses, get_portfolio_history, query_market_data, get_portfolio_decision, explain_portfolio_decision]
+output_contract: finance/v1/tools/generate-portfolio-recommendation-cvar-response.json

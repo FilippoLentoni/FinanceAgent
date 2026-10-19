@@ -105,6 +105,15 @@ def default_results() -> dict[str, Callable[[dict[str, Any]], Any]]:
     }
 
 
+def saved_history(instruments: list[str], *, portfolio_id: str = "pf_01KDVDNAZ83BAMMYCEGWF33DPM", revision: int = 1) -> dict[str, Any]:
+    """A ``get_portfolio_history`` page whose latest revision holds ``instruments`` (the saved book's universe)."""
+    return {"portfolio_id": portfolio_id, "next_token": None, "synthetic": True, "contract_version": "1.14.0",
+            "history": [{"portfolio_id": portfolio_id, "revision": revision, "recorded_at": "2026-10-08T21:00:00Z", "reason": "paper_initialization",
+                         "checksum": "sha256:" + "e" * 64, "synthetic": True,
+                         "paper_state": {"positions": [{"instrument_id": i, "quantity": 1.0} for i in instruments], "cash_balance": 0.0,
+                                         "high_watermark": 10000.0, "as_of": "2026-10-08", "base_currency": "USD", "mode": "paper", "source": "paper_initialization"}}]}
+
+
 class FakeToolClient:
     """Stands in for the Gateway MCP client: records calls, answers from ``results``."""
 

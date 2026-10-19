@@ -6,7 +6,7 @@ import re
 
 from ..core.decision_history import previous_decision
 from ..providers.base import ToolCall, text_of
-from ..tools.portfolio import LIFECYCLE_TOOLS
+from ..tools.portfolio import LIFECYCLE_TOOLS, RECOMMENDATION_TOOLS
 from .recommendations import INSTRUMENT_ALIASES
 from .sensitivity import sensitivity_plan
 
@@ -40,7 +40,7 @@ def _issued(messages):
         for block in message.get("content", []):
             result = block.get("tool_result", {})
             doc = result.get("content")
-            if result.get("status") == "success" and isinstance(doc, dict) and doc.get("decision_id") and result.get("name") in ("recommend_portfolio", "recommend_classical_portfolio"):
+            if result.get("status") == "success" and isinstance(doc, dict) and doc.get("decision_id") and result.get("name") in RECOMMENDATION_TOOLS:
                 out.append(doc)
     return out
 
@@ -50,7 +50,7 @@ def _latest_attempt(messages):
     for message in reversed(messages):
         for block in reversed(message.get("content", [])):
             result = block.get("tool_result", {})
-            if result.get("name") in ("recommend_portfolio", "recommend_classical_portfolio"):
+            if result.get("name") in RECOMMENDATION_TOOLS:
                 return result
     return None
 

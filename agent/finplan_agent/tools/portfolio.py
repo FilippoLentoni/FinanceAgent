@@ -7,13 +7,26 @@ from ..core.errors import AgentError
 from ..providers.base import ToolSpec
 from .mcp_client import ToolClient, ToolOutcome
 
+#: One MCP tool per model (contracts 1.14.0). The algorithm is fixed by the tool name and every
+#: request names its ``instruments`` universe; the retired ``recommend_portfolio`` and
+#: ``recommend_classical_portfolio`` tools have no aliases.
+MIN_VARIANCE_TOOL = "generate_portfolio_recommendation_min_variance"
+CVAR_TOOL = "generate_portfolio_recommendation_cvar"
+PPO_TOOL = "generate_portfolio_recommendation_ppo"
+#: Model word -> tool. ``min_variance`` / ``cvar`` run on the traditional (classical) Gateway,
+#: ``ppo`` on the primary Gateway, as their predecessors did.
+MODEL_TOOLS = {"min_variance": MIN_VARIANCE_TOOL, "cvar": CVAR_TOOL, "ppo": PPO_TOOL}
+TOOL_MODELS = {tool: model for model, tool in MODEL_TOOLS.items()}
+CLASSICAL_RECOMMENDATION_TOOLS = frozenset({MIN_VARIANCE_TOOL, CVAR_TOOL})
+RECOMMENDATION_TOOLS = frozenset(MODEL_TOOLS.values())
+
 LIFECYCLE_TOOLS = frozenset({
     "get_portfolio_history", "list_portfolio_decisions", "get_portfolio_decision", "resolve_portfolio_decision", "list_market_snapshots", "record_agent_activity", "list_agent_activity", "explain_portfolio_decision", "compare_portfolio_decisions", "evaluate_portfolio_decision",
 })
 
 CLASSICAL_TOOLS = frozenset({
     "get_crypto_experiment", "recommend_crypto_portfolio", "list_crypto_history", "discover_research_data", "get_etf_research_inputs",
-    "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
+    MIN_VARIANCE_TOOL, CVAR_TOOL, "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
     "research_portfolio_models", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback", "research_market_events",
 })

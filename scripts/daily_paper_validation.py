@@ -29,6 +29,17 @@ def token_for(session,config):
     new['refresh_token']=new.get('refresh_token',token['refresh_token']);new['expires_at']=int(time.time())+new['expires_in'];save_token(new,str(path));return new['access_token']
 
 
+MODEL_TOOLS={'ppo':'generate_portfolio_recommendation_ppo','min_variance':'generate_portfolio_recommendation_min_variance','cvar':'generate_portfolio_recommendation_cvar'}
+
+
+def model_request(book,pid,head):
+    """(tool, arguments) of the book's model over its explicit universe (contracts 1.14.0)."""
+    if book['strategy'] not in MODEL_TOOLS:raise ValueError('strategy '+str(book['strategy'])+' is not served by a model tool')
+    instruments=list(book.get('instruments') or [p['instrument_id'] for p in head['paper_state']['positions']])
+    if not instruments:raise ValueError('the book has no instrument universe')
+    return MODEL_TOOLS[book['strategy']],{'portfolio_id':pid,'instruments':instruments}
+
+
 class Driver:
     def __init__(self,session,config,output):
         self.session,self.config,self.output=session,config,output;self.token=token_for(session,config);self.checks=[]
@@ -40,7 +51,7 @@ class Driver:
         if self.token in json.dumps(data,default=str):raise ValueError('credential in receipt')
         save(self.output/(label+'.json'),data);print(label,flush=True)
     def direct(self,label,tool,args):
-        client=self.classical if tool in {'recommend_classical_portfolio','run_recursive_improvement','research_market_events','submit_portfolio_feedback'} else self.primary
+        client=self.classical if tool in {'generate_portfolio_recommendation_min_variance','generate_portfolio_recommendation_cvar','run_recursive_improvement','research_market_events','submit_portfolio_feedback'} else self.primary
         t=time.monotonic();out=client.call_tool(tool,args);self.record(label,{'tool':tool,'arguments':args,'seconds':time.monotonic()-t,**asdict(out)})
         if not out.ok:raise RuntimeError(tool+': '+str((out.error or {}).get('code')))
         return out.result
@@ -119,9 +130,7 @@ def main():
                     committed=driver.direct(name+'-recover-accepted','get_portfolio_decision',{'decision_id':progress['decision_id']})['decision']
                     if committed.get('status')!='accepted' or committed.get('portfolio_id')!=pid or committed.get('portfolio_revision')!=progress['before_revision']:
                         raise ValueError('advanced revision does not belong to the reviewed accepted decision')
-                    recover_tool='recommend_portfolio' if book['strategy']=='ppo' else 'recommend_classical_portfolio'
-                    recover_args={'portfolio_id':pid}
-                    if recover_tool=='recommend_classical_portfolio':recover_args['algorithm']=book['strategy']
+                    recover_tool,recover_args=model_request(book,pid,before)
                     next_result=driver.direct(name+'-recovered-next-state',recover_tool,recover_args)
                     if next_result['recommendation']['portfolio_state']['revision']!=before['revision']:raise ValueError('recovered inference did not read accepted holdings')
                     progress.update(complete=True,after_revision=before['revision']);save(progress_path,progress);summary['books'].append(progress);continue
@@ -131,8 +140,7 @@ def main():
                         driver.hosted(name+'-evaluate-'+old['decision_id'],{'prompt':'Evaluate the strategy horizon and observed paper performance for '+old['decision_id']},tool='evaluate_portfolio_decision')
                         progress.setdefault('evaluated_ids',[]).append(old['decision_id']);save(progress_path,progress)
                 if args.report_only:continue
-                tool='recommend_portfolio'if book['strategy']=='ppo'else'recommend_classical_portfolio';request={'portfolio_id':pid}
-                if tool=='recommend_classical_portfolio':request['algorithm']=book['strategy']
+                tool,request=model_request(book,pid,before)
                 if not progress.get('decision_id'):
                     result=driver.direct(name+'-recommendation',tool,request);progress.update(name=name,portfolio_id=pid,decision_id=result['decision_id'],before_revision=before['revision'],snapshot=result['recommendation']['input_snapshot_id'],market_date=result['recommendation']['as_of']);save(progress_path,progress)
                 if any(row.get('decision_id')!=progress['decision_id'] and row.get('status')=='accepted' and row.get('execution',{}).get('reference_date','')>=progress['market_date'] for row in previous):
@@ -152,7 +160,7 @@ def main():
                 older=next((r for r in previous if r.get('algorithm')==book['strategy']and r.get('execution',{}).get('reference_date')!=progress['market_date']),None)
                 if older:driver.hosted(name+'-comparison',{'prompt':'Compare decisions '+older['decision_id']+' and '+did},tool='compare_portfolio_decisions')
                 if not progress.get('alternative_id'):
-                    alt=driver.direct(name+'-reject-alternative','recommend_classical_portfolio',{'portfolio_id':pid,'algorithm':'min_variance','settings':{'max_weight':0.4},'idempotency_key':'test-reject-'+name+'-'+today});progress['alternative_id']=alt['decision_id'];save(progress_path,progress)
+                    alt=driver.direct(name+'-reject-alternative','generate_portfolio_recommendation_min_variance',{'portfolio_id':pid,'instruments':model_request(book,pid,before)[1]['instruments'],'settings':{'max_weight':0.4},'idempotency_key':'test-reject-'+name+'-'+today});progress['alternative_id']=alt['decision_id'];save(progress_path,progress)
                 if progress['alternative_id']==did:raise ValueError('reject alternative must differ from accepted proposal')
                 driver.hosted(name+'-model-comparison',{'prompt':'Compare decisions '+did+' and '+progress['alternative_id']},tool='compare_portfolio_decisions')
                 driver.resolve(name+'-reject',progress['alternative_id'],pid,progress['before_revision'],'reject')

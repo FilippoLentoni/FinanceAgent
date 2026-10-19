@@ -42,7 +42,7 @@ def test_gateway_lists_tools_for_the_ci_principal():
 
 
 def test_gateway_invalid_holdings_are_reported_as_nonretryable_validation():
-    result = deployed().gateway().call_tool("recommend_portfolio", {"holdings": {"weights": []}})
+    result = deployed().gateway().call_tool("generate_portfolio_recommendation_ppo", {"instruments": ["VOO"], "holdings": {"weights": []}})
     assert not result.ok and result.error["code"] == "VALIDATION_FAILED"
     assert result.error["retryable"] is False
 
@@ -57,8 +57,10 @@ def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill()
     code, first = env.invoke_agent({"prompt": "Give me a PPO investment recommendation", "stream": True}, sid)
     assert code == 200 and first[-1]["status"] == "completed", first[-1]
     rec = first[-1]["answer"]["recommendation"]
-    assert rec and first[-1]["usage"]["tool_calls"] == 1
-    recommendation_skill = next(s for s in first[-1]["answer"]["skills_used"] if s["name"] == "recommend-portfolio")
+    # The saved book's universe is read first (get_portfolio_history), then the PPO tool runs on it.
+    assert rec and first[-1]["usage"]["tool_calls"] == 2
+    assert [e["tool"] for e in first[-1]["answer"]["evidence"]] == ["get_portfolio_history", "generate_portfolio_recommendation_ppo"]
+    recommendation_skill = next(s for s in first[-1]["answer"]["skills_used"] if s["name"] == "generate-portfolio-recommendation-ppo")
     issued = first[-1]["answer"]["portfolio_decisions"][0]
     decision_id = issued["decision_id"]
     assert decision_id.startswith("pd_") and issued["recommendation"] == rec
@@ -80,8 +82,9 @@ def test_saved_portfolio_why_replays_through_mcp_and_exports_the_applied_skill()
     assert final["usage"]["invocations"] == 0
     skill = next(s for s in final["answer"]["skills_used"] if s["name"] == "paper-portfolio-lifecycle")
     remote = {t.name: t for t in env.gateway().list_tools()}
-    assert recommendation_skill["instructions_checksum"] in remote["recommend_portfolio"].description
-    assert f"recommend-portfolio@{recommendation_skill['version']}" in remote["recommend_portfolio"].description
+    assert recommendation_skill["instructions_checksum"] in remote["generate_portfolio_recommendation_ppo"].description
+    assert f"generate-portfolio-recommendation-ppo@{recommendation_skill['version']}" in remote["generate_portfolio_recommendation_ppo"].description
+    assert not {"recommend_portfolio", "recommend_classical_portfolio"} & set(remote)
     for tool in ("get_portfolio_decision", "explain_portfolio_decision"):
         assert skill["instructions_checksum"] in remote[tool].description
         assert f"paper-portfolio-lifecycle@{skill['version']}" in remote[tool].description

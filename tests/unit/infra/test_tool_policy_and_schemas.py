@@ -92,9 +92,10 @@ def test_policy_file_validates(tmp_path):
 def test_classical_policy_denies_ppo_and_paid_ci_research():
     doc = load_policy(CLASSICAL_POLICY_FILE)
     for role in ("viewer", "researcher", "plan_editor", "plan_publisher"):
-        assert decide("recommend_classical_portfolio", groups=[role], doc=doc)
+        assert decide("generate_portfolio_recommendation_min_variance", groups=[role], doc=doc)
+        assert decide("generate_portfolio_recommendation_cvar", groups=[role], doc=doc)
         assert decide("submit_portfolio_feedback", groups=[role], doc=doc)
-        assert not decide("recommend_portfolio", groups=[role], doc=doc)
+        assert not decide("generate_portfolio_recommendation_ppo", groups=[role], doc=doc)
     for args in ({}, {"dry_run": False}):
         assert not decide("run_portfolio_research", scopes=CI_SCOPE, arguments=args, doc=doc)
         assert not decide("run_portfolio_research", groups=["viewer"], arguments=args, doc=doc)
@@ -173,7 +174,7 @@ def test_every_contract_tool_projects_to_the_gateway_subset():
             for node in _walk(schema):
                 assert set(node) <= {"type", "description", "properties", "required", "items"}
                 assert node["type"] in GATEWAY_TYPES
-        stem = "recommend-portfolio-invocation" if t == "recommend_portfolio" else t.replace('_', '-')
+        stem = t.replace('_', '-')
         assert d.input_schema_id.endswith(f"tools/{stem}-request.json")
 
 
@@ -223,3 +224,19 @@ def test_literal_union_infers_boolean_and_explicit_type_stays_authoritative():
 def test_cfn_casing():
     c = to_cfn({"type": "object", "properties": {"a_b": {"type": "array", "items": {"type": "string"}}}, "required": ["a_b"]})
     assert c == {"Type": "object", "Properties": {"a_b": {"Type": "array", "Items": {"Type": "string"}}}, "Required": ["a_b"]}
+
+
+def test_per_model_recommendation_tools_replace_the_retired_ones_outright():
+    from infra.stacks.tool_schemas import classical_tools, contract_tools, primary_tools
+    tools = set(contract_tools())
+    assert {"generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar", "generate_portfolio_recommendation_ppo"} <= tools
+    assert not {"recommend_portfolio", "recommend_classical_portfolio"} & tools
+    assert "generate_portfolio_recommendation_ppo" in primary_tools() and "generate_portfolio_recommendation_ppo" not in classical_tools()
+    for tool in ("generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar"):
+        assert tool in classical_tools() and tool not in primary_tools()
+    for tool in ("generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar", "generate_portfolio_recommendation_ppo"):
+        d = tool_definition(tool)
+        assert d.input_schema["required"] == ["instruments"] and "algorithm" not in d.input_schema["properties"]
+    assert "cvar_alpha" not in tool_definition("generate_portfolio_recommendation_min_variance").input_schema["properties"]["settings"]["properties"]
+    assert "generate-portfolio-recommendation-ppo@" in tool_definition("generate_portfolio_recommendation_ppo").description
+    assert "generate-portfolio-recommendation-classical@" in tool_definition("generate_portfolio_recommendation_cvar").description

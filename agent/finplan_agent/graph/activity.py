@@ -132,7 +132,16 @@ def archive_turn(state,ctx,status,usage):
              "confirmation":state.get("confirmation"),"claim_check":state.get("claim_check"),
              "release_id":ctx.release_id,"graph_version":GRAPH_VERSION,"usage":usage,
              "caller":state.get("caller"),"error":state.get("error")}
-    arguments={"event_kind":"agent_turn","session_id":ctx.session_id,"correlation_id":cid,"payload":sanitize(payload),
+    recorder=getattr(ctx,"tool_recorder",None)
+    if recorder is not None:
+        # Joins the turn to the full per-call tool I/O events (event_kind tool_call).
+        payload["tool_call_receipts"]=[{k:r.get(k) for k in ("tool","call_id","sequence","activity_event_id","recording_status")} for r in recorder.receipts]
+    # sanitize() redacts credentials/private locations; encode_for_activity() then stores any string the
+    # activity contract still refuses (path-like, http:// or backslash text in narratives and source
+    # excerpts) reversibly as {"representation": "encoded_string", ...} instead of failing the turn.
+    from ..tools.recording import encode_for_activity
+    stored,_redactions=encode_for_activity(sanitize(payload))
+    arguments={"event_kind":"agent_turn","session_id":ctx.session_id,"correlation_id":cid,"payload":stored,
                "idempotency_key":"turn-"+hashlib.sha256((ctx.session_id+"|"+cid).encode()).hexdigest()}
     for row in reversed(state.get("tool_results",[])):
         doc=row.get("result") or {}

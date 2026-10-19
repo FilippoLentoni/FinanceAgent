@@ -18,7 +18,12 @@ def provider_tool_specs(specs):
 
 def recommendation_mcp_description(description: str, root=None) -> str:
     """Expose the exact packaged recommendation recipe through tools/list, without a new target."""
-    return _skill_description('recommend-portfolio', description, root)
+    return _skill_description(PPO_SKILL, description, root)
+
+
+#: Packaged recipes of the per-model recommendation tools (contracts 1.14.0).
+PPO_SKILL = 'generate-portfolio-recommendation-ppo'
+CLASSICAL_RECOMMENDATION_SKILL = 'generate-portfolio-recommendation-classical'
 
 
 CLASSICAL_SKILLS = {
@@ -38,9 +43,10 @@ CLASSICAL_SKILLS = {
     'explain_portfolio_decision': 'paper-portfolio-lifecycle',
     'compare_portfolio_decisions': 'paper-portfolio-lifecycle',
     'evaluate_portfolio_decision': 'investigate-portfolio-performance',
-    'recommend_classical_portfolio': 'recommend-classical-portfolio',
-    'get_classical_analysis': 'recommend-classical-portfolio',
-    'list_classical_analyses': 'recommend-classical-portfolio',
+    'generate_portfolio_recommendation_min_variance': CLASSICAL_RECOMMENDATION_SKILL,
+    'generate_portfolio_recommendation_cvar': CLASSICAL_RECOMMENDATION_SKILL,
+    'get_classical_analysis': CLASSICAL_RECOMMENDATION_SKILL,
+    'list_classical_analyses': CLASSICAL_RECOMMENDATION_SKILL,
     'explain_classical_recommendation': 'explain-classical-recommendation',
     'compare_classical_plans': 'compare-classical-plans',
     'evaluate_classical_performance': 'evaluate-classical-performance',

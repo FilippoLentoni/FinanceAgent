@@ -104,8 +104,11 @@ Use the Runtime ARN from `/finplan/beta/financeagent/agent/runtime-ref` to const
 URL. Send a beta bearer token and a fresh session ID of
 33–100 allowed characters. `{"action":"describe","stream":false}` reports the deployed release,
 provider and skills. For the saved paper portfolio, send an ordinary question such as
-`{"prompt":"how should I invest today?","stream":false}`. The agent calls `recommend_portfolio`
-through MCP with `{}`; inference reads the saved quantities/cash and latest approved market data.
+`{"prompt":"how should I invest today?","stream":false}`. The agent reads the saved book's instruments
+(`get_portfolio_history`) and calls `generate_portfolio_recommendation_ppo` through MCP with those
+`instruments`; inference reads the saved quantities/cash and latest approved market data. Name a model
+(`min_variance`, `cvar`, `ppo`) and/or list symbols to choose the tool and universe, e.g. "Give me a
+portfolio recommendation for AAPL, AMZN, GOOGL, META, MSFT, NVDA, TSLA, VOO using model cvar".
 The beta default is the user-approved $10,000 equal-weight paper book, not actual brokerage holdings.
 Results include current/target shares, proposed buys/sells, cash and the market-data date. Asking
 again revalues the saved book; it does not apply the prior recommendation or execute an order.
@@ -165,8 +168,9 @@ For comparison, an explicit **hypothetical scenario** uses $10,000 in cash and t
 }
 ```
 
-For direct MCP, call `recommend_portfolio` with `{}` for the saved paper book, or with the inner
-`recommendation` object above for the explicit scenario. The Gateway may display a target prefix
+For direct MCP, call `generate_portfolio_recommendation_ppo` (or `_min_variance` / `_cvar` on the
+traditional Gateway) with `{"instruments": [...]}` for the saved paper book, or with the inner
+`recommendation` object above plus `instruments` for the explicit scenario. The Gateway may display a target prefix
 on the tool name; use the name returned by `/mcp` tool discovery. A newer date requires an approved
 snapshot with corresponding completed-session coverage.
 Recommendations are advisory/paper outputs and do not execute orders.
@@ -174,6 +178,6 @@ Recommendations are advisory/paper outputs and do not execute orders.
 For a hosted follow-up, retain the session ID and ask `Why is this your recommendation?`. The
 agent re-reads the original policy/state context and approved market evidence through MCP. Its
 `skills_used` metadata records the applied recommendation recipe. Direct MCP clients discover the
-same versioned instructions and checksum in the `recommend_portfolio` tool description and can
+same versioned instructions and checksum in the `generate_portfolio_recommendation_ppo` tool description and can
 perform those calls themselves; invoking the hosted runtime is optional. Empty MCP resource/prompt
 lists do not prevent tool access.

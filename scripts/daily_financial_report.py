@@ -30,8 +30,12 @@ from finplan_agent.graph.activity import sanitize  # noqa: E402
 from scripts.beta_login import NoRedirect, validate_metadata  # noqa: E402
 from scripts.daily_paper_validation import token_for  # noqa: E402
 
-METHODS = ('ppo', 'min_variance', 'mean_variance', 'cvar')
-READ_TOOLS = frozenset({'recommend_portfolio', 'recommend_classical_portfolio', 'list_portfolio_decisions',
+METHODS = ('ppo', 'min_variance', 'cvar')
+#: Methods a configuration may still name but no tool serves since contracts 1.14.0 (reported, not run).
+RETIRED_METHODS = ('mean_variance',)
+MODEL_TOOLS = {'ppo': 'generate_portfolio_recommendation_ppo', 'min_variance': 'generate_portfolio_recommendation_min_variance',
+               'cvar': 'generate_portfolio_recommendation_cvar'}
+READ_TOOLS = frozenset({*MODEL_TOOLS.values(), 'list_portfolio_decisions',
                         'get_portfolio_decision', 'explain_portfolio_decision', 'compare_portfolio_decisions',
                         'evaluate_portfolio_decision', 'research_market_events', 'get_job_status', 'get_experiment_result'})
 
@@ -241,16 +245,23 @@ def generate(reader, config: dict, now: datetime) -> dict:
               'constraint_comparison': 'Sequential default reads must return identical market and holdings evidence to qualify as aligned. Classical settings are pinned across optimizer families. PPO constraints/horizon are frozen in its trained artifact and may differ; inspect producer diagnostics before treating the methods as an identical feasible-set experiment. Historical rankings and scores belong only to their frozen tuned experiment configurations; they do not establish those scores for the current daily optimizer settings or paper-book size. Cash constraints, covariance/scenario methods, horizon, turnover penalties and execution costs must be matched before transferring performance claims.'}
     reference = None
     for method in config.get('methods', METHODS):
+        if method in RETIRED_METHODS:
+            report['methods'].append({'method': method, 'status': 'not_available', 'error': {'code': 'MODEL_NOT_SERVED'},
+                                      'explainability': {level: {'status': 'not_available', 'reason': 'model_not_served'} for level in ('1_recommendation', '2_plan_change', '3_realization_and_context')}})
+            continue
         if method not in METHODS:
             raise ValueError('unsupported report method')
-        arguments = {'portfolio_id': pid}
+        instruments = list(config.get('expected_instruments') or [])
+        if not instruments:
+            raise ValueError('expected_instruments is required: every model tool optimises an explicit universe')
+        arguments = {'portfolio_id': pid, 'instruments': instruments}
         # Invocation schemas couple snapshot_id and as_of. Supplying both would
         # reinterpret current morning news at a historical close, so use approved
         # defaults and validate all returned snapshot/state/feature identities.
-        tool = 'recommend_portfolio' if method == 'ppo' else 'recommend_classical_portfolio'
+        tool = MODEL_TOOLS[method]
         if method != 'ppo':
-            arguments['algorithm'] = method
-            arguments['settings'] = dict(config.get('classical_settings', {}))
+            allowed = ('lookback_days', 'max_weight', 'cash_weight', 'horizon_sessions', 'turnover_penalty') + (('cvar_alpha',) if method == 'cvar' else ())
+            arguments['settings'] = {k: v for k, v in dict(config.get('classical_settings', {})).items() if k in allowed}
         result = reader.call(method + '-recommendation', tool, arguments)
         item = {'method': method, 'status': result['status'], 'recommendation_receipt': result['receipt'], 'explainability': {}}
         report['methods'].append(item)

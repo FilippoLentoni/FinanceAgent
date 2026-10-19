@@ -41,7 +41,11 @@ def target_metadata(env: str, tool: str, *, classical: bool) -> dict[str, Any]:
 
 CLASSICAL_ONLY_TOOLS = frozenset({
     "get_crypto_experiment", "recommend_crypto_portfolio", "list_crypto_history", "discover_research_data", "get_etf_research_inputs",
-    "recommend_classical_portfolio", "explain_classical_recommendation", "compare_classical_plans",
+    # contracts 1.14.0: the traditional model tools (formerly recommend_classical_portfolio with an
+    # ``algorithm``) stay on the traditional Gateway; generate_portfolio_recommendation_ppo (formerly
+    # recommend_portfolio) stays on the primary Gateway.
+    "generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar",
+    "explain_classical_recommendation", "compare_classical_plans",
     "evaluate_classical_performance", "get_classical_analysis", "list_classical_analyses",
     "research_portfolio_models", "research_market_events", "run_portfolio_research", "run_recursive_improvement", "submit_portfolio_feedback",
 })
@@ -274,12 +278,11 @@ def _output_shape(schema: dict[str, Any]) -> dict[str, Any]:
 def tool_definition(tool: str, description: str | None = None, store: SchemaStore | None = None) -> ToolDefinition:
     store = store or load_store()
     stem = tool.replace("_", "-")
-    request_name = "tools/recommend-portfolio-invocation-request" if tool == "recommend_portfolio" else f"tools/{stem}{_REQ_SUFFIX}"
-    req = store.get(request_name)
+    req = store.get(f"tools/{stem}{_REQ_SUFFIX}")
     resp = store.get(f"tools/{stem}{_RESP_SUFFIX}")
     desc = description or str(req.schema.get("description") or tool)
     desc = _clip(desc)
-    if tool == "recommend_portfolio":
+    if tool == "generate_portfolio_recommendation_ppo":
         from finplan_agent.skills import recommendation_mcp_description
         desc = recommendation_mcp_description(desc)
     elif tool in CLASSICAL_ONLY_TOOLS or tool in CLASSICAL_SHARED_TOOLS:

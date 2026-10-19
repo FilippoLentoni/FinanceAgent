@@ -3,7 +3,7 @@ version: 1
 roles:
   viewer:
     tools:
-    - recommend_portfolio
+    - generate_portfolio_recommendation_ppo
     - get_performance_evidence
     - get_publication
     - list_publications
@@ -29,7 +29,7 @@ roles:
     - evaluate_portfolio_decision
   researcher:
     tools:
-    - recommend_portfolio
+    - generate_portfolio_recommendation_ppo
     - get_performance_evidence
     - get_publication
     - list_publications
@@ -56,7 +56,7 @@ roles:
     - evaluate_portfolio_decision
   plan_editor:
     tools:
-    - recommend_portfolio
+    - generate_portfolio_recommendation_ppo
     - get_performance_evidence
     - get_publication
     - list_publications
@@ -84,7 +84,7 @@ roles:
     - evaluate_portfolio_decision
   plan_publisher:
     tools:
-    - recommend_portfolio
+    - generate_portfolio_recommendation_ppo
     - get_performance_evidence
     - get_publication
     - list_publications
@@ -112,7 +112,7 @@ roles:
     - evaluate_portfolio_decision
   ci_test:
     tools:
-    - recommend_portfolio
+    - generate_portfolio_recommendation_ppo
     - get_performance_evidence
     - get_publication
     - list_publications

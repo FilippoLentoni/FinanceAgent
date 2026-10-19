@@ -1,0 +1,5 @@
+name: generate-portfolio-recommendation-ppo
+version: 0.4.0
+purpose: Run the frozen PPO policy trained on an explicit instrument universe for advisory portfolio decisions with full provenance.
+tools: [generate_portfolio_recommendation_ppo, get_portfolio_history, query_market_data, get_plan, get_plan_version, get_portfolio_decision, explain_portfolio_decision]
+output_contract: finance/v1/tools/generate-portfolio-recommendation-ppo-response.json

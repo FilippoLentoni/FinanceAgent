@@ -7,7 +7,12 @@ from finplan_agent.graph.claim_check import claim_check
 from finplan_agent.graph.nodes import narrate
 from finplan_agent.graph.recommendations import recommendation_arguments, render_recommendation, target_cash_value
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
-from tests.fakes.agent import SESSION, FakeToolClient, auth, make_service
+from tests.fakes.agent import SESSION, FakeToolClient, auth, make_service, saved_history
+
+PPO = 'generate_portfolio_recommendation_ppo'
+INSTRUMENTS = ['AAPL', 'GOOGL', 'NFLX', 'NVDA', 'VOO']
+LOOKUP = ('get_portfolio_history', {'limit': 1})
+DEFAULT = (PPO, {'instruments': INSTRUMENTS})
 
 
 @pytest.fixture
@@ -41,9 +46,10 @@ class NoProvider:
 
 
 def service(rec, *, errors=None, provider=None):
-    tools = FakeToolClient({'recommend_portfolio':lambda _: {'recommendation':deepcopy(rec),'synthetic':True}}, errors=errors, extra_tools=['recommend_portfolio'])
+    tools = FakeToolClient({PPO:lambda _: {'recommendation':deepcopy(rec),'synthetic':True},
+                            'get_portfolio_history':lambda _: saved_history(INSTRUMENTS)}, errors=errors, extra_tools=[PPO, 'get_portfolio_history'])
     svc, _ = make_service(tools=tools, provider=provider or NoProvider())
-    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry('recommend_portfolio',False,'reader')],environment='beta')
+    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry(PPO,False,'reader'),CatalogEntry('get_portfolio_history',False,'reader')],environment='beta')
     return svc, tools
 
 
@@ -56,7 +62,7 @@ def test_default_question_calls_mcp_once_and_reports_shares_and_cash(recommendat
     svc, tools = service(recommendation)
     result = svc.handle({'prompt':prompt,'stream':False},auth(),runtime_session_id=SESSION)
     assert result['status'] == 'completed'
-    assert tools.calls == [('recommend_portfolio',{})]
+    assert tools.calls == [LOOKUP, DEFAULT]
     assert result['answer']['recommendation'] == recommendation
     text = result['answer']['narrative']
     assert 'Saved paper portfolio' in text and 'GOOGL | sell | 8.0000 | 2.6000 | -5.4000 | -1,350.00 | 6.50%' in text
@@ -65,14 +71,14 @@ def test_default_question_calls_mcp_once_and_reports_shares_and_cash(recommendat
         assert '| '+i+' |' in text
     assert 'No calibrated return forecast' in text and 'not executions' in text and '<thinking>' not in text
     assert result['answer']['claim_check']['passed'], result['answer']['claim_check']
-    assert result['usage']['tool_calls'] == 1
+    assert result['usage']['tool_calls'] == 2
 
 
 def test_repeated_question_reads_again_and_never_treats_targets_as_executions(recommendation):
     svc, tools = service(recommendation)
     a=svc.handle({'prompt':'How should I invest today?','stream':False},auth(),runtime_session_id=SESSION)
     b=svc.handle({'prompt':'How should I invest today?','stream':False},auth(),runtime_session_id=SESSION)
-    assert tools.calls == [('recommend_portfolio',{}),('recommend_portfolio',{})]
+    assert tools.calls == [LOOKUP, DEFAULT, LOOKUP, DEFAULT]
     assert a['answer']['recommendation'] == b['answer']['recommendation'] == recommendation
     assert '8.0000 | 2.6000 | -5.4000' in b['answer']['narrative']
 
@@ -82,7 +88,7 @@ def test_explicit_request_reaches_tool_unchanged(recommendation):
     args={'input_snapshot_id':recommendation['input_snapshot_id'],'as_of':'2026-10-08',
           'holdings':{'weights':[{'instrument_id':'GOOGL','weight':1.0}], 'cash_weight':0.,'portfolio_value':12345.,'high_watermark':15000.}}
     result=svc.handle({'recommendation':args,'stream':False},auth(),runtime_session_id=SESSION)
-    assert result['status']=='completed' and tools.calls==[('recommend_portfolio',args)]
+    assert result['status']=='completed' and tools.calls==[(PPO,{**args,'instruments':['GOOGL']})]
 
 
 @pytest.mark.parametrize('text', [
@@ -96,9 +102,9 @@ def test_explicit_actual_state_is_not_replaced_by_default(text):
 
 
 def test_failed_inference_is_not_retried_or_reported_as_a_recommendation(recommendation):
-    svc,tools=service(recommendation,errors={'recommend_portfolio':{'code':'PRECONDITION_FAILED','message':'no saved portfolio','retryable':False}})
+    svc,tools=service(recommendation,errors={PPO:{'code':'PRECONDITION_FAILED','message':'no saved portfolio','retryable':False}})
     result=svc.handle({'prompt':'How should I invest today?','stream':False},auth(),runtime_session_id=SESSION)
-    assert tools.calls==[('recommend_portfolio',{})]
+    assert tools.calls==[LOOKUP, DEFAULT]
     assert result['answer']['recommendation'] is None and 'PRECONDITION_FAILED' in result['answer']['narrative']
     assert 'sell |' not in result['answer']['narrative']
 
@@ -109,7 +115,7 @@ def test_provider_false_draft_cannot_override_complete_recommendation(recommenda
     import finplan_agent.graph.nodes as nodes
     monkeypatch.setattr(nodes,'_emit',lambda *_:None)
     state={'draft_text':'<thinking>secret</thinking>The entire portfolio is invested because Google earnings will rise.',
-           'tool_results':[{'tool':'recommend_portfolio','ok':True,'result':{'recommendation':recommendation}}]}
+           'tool_results':[{'tool':PPO,'ok':True,'result':{'recommendation':recommendation}}]}
     result=narrate(state,SimpleNamespace(context=SimpleNamespace(provider=NoProvider())))
     assert 'Cash:' in result['narrative'] and '79.50%' in result['narrative']
     assert '<thinking>' not in result['narrative'] and 'earnings will rise' not in result['narrative'] and 'entire portfolio is invested' not in result['narrative']
@@ -134,7 +140,7 @@ def test_provider_cannot_substitute_saved_book_for_explicit_actual_state(recomme
         kind='fixture'
         model_id=None
         def generate(self,request,**kwargs):
-            return GenerateResult(text='',tool_calls=(ToolCall(id='wrong',name='recommend_portfolio',arguments={}),),usage=Usage(),stop_reason='tool_use',provider_kind='fixture',model_id=None)
+            return GenerateResult(text='',tool_calls=(ToolCall(id='wrong',name=PPO,arguments={}),),usage=Usage(),stop_reason='tool_use',provider_kind='fixture',model_id=None)
     svc,tools=service(recommendation,provider=WrongDefaultProvider())
     result=svc.handle({'prompt':'Should I buy Google? I hold 10 shares.','stream':False},auth(),runtime_session_id=SESSION)
     assert not tools.calls and result['answer']['recommendation'] is None
@@ -145,7 +151,7 @@ def explanation_service(rec):
     from finplan_agent.skills import load_skills
     svc, tools = service(rec)
     tools.results['query_market_data'] = lambda _: {'snapshot':{'input_snapshot_id':rec['input_snapshot_id'],'status':'approved'},'partial':False}
-    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry('recommend_portfolio',False,'reader'),CatalogEntry('query_market_data',False,'reader')],environment='beta')
+    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry(PPO,False,'reader'),CatalogEntry('get_portfolio_history',False,'reader'),CatalogEntry('query_market_data',False,'reader')],environment='beta')
     svc.deps.skills = load_skills()[0]
     return svc, tools
 
@@ -155,13 +161,13 @@ def test_plain_followup_replays_original_context_and_reads_market_evidence(recom
     svc,tools=explanation_service(recommendation)
     first=svc.handle({'prompt':'How should I invest today?','stream':False},auth(),runtime_session_id=SESSION)
     second=svc.handle({'prompt':prompt,'stream':False},auth(),runtime_session_id=SESSION)
-    assert tools.calls==[('recommend_portfolio',{}),('recommend_portfolio',{'portfolio_id':recommendation['portfolio_state']['portfolio_id'],'input_snapshot_id':recommendation['input_snapshot_id'],'as_of':recommendation['as_of']}),('query_market_data',{'input_snapshot_id':recommendation['input_snapshot_id'],'start_date':recommendation['as_of'],'end_date':recommendation['as_of']})]
+    assert tools.calls==[LOOKUP,DEFAULT,(PPO,{'portfolio_id':recommendation['portfolio_state']['portfolio_id'],'input_snapshot_id':recommendation['input_snapshot_id'],'as_of':recommendation['as_of'],'instruments':INSTRUMENTS}),('query_market_data',{'input_snapshot_id':recommendation['input_snapshot_id'],'start_date':recommendation['as_of'],'end_date':recommendation['as_of']})]
     assert second['status']=='completed' and second['usage']['tool_calls']==2
     assert second['usage']['invocations']==0 and second['answer']['recommendation']==first['answer']['recommendation']
     assert 'original completed session' in second['answer']['narrative'] and 'Feature-level attribution' in second['answer']['narrative']
     assert second['answer']['claim_check']['passed'] and not second['answer']['claim_check']['removed_figures']
-    assert second['answer']['skills_used'][0]['name']=='recommend-portfolio'
-    assert second['answer']['skills_used'][0]['version']=='0.3.3'
+    assert second['answer']['skills_used'][0]['name']=='generate-portfolio-recommendation-ppo'
+    assert second['answer']['skills_used'][0]['version']=='0.4.0'
 
 
 def test_explanation_retains_explicit_original_holdings(recommendation):
@@ -171,7 +177,7 @@ def test_explanation_retains_explicit_original_holdings(recommendation):
     args={'input_snapshot_id':rec['input_snapshot_id'],'as_of':rec['as_of'],'holdings':{'weights':[{'instrument_id':'GOOGL','weight':1.0}],'cash_weight':0.,'portfolio_value':10000.,'high_watermark':10000.}}
     svc.handle({'recommendation':args,'stream':False},auth(),runtime_session_id=SESSION)
     result=svc.handle({'prompt':'Why is this your recommendation?','stream':False},auth(),runtime_session_id=SESSION)
-    assert result['status']=='completed' and tools.calls[1]==('recommend_portfolio',args)
+    assert result['status']=='completed' and tools.calls[1]==(PPO,{**args,'instruments':['GOOGL']})
 
 
 @pytest.mark.parametrize('change',[('portfolio_state','revision',2),('policy_artifact_checksum',None,'sha256:'+'d'*64)])
@@ -184,7 +190,7 @@ def test_changed_state_or_policy_is_not_explained_as_the_original(recommendation
         changed[key][nested]=value
     else:
         changed[key]=value
-    tools.results['recommend_portfolio']=lambda _: {'recommendation':changed}
+    tools.results[PPO]=lambda _: {'recommendation':changed}
     result=svc.handle({'prompt':'Why is this your recommendation?','stream':False},auth(),runtime_session_id=SESSION)
     assert result['status']=='failed' and result['error']['details']['reason']=='recommendation_replay_mismatch'
     assert result['answer']['recommendation'] is None and 'cannot present the new result' in result['answer']['narrative']
@@ -197,7 +203,7 @@ def test_missing_market_evidence_does_not_fall_back_to_conversation(recommendati
     result=svc.handle({'prompt':'Why is this your recommendation?','stream':False},auth(),runtime_session_id=SESSION)
     assert result['status']=='failed' and result['error']['code']=='NOT_FOUND'
     assert result['answer']['recommendation'] is None
-    assert len(tools.calls)==3 and result['usage']['invocations']==0
+    assert len(tools.calls)==4 and result['usage']['invocations']==0
 
 
 def test_why_without_prior_tool_evidence_requests_context(recommendation):
@@ -213,10 +219,10 @@ def test_remote_tool_description_exports_exact_hosted_skill():
     from finplan_agent.skills import load_skills
     from infra.stacks.tool_schemas import tool_definition
     root=Path(__file__).resolve().parents[2]
-    skill=next(s for s in load_skills(root/'skills')[0] if s['name']=='recommend-portfolio')
-    desc=tool_definition('recommend_portfolio').description
-    assert (root/'skills/recommend-portfolio/SKILL.md').read_text() in desc
-    assert skill['instructions_checksum'] in desc and 'recommend-portfolio@0.3.3' in desc
+    skill=next(s for s in load_skills(root/'skills')[0] if s['name']=='generate-portfolio-recommendation-ppo')
+    desc=tool_definition(PPO).description
+    assert (root/'skills/generate-portfolio-recommendation-ppo/SKILL.md').read_text() in desc
+    assert skill['instructions_checksum'] in desc and 'generate-portfolio-recommendation-ppo@0.4.0' in desc
 
 
 @pytest.mark.parametrize('instrument', ['Amazon', 'AMZN', 'Microsoft', 'MSFT', 'Meta', 'META', 'Tesla', 'TSLA'])

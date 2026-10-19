@@ -4,6 +4,16 @@ OpenSpec change `add-explanation-workflows`. This page documents the contract be
 evidence and the narrative, the three workflows, and the modeled-effect disclaimer. Code:
 `agent/finplan_agent/explanations/`. Skills: `skills/explain-*`.
 
+## Recommendation follow-ups (per-model tools)
+
+Explanations of a recommendation produced in the conversation by `generate_portfolio_recommendation_min_variance`,
+`_cvar` or `_ppo` ("Why did you recommend this?", "Explain the risk / the main drivers") do not use the
+`explanation` payload below: they re-read the stored evidence (issued decision -> `explain_portfolio_decision`;
+classical analysis -> `explain_classical_recommendation`; PPO without a decision -> the same tool re-called
+pinned to the original snapshot/date/holdings/`instruments` plus `query_market_data`). See
+`docs/agent-api.md` "Model tools". The structured types below are plan-version workflows and do not
+name the recommendation tools.
+
 ## The rule
 
 Every number in an explanation comes from an **evidence artifact computed by a deterministic tool or

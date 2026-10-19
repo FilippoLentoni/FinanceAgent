@@ -34,6 +34,8 @@ class AgentState(TypedDict, total=False):
     messages: Annotated[list[dict[str, Any]], operator.add]
     # per-turn bookkeeping
     pending_calls: list[dict[str, Any]]
+    #: Model calls waiting for the saved book's instrument universe (graph.model_tools).
+    deferred_calls: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     recommendation_reference: dict[str, Any] | None
     portfolio_workflow: dict[str, Any] | None
@@ -66,6 +68,7 @@ class AgentState(TypedDict, total=False):
 #: Fields reset at the start of every turn.
 TURN_RESET: dict[str, Any] = {
     "pending_calls": [],
+    "deferred_calls": [],
     "tool_results": [],
     "recommendation_reference": None,
     "portfolio_workflow": None,
@@ -113,6 +116,8 @@ class AgentContext:
     explanations: Any = None
     #: Optional independently authenticated brokerage reader; never checkpointed.
     brokerage: Any = None
+    #: Per-request tool-call recorder (``finplan_agent.tools.recording``); never checkpointed.
+    tool_recorder: Any = None
     _offered: list[ToolSpec] | None = field(default=None, repr=False)
 
     def offered_tools(self) -> list[ToolSpec]:

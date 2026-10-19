@@ -341,7 +341,9 @@ def test_classical_catalog_and_policy_are_separate_from_the_existing_ppo_gateway
     assert actual["ClassicalGateway"] == set(classical_tools())
     assert not actual["Gateway"] & CLASSICAL_ONLY_TOOLS
     assert actual["ClassicalGateway"] <= CLASSICAL_ONLY_TOOLS | CLASSICAL_SHARED_TOOLS
-    assert "recommend_portfolio" not in actual["ClassicalGateway"]
+    assert "generate_portfolio_recommendation_ppo" not in actual["ClassicalGateway"]
+    assert {"generate_portfolio_recommendation_min_variance", "generate_portfolio_recommendation_cvar"} <= actual["ClassicalGateway"]
+    assert not {"recommend_portfolio", "recommend_classical_portfolio"} & (actual["Gateway"] | actual["ClassicalGateway"])
 
 
 def test_classical_bootstrap_grants_extend_beta_only(templates):
@@ -376,7 +378,7 @@ def test_environment_gate_rejects_missing_or_overbroad_identity_header_propagati
     t["Resources"]["ClassicalTargetRunPortfolioResearch"]["Properties"].pop("MetadataConfiguration")
     assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
     t = deepcopy(templates["agent:beta"])
-    t["Resources"]["TargetRecommendPortfolio"]["Properties"]["MetadataConfiguration"] = {"AllowedRequestHeaders": ["X-Finplan-User-Token"]}
+    t["Resources"]["TargetGeneratePortfolioRecommendationPpo"]["Properties"]["MetadataConfiguration"] = {"AllowedRequestHeaders": ["X-Finplan-User-Token"]}
     assert any("identity header propagation" in p for p in environment_problems(t, "test", "beta"))
 
 

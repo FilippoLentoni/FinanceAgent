@@ -29,20 +29,34 @@ def test_negated_accept_does_not_request_resolution():
 
 
 def test_sensitivity_freezes_holdings_and_changes_one_parameter():
-    rec = {'strategy': 'mean_variance', 'settings': {'risk_aversion': 2, 'max_weight': 0.6, 'lookback_days': 60},
+    rec = {'strategy': 'min_variance', 'settings': {'risk_aversion': 2, 'max_weight': 0.6, 'lookback_days': 60},
            'input_snapshot_id': 'snap_01JA2B3C4D5E6F7G8H9JKMNPQR', 'as_of': '2025-01-03',
            'portfolio_state': {'portfolio_value': 1000, 'high_watermark': 1100, 'current_cash': 200,
                                'positions': [{'instrument_id': 'SYNTH', 'quantity': 8, 'reference_price': 100}]}}
     original = deepcopy(rec)
-    wf = {'mode': 'lifecycle_sensitivity', 'variants': [{'parameter': 'risk_aversion', 'base': 2, 'value': 5}]}
+    wf = {'mode': 'lifecycle_sensitivity', 'variants': [{'parameter': 'max_weight', 'base': 0.6, 'value': 0.4}]}
     rows = [{'tool': 'get_portfolio_decision', 'ok': True, 'result': {'decision': {'decision_id': PD, 'recommendation': rec}}}]
     plan = sensitivity_plan(wf, rows, 1)
-    args = plan['calls'][0].arguments
-    assert args['settings'] == {**rec['settings'], 'risk_aversion': 5}
+    call = plan['calls'][0]
+    assert call.name == 'generate_portfolio_recommendation_min_variance'
+    args = call.arguments
+    # Only settings the per-model tool accepts; the algorithm is fixed by the tool name.
+    assert args['settings'] == {'max_weight': 0.4, 'lookback_days': 60} and 'algorithm' not in args
+    assert args['instruments'] == ['SYNTH']
     assert args['holdings'] == {'weights': [{'instrument_id': 'SYNTH', 'weight': 0.8}], 'cash_weight': 0.2, 'portfolio_value': 1000, 'high_watermark': 1100}
     assert 'portfolio_id' not in args
     assert rec == original
-    assert not sensitivity_plan(plan['workflow'], rows + [{'tool': 'recommend_classical_portfolio', 'ok': True}], 1)['calls']
+    assert not sensitivity_plan(plan['workflow'], rows + [{'tool': 'generate_portfolio_recommendation_min_variance', 'ok': True}], 1)['calls']
+
+
+def test_mean_variance_and_risk_aversion_sensitivity_are_refused_clearly():
+    rec = {'strategy': 'mean_variance', 'settings': {'risk_aversion': 2, 'max_weight': 0.6},
+           'input_snapshot_id': 'snap_01JA2B3C4D5E6F7G8H9JKMNPQR', 'as_of': '2025-01-03',
+           'portfolio_state': {'portfolio_value': 1000, 'high_watermark': 1100, 'current_cash': 200,
+                               'positions': [{'instrument_id': 'SYNTH', 'quantity': 8, 'reference_price': 100}]}}
+    rows = [{'tool': 'get_portfolio_decision', 'ok': True, 'result': {'decision': {'decision_id': PD, 'recommendation': rec}}}]
+    plan = sensitivity_plan({'mode': 'lifecycle_sensitivity', 'variants': [{'parameter': 'risk_aversion', 'base': 2, 'value': 5}]}, rows, 1)
+    assert not plan['calls'] and 'no longer served' in plan['clarification']
 
 
 def test_market_context_narrative_does_not_archive_escape_paths():

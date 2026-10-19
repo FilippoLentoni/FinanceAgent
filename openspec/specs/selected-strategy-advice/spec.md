@@ -6,7 +6,7 @@ Lets the hosted portfolio agent invoke the experimentally selected strategy and 
 ## Requirements
 
 ### Requirement: Selected strategy on user request
-The agent SHALL use recommend_portfolio through Gateway as the authenticated caller when asked for a strategy-based recommendation. It MUST request missing portfolio state rather than invent holdings or replace the selected strategy with an LLM-generated allocation.
+The agent SHALL use generate_portfolio_recommendation_ppo through Gateway as the authenticated caller when asked for a strategy-based recommendation. It MUST request missing portfolio state rather than invent holdings or replace the selected strategy with an LLM-generated allocation.
 
 #### Scenario: Structured recommendation
 - **WHEN** a caller supplies a valid snapshot, date and portfolio state

@@ -79,6 +79,9 @@ class Deps:
     provider_loader: Callable[[], tuple[ProviderConfig, ExplanationProvider]] | None = None
     provider_refresh_seconds: float = 60.0
     durable_activity: bool = False
+    #: Follow every tool call with a durable ``tool_call`` activity event (tools.recording); the
+    #: hosted runtime always does, offline tests opt in (like ``durable_activity``).
+    record_tool_calls: bool = False
     #: Approved per-caller brokerage reader; absent until separate OAuth activation.
     brokerage_client_factory: Callable[[Caller], Any] | None = None
 
@@ -155,6 +158,7 @@ class AgentService:
             explanation_settings=load_explanation_settings(settings.repo_config, ssm, settings.ssm.explanation_limits),
             provider_loader=lambda: _load_provider(settings.environment, ssm),
             durable_activity=True,
+            record_tool_calls=True,
             brokerage_client_factory=(lambda caller: BrokerageGatewayReader(brokerage_url,lambda:caller.bearer)) if brokerage_url else None,
         )
         return cls(deps)
@@ -203,7 +207,7 @@ class AgentService:
             "streaming": {"http": True, "websocket": s.websocket_enabled},
         }
 
-    def _context(self, caller: Caller, session_id: str) -> AgentContext:
+    def _context(self, caller: Caller, session_id: str, correlation_id: str = "corr-unrecorded", *, synthetic: bool = False) -> AgentContext:
         self.refresh_provider()
         spend = self.deps.spend
 
@@ -215,13 +219,23 @@ class AgentService:
             except Exception:  # noqa: BLE001 - metrics never fail a turn
                 log.warning("usage metric emission failed")
 
+        from ..tools.recording import ToolCallRecorder
+
+        raw_tools = self.deps.tool_client_factory(caller)
+        # Every tool call of this request is followed by a durable tool_call activity event written
+        # through the UNWRAPPED client (no budget, cap or in-graph policy applies to the recorder).
+        recorder = ToolCallRecorder(raw_tools, session_id=session_id, correlation_id=correlation_id, synthetic=synthetic, release_id=self.deps.settings.release_id) if self.deps.record_tool_calls else None
+        brokerage = self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None
+        if recorder is not None and brokerage is not None and hasattr(getattr(brokerage, "client", None), "call_tool"):
+            brokerage.client = recorder.wrap(brokerage.client, gateway="brokerage")
         return AgentContext(
             environment=self.deps.settings.environment,
             release_id=self.deps.settings.release_id,
             provider=self.deps.provider,
             provider_config=self.deps.provider_config,
             guard=self.guard,
-            tools=self.deps.tool_client_factory(caller),
+            tools=recorder.wrap(raw_tools, gateway="primary") if recorder is not None else raw_tools,
+            tool_recorder=recorder,
             catalog=self.catalog(),
             session_id=session_id,
             stable_instructions=self.deps.stable_instructions,
@@ -230,8 +244,20 @@ class AgentService:
             on_spend=getattr(spend, "record_local", None),
             explanations=self.deps.explanation_settings,
             durable_activity=self.deps.durable_activity,
-            brokerage=self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None,
+            brokerage=brokerage,
         )
+
+    @staticmethod
+    def _with_receipts(final: dict[str, Any], context: AgentContext | None) -> dict[str, Any]:
+        """Expose the per-call tool I/O records (``answer.tool_call_receipts``; top level when there is no answer)."""
+        recorder = getattr(context, "tool_recorder", None)
+        if recorder is None:
+            return final
+        receipts = [dict(r) for r in recorder.receipts]
+        target = final["answer"] if isinstance(final.get("answer"), dict) else final
+        target["tool_call_receipts"] = receipts
+        target["tool_call_recording"] = recorder.summary()
+        return final
 
     def _final(self, config: dict[str, Any], session_id: str, correlation_id: str) -> dict[str, Any]:
         snap = self.graph.get_state(config)
@@ -319,30 +345,28 @@ class AgentService:
                 return {"type": "deleted", "session_id": session_id, "correlation_id": cid}
             open_session(self.deps.ownership, session_id, caller)  # FORBIDDEN before any checkpoint read
             graph_input = self._graph_input(action, payload, config, caller, cid)
-            context = self._context(caller, session_id)
+            context = self._context(caller, session_id, cid, synthetic=capture is not None or "ci_test" in caller.roles)
             if capture is not None:
                 import hashlib
                 from ..modeling.capture import canonical
-                original_tools = context.tools
+                raw_tools = context.tool_recorder.sink if context.tool_recorder is not None else context.tools
 
                 def persist_input(entry):
-                    result = original_tools.call_tool("record_agent_activity", {
-                        "event_kind": "modeling_input_capture", "session_id": session_id,
-                        "correlation_id": cid, "synthetic": True,
-                        "payload": entry,
-                        "idempotency_key": "input-" + hashlib.sha256(canonical([session_id, cid, len(capture.entries), entry["checksum"]])).hexdigest(),
-                    })
-                    if not result.ok:
-                        raise AgentError.dependency("Could not durably capture graph input before invocation", reason=(result.error or {}).get("code", "CAPTURE_UNAVAILABLE"))
-                    receipt = result.result or {}
-                    if not receipt.get("activity_event_id") or not str(receipt.get("checksum", "")).startswith("sha256:"):
-                        raise AgentError.dependency("Graph capture returned no immutable receipt", reason="CAPTURE_RECEIPT_MISSING")
-                    return {k: receipt[k] for k in ("activity_event_id", "checksum", "recorded_at") if k in receipt}
+                    # Encoded reversibly (storage-location/path-like strings) and split into parts when
+                    # large, exactly like the per-call tool records (tools.recording).
+                    from ..tools.recording import encode_for_activity, write_activity
+                    stored, redactions = encode_for_activity(entry["supplied"], ("supplied",))
+                    metadata = {"payload_format": "finplan.modeling_input_capture.v1", "boundary": entry["boundary"], "captured_at": entry["captured_at"],
+                                "checksum": entry["checksum"], "status": entry["status"], "exact": not redactions, "redactions": redactions[:200]}
+                    key = "input-" + hashlib.sha256(canonical([session_id, cid, len(capture.entries), entry["checksum"]])).hexdigest()
+                    return write_activity(raw_tools, event_kind="modeling_input_capture", session_id=session_id, correlation_id=cid, synthetic=True,
+                                          idempotency_key=key, metadata=metadata, content={"supplied": stored})
 
                 capture.sink = persist_input
-                capture.max_tool_calls = context.guard.config.max_tool_calls_turn
                 context.provider = capture.provider(context.provider)
                 context.tools = capture.tools(context.tools)
+                if context.brokerage is not None and hasattr(getattr(context.brokerage, "client", None), "call_tool"):
+                    context.brokerage.client = capture.tools(context.brokerage.client)
         except AgentError as exc:
             final = self._failed(exc, session_id, cid)
             return iter([final]) if stream else final
@@ -358,9 +382,10 @@ class AgentService:
             final = self._failed(AgentError.internal(), session_id, cid)
         else:
             final = self._final(config, session_id, cid)
+        self._with_receipts(final, context)
         if capture is not None:
             final["captured_inputs"] = capture.entries
-            final["input_capture_status"] = "captured_at_invocation_boundary"
+            final["input_capture_status"] = "captured_at_invocation_boundary" if not capture.failed else "incomplete_durable_capture"
         return final
 
     def _graph_input(self, action: str, payload: dict[str, Any], config: dict[str, Any], caller: Caller, cid: str) -> list[Any]:
@@ -380,7 +405,15 @@ class AgentService:
         if recommendation is not None:
             if not isinstance(recommendation, dict) or tool_request is not None or payload.get("explanation") is not None:
                 raise AgentError.validation("recommendation must be an object and cannot be combined with another workflow", pointer="/recommendation")
-            tool_request = {"name":"recommend_portfolio", "arguments":recommendation}
+            # No model named: the PPO tool (documented in docs/agent-api.md). ``model`` selects
+            # min_variance / cvar / ppo; instruments default to the holdings, else the saved book.
+            from ..tools.portfolio import MODEL_TOOLS, PPO_TOOL
+            arguments = {k: v for k, v in recommendation.items() if k != "model"}
+            model = recommendation.get("model")
+            if model is not None and (not isinstance(model, str) or model.strip().lower().replace(" ", "_").replace("-", "_") not in MODEL_TOOLS):
+                raise AgentError.validation("recommendation.model must be one of " + ", ".join(MODEL_TOOLS), pointer="/recommendation/model", allowed=list(MODEL_TOOLS))
+            name = MODEL_TOOLS[model.strip().lower().replace(" ", "_").replace("-", "_")] if model is not None else PPO_TOOL
+            tool_request = {"name": name, "arguments": arguments}
         explanation = payload.get("explanation")
         if explanation is not None and not isinstance(explanation, dict):
             raise AgentError.validation("explanation must be an object", pointer="/explanation")
@@ -416,13 +449,13 @@ class AgentService:
                     if isinstance(chunk, dict) and chunk.get("type"):
                         yield chunk
         except AgentError as exc:
-            yield self._failed(exc, session_id, cid)
+            yield self._with_receipts(self._failed(exc, session_id, cid), context)
             return
         except Exception:  # noqa: BLE001
             log.exception("graph run failed (correlation_id=%s)", cid)
-            yield self._failed(AgentError.internal(), session_id, cid)
+            yield self._with_receipts(self._failed(AgentError.internal(), session_id, cid), context)
             return
-        yield self._final(config, session_id, cid)
+        yield self._with_receipts(self._final(config, session_id, cid), context)
 
 
 def _load_provider(environment: str, ssm: Any) -> tuple[ProviderConfig, ExplanationProvider]:

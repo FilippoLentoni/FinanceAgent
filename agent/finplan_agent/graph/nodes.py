@@ -28,7 +28,7 @@ from ..core.ids import idempotency_key
 from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec, Usage, text_of
 from ..providers.fixture import FixtureProvider
 from ..skills import provider_tool_specs
-from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS
+from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS, PPO_TOOL
 from .brokerage import connection_plan
 from .claim_check import claim_check, metric_label_check
 from .crypto import TOOLS as CRYPTO_TOOLS
@@ -158,18 +158,34 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     updates: dict[str, Any] = {"plan_rounds": rounds, "pending_calls": []}
     if rounds > MAX_PLAN_ROUNDS:
         return updates
-    brokerage = connection_plan(state, ctx.brokerage)
+    requested = _tool_request(state)
+    brokerage = connection_plan(state, ctx.brokerage) if requested is None or requested["name"] == "get_etf_connection_status" else None
     if brokerage is not None:
         return {**updates, **brokerage, "skills_used": [s for s in ctx.skills if s.get("name") == "etf-brokerage-readiness"]}
     # A recommendation is a single fresh, read-only inference call. Do not let subsequent
     # provider drafts replace a complete allocation or silently retry failed inference.
-    if not state.get("portfolio_workflow") and any(r.get("tool") == "recommend_portfolio" for r in state.get("tool_results") or []):
+    deferred = [ToolCall(id=c["id"], name=c["name"], arguments=dict(c["arguments"])) for c in state.get("deferred_calls") or []]
+    if not deferred and not state.get("portfolio_workflow") and any(r.get("tool") == PPO_TOOL for r in state.get("tool_results") or []):
         return updates
     try:
         offered = ctx.offered_tools()
     except AgentError as exc:
         updates.update(error=_err(exc, state), degraded="tools_unavailable")
         return updates
+    if requested is not None and not deferred:
+        # An explicit tool_request is authoritative: exactly the named tool runs (subject to policy and
+        # confirmation) or the turn fails with a typed error; another tool is never substituted.
+        refused = _requested_tool_problem(requested["name"], offered, ctx)
+        if refused is not None:
+            updates.update(error=_err(refused, state), status="failed", draft_text=f"The requested tool {requested['name']} was not run: {refused.message}.")
+            return updates
+        if not state.get("portfolio_workflow") and any(not str(r.get("id", "")).startswith("universe-") for r in state.get("tool_results") or []):
+            return updates  # the requested call ran; narrate it (no further planning)
+    if deferred:
+        # The saved book's universe was looked up for these model calls: fill instruments and run them.
+        updates["deferred_calls"] = []
+        result = GenerateResult(text="", tool_calls=tuple(deferred), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+        return _schedule(state, ctx, offered, result, updates, deferred_round=True)
     request = GenerateRequest(
         purpose="plan",
         system=SYSTEM_PROMPT,
@@ -182,6 +198,11 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     arguments = recommendation_arguments(request.messages)
     reference = recommendation_reference(request.messages)
     workflow = etf_news_plan(state, ctx.session_id) or crypto_plan(state, ctx.session_id) or improvement_plan(state, ctx.session_id) or lifecycle_plan(state, ctx.session_id, max_tool_calls=ctx.guard.config.max_tool_calls_turn, remaining_plan_rounds=MAX_PLAN_ROUNDS-rounds) or portfolio_plan(state, ctx.session_id)
+    if workflow is not None and requested is not None and not state.get("portfolio_workflow") and [c.name for c in workflow["calls"]][:1] != [requested["name"]]:
+        workflow = None  # a deterministic route for another tool never replaces the requested one
+    if workflow is None and requested is not None and requested["name"] != PPO_TOOL:
+        call = ToolCall(id=f"request-{state.get('turn', 1)}", name=requested["name"], arguments=dict(requested["arguments"]))
+        return _schedule(state, ctx, offered, GenerateResult(text="", tool_calls=(call,), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None), updates)
     if workflow is not None:
         updates["portfolio_workflow"] = workflow["workflow"]
         if workflow.get("clarification"):
@@ -195,8 +216,8 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     elif explanation_requested(request.messages) and reference is None and arguments is None:
         updates["draft_text"] = "I need a successful portfolio recommendation in this conversation before I can explain it. Ask for a recommendation first, or provide the complete original portfolio scenario. I will re-read its policy and market evidence rather than infer figures from conversation text."
         return updates
-    elif arguments is not None and any(t.name == "recommend_portfolio" for t in offered):
-        calls = [ToolCall(id=f"recommend-{state.get('turn', 1)}", name="recommend_portfolio", arguments=arguments)]
+    elif arguments is not None and any(t.name == PPO_TOOL for t in offered):
+        calls = [ToolCall(id=f"recommend-{state.get('turn', 1)}", name=PPO_TOOL, arguments=arguments)]
         if reference:
             if not any(t.name == "query_market_data" for t in offered):
                 updates.update(error=_err(AgentError.dependency("The market-evidence MCP tool is unavailable."), state), status="failed")
@@ -215,10 +236,44 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
             # Degrade to the deterministic planner: tool-only answer, no model call.
             updates.update(error=_err(exc, state), degraded="tool_only")
             result = FixtureProvider().generate(request)
-    calls = list(result.tool_calls)
-    if supplied_state_recommendation(request.messages) and any(c.name == "recommend_portfolio" and not isinstance(c.arguments.get("holdings"), dict) for c in calls):
+    if supplied_state_recommendation(request.messages) and any(c.name == PPO_TOOL and not isinstance(c.arguments.get("holdings"), dict) for c in result.tool_calls):
         updates["draft_text"] = "For your explicitly supplied portfolio, please provide complete current holdings weights, cash weight, total portfolio value and historical high watermark, with an approved snapshot and completed session. I will not substitute the saved paper portfolio for your actual holdings."
         return updates
+    return _schedule(state, ctx, offered, result, updates)
+
+
+def _tool_request(state: AgentState) -> dict[str, Any] | None:
+    user = next((m for m in reversed(state.get("messages", [])) if m.get("role") == "user" and any("text" in b for b in m.get("content", []))), {})
+    for block in user.get("content", []):
+        request = block.get("tool_request")
+        if isinstance(request, dict) and isinstance(request.get("name"), str):
+            return {"name": request["name"], "arguments": dict(request.get("arguments") or {})}
+    return None
+
+
+def _requested_tool_problem(name: str, offered: list[ToolSpec], ctx: AgentContext) -> AgentError | None:
+    if ctx.catalog.is_denied(name):
+        return AgentError("OPERATION_NOT_PERMITTED", "live execution, trading, payment and wallet tools are never available", {"tool": name})
+    if not any(t.name == name for t in offered):
+        return AgentError("FORBIDDEN", "the tool is not available to this caller (not granted by the Gateway policy for its role, or not deployed)", {"tool": name})
+    return None
+
+
+def _schedule(state: AgentState, ctx: AgentContext, offered: list[ToolSpec], result: Any, updates: dict[str, Any], *, deferred_round: bool = False) -> dict[str, Any]:
+    """Turn planned calls into pending calls (instrument universes resolved, budget checked)."""
+    from .model_tools import resolve_instruments
+
+    calls = list(result.tool_calls)
+    calls, lookup, invalid = resolve_instruments(calls, list(state.get("tool_results") or []), int(state.get("turn", 1)))
+    if invalid is not None:
+        updates.update(error=_err(invalid, state), status="failed", draft_text="I could not determine which instruments to recommend for: " + invalid.message + ". No recommendation was run.")
+        return updates
+    if lookup is not None:
+        if deferred_round:
+            updates.update(error=_err(AgentError.validation("the saved portfolio universe lookup did not return instruments", pointer="/arguments/instruments"), state), status="failed")
+            return updates
+        updates["deferred_calls"] = [{"id": c.id, "name": c.name, "arguments": dict(c.arguments)} for c in calls]
+        calls = [lookup]
     if not calls:
         if result.text:
             updates["draft_text"] = result.text
@@ -231,7 +286,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
     by_name: dict[str, ToolSpec] = {t.name: t for t in offered}
     # Record the packaged recipes for actual offered calls from every planner,
     # including provider-selected tools whose instructions were supplied above.
-    skills = selected_portfolio_skills([c for c in calls if c.name in by_name], ctx.skills)
+    skills = selected_portfolio_skills([c for c in calls if c.name in by_name and not c.id.startswith("universe-")], ctx.skills)
     existing = state.get("skills_used") or []
     selected = [skill for skill in skills if skill not in existing]
     updates["skills_used"] = existing + selected
@@ -245,6 +300,10 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         state_changing = True if spec is None else spec.state_changing
         if c.name in {"run_portfolio_research", "run_recursive_improvement"} and args.get("dry_run", True) is True or c.name == "submit_experiment" and args.get("dry_run") is True:
             state_changing = False
+        if c.name == "production_strategy" and args.get("action") == "get":
+            state_changing = False  # a read (policy/tool-policy.yaml grants production_strategy(action=get) to readers)
+        if c.name == "submit_portfolio_feedback":
+            state_changing = True  # writes durable feedback: confirm first, whatever the catalog flag says
         if state_changing or c.name == "submit_experiment":
             args.setdefault("idempotency_key", idempotency_key(ctx.session_id, int(state.get("turn", 1)), c.name, args))
         pending.append({"id": c.id, "name": c.name, "arguments": args, "state_changing": state_changing, "offered": spec is not None})
@@ -321,7 +380,7 @@ def tool_call(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, An
                 if name == "list_agent_activity":
                     from .activity import activity_history_references
                     result = activity_history_references(result)
-                kept, summary = compact(result, 65536 if name in CRYPTO_TOOLS or name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in ("recommend_portfolio", "query_market_data") else ctx.max_result_chars)
+                kept, summary = compact(result, 65536 if name in CRYPTO_TOOLS or name in CLASSICAL_TOOLS or name in LIFECYCLE_TOOLS or name in (PPO_TOOL, "query_market_data") else ctx.max_result_chars)
                 if name == 'get_experiment_result':
                     from .experiment_evidence import selection_evidence
                     reviewed = selection_evidence(result, ctx.max_result_chars)
@@ -356,7 +415,7 @@ def _evidence(state: AgentState) -> tuple[dict[str, Any], ...]:
     out = []
     for r in state.get("tool_results") or []:
         item: dict[str, Any] = {"tool": r["tool"], "summary": r.get("summary") or {}}
-        if r.get("tool") == "recommend_portfolio" and r.get("ok"):
+        if r.get("tool") == PPO_TOOL and r.get("ok"):
             item["recommendation"] = (r.get("result") or {}).get("recommendation")
         if r.get("error"):
             item["error"] = {"code": r["error"].get("code")}
@@ -418,7 +477,7 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
         failed = next((r for r in state.get("tool_results") or [] if not r.get("ok") and not r.get("declined")), None)
         return {"narrative": text, "narrative_status": "generated", **({"status": "failed", "error": failed.get("error")} if failed else {})}
     for item in reversed(state.get("tool_results") or []):
-        if item.get("tool") != "recommend_portfolio":
+        if item.get("tool") != PPO_TOOL:
             continue
         rec = (item.get("result") or {}).get("recommendation") if item.get("ok") else None
         reference = state.get("recommendation_reference")
@@ -458,8 +517,36 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
         result, updates = _invoke_provider(state, ctx, request, stream_tokens=True)
     except AgentError as exc:
         status = "budget_exceeded" if exc.code == "BUDGET_EXCEEDED" else "unavailable"
+        fallback = _deterministic_evidence_text(state)
+        if fallback:
+            # Tool evidence (including tool errors) is always reported, even without a model narrative.
+            _emit({"type": "token", "text": fallback})
+            return {"narrative": fallback, "narrative_status": status, "error": state.get("error") or _err(exc, state)}
         return {"narrative": "", "narrative_status": status, "error": state.get("error") or _err(exc, state)}
+    if not (result.text or "").strip():
+        fallback = _deterministic_evidence_text(state)
+        if fallback:
+            _emit({"type": "token", "text": fallback})
+            return {**updates, "narrative": fallback, "narrative_status": "generated", "degraded": "evidence_only"}
     return {**updates, "narrative": result.text, "narrative_status": "generated"}
+
+
+def _deterministic_evidence_text(state: AgentState) -> str:
+    """Evidence-only answer from this turn's tool results (no model): each tool, its outcome and its
+    scalar summary or contract error. Every figure comes from a tool result."""
+    lines = []
+    for r in state.get("tool_results") or []:
+        if r.get("declined"):
+            lines.append(f"- {r['tool']}: cancelled at confirmation; nothing was changed.")
+        elif r.get("ok"):
+            summary = {k: v for k, v in (r.get("summary") or {}).items() if v is not None}
+            lines.append(f"- {r['tool']}: succeeded. " + ("Summary: " + json.dumps(summary, sort_keys=True, default=str) if summary else "The full result is in the structured evidence."))
+        else:
+            err = r.get("error") or {}
+            lines.append(f"- {r['tool']} failed: {err.get('code', 'DEPENDENCY_UNAVAILABLE')}: {err.get('message', 'evidence unavailable')}.")
+    if not lines:
+        return ""
+    return "Tool evidence for this request (no model narrative was produced):\n" + "\n".join(lines)
 
 
 def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
@@ -473,7 +560,7 @@ def check_claims(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str,
     # The cash dollar target is the one derived figure in the deterministic recommendation
     # renderer: verify the same exact multiplication of fresh producer value and target weight.
     for item in state.get("tool_results") or []:
-        if item.get("ok") and item.get("tool") == "recommend_portfolio":
+        if item.get("ok") and item.get("tool") == PPO_TOOL:
             rec = (item.get("result") or {}).get("recommendation")
             if rec:
                 values.append({"computed_target_cash": target_cash_value(rec)})

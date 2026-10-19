@@ -55,7 +55,7 @@ def test_current_news_recommendation_narration_preserves_real_cutoff_and_claim_c
     assert '2026-10-07' in narrative and '2026-10-08T12:45:00Z' in narrative
     assert 'separately collected same-morning paid research headlines' in narrative
     assert 'Decisions use the completed close for the next session' not in narrative
-    assert tools.calls == [('recommend_portfolio', {})]
+    assert tools.calls == [('get_portfolio_history', {'limit': 1}), ('generate_portfolio_recommendation_ppo', {'instruments': ['AAPL', 'GOOGL', 'NFLX', 'NVDA', 'VOO']})]
 
 
 def test_declared_paid_research_features_keep_their_own_cutoff():

@@ -71,14 +71,14 @@ def invoke_graph(arguments: dict[str, Any], capture_before: Callable[[dict[str, 
     payload = {"recommendation": arguments, "stream": False, "capture_inputs": True}
     check_public(payload)
     final = _post(session, payload, capture_before, timeout,
-                  {"numerical_policy": "FinanceModel served policy via recommend_portfolio; identity verified against the returned artifact", "news": "News not consumed by the graph request unless the served policy explicitly reports news features"})
+                  {"numerical_policy": "FinanceModel served policy via generate_portfolio_recommendation_ppo; identity verified against the returned artifact", "news": "News not consumed by the graph request unless the served policy explicitly reports news features"})
     if final.get("status") == "failed" and "error_code" in final and "answer" not in final:
         return final
     recommendation = (final.get("answer") or {}).get("recommendation")
     if isinstance(recommendation, dict) and isinstance(recommendation.get("target_weights"), list) and recommendation.get("cash_weight") is not None:
         final["target_weights"] = recommendation["target_weights"]
         final["cash_weight"] = recommendation["cash_weight"]
-        final["allocation_origin"] = "FinanceModel served policy via LangGraph recommend_portfolio tool"
+        final["allocation_origin"] = "FinanceModel served policy via LangGraph generate_portfolio_recommendation_ppo tool"
         final["served_strategy"] = recommendation.get("strategy")
         final["forecast"] = {"available": False, "status": "not_available", "reason": "A target allocation is not a portfolio value forecast"}
     else:

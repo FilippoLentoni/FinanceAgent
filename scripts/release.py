@@ -240,6 +240,9 @@ def load_env_config(env: str, root: Path = ROOT) -> dict[str, Any]:
 
 
 # ===================================================================== resolve
+#: Tools removed outright by contracts 1.14.0 (no aliases); never registered as Gateway targets.
+RETIRED_TOOLS = ("recommend_classical_portfolio", "recommend_portfolio")
+
 @dataclass
 class Resolution:
     env: str
@@ -252,6 +255,10 @@ class Resolution:
         from infra.stacks.agent import target_variable
 
         out = {target_variable(t): v for t, v in sorted(self.targets.items())}
+        # The bootstrap-owned Resolve buildspec still lists the exported variables of tools retired
+        # by contracts 1.14.0; keep them defined (``none``) until the next bootstrap drops them.
+        for tool in RETIRED_TOOLS:
+            out.setdefault(target_variable(tool), NONE)
         out["BEDROCK_INVOKE_ARNS"] = ",".join(self.bedrock_arns) if self.bedrock_arns else NONE
         return out
 

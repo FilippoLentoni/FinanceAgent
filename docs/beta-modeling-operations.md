@@ -36,7 +36,7 @@ versioned model artifacts, separate from the exact decision observation payload.
 Never capture credentials or hidden model reasoning.
 
 The explicit recommendation route can execute deterministic planning, the
-`recommend_portfolio` tool and deterministic narration without a Bedrock model
+`generate_portfolio_recommendation_ppo` tool (or the model named in the request) and deterministic narration without a Bedrock model
 call. The first live capture followed this route and returned the served PPO
 allocation. Label the allocation origin and actual captured boundaries; a
 configured Nova model is not evidence that Nova ran or consumed the news.

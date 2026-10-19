@@ -6,14 +6,16 @@ from finplan_agent.core.errors import AgentError
 from finplan_agent.graph.claim_check import claim_check
 from finplan_agent.skills import load_skills
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
-from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, PortfolioMcpClient
-from tests.fakes.agent import SESSION, FakeToolClient, auth, make_service
+from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, MIN_VARIANCE_TOOL, PPO_TOOL, PortfolioMcpClient
+from tests.fakes.agent import SESSION, FakeToolClient, auth, make_service, saved_history
 from tests.unit.test_saved_portfolio_recommendations import NoProvider
 from tests.unit.test_saved_portfolio_recommendations import recommendation as recommendation
 
 A = 'ca_' + 'a'*32
 B = 'ca_' + 'b'*32
 C = 'ca_' + 'c'*32
+INSTRUMENTS = ['AAPL', 'GOOGL', 'NFLX', 'NVDA', 'VOO']
+LOOKUP = ('get_portfolio_history', {'limit': 1})
 
 
 def doc(rec, aid=A, kind='recommendation'):
@@ -33,12 +35,13 @@ def doc(rec, aid=A, kind='recommendation'):
 
 
 def service(document, *, errors=None):
-    results = {'recommend_classical_portfolio':lambda _:deepcopy(document),
+    results = {MIN_VARIANCE_TOOL:lambda _:deepcopy(document),
+               'get_portfolio_history':lambda _:saved_history(INSTRUMENTS),
                'get_classical_analysis':lambda _:deepcopy(document),
                'explain_classical_recommendation':lambda _:dict(deepcopy(document), analysis_id=B,analysis_kind='explanation')}
-    tools = FakeToolClient(results, errors=errors, extra_tools=list(CLASSICAL_TOOLS)+['recommend_portfolio'])
+    tools = FakeToolClient(results, errors=errors, extra_tools=list(CLASSICAL_TOOLS)+[PPO_TOOL,'get_portfolio_history'])
     svc, _ = make_service(tools=tools, provider=NoProvider())
-    svc.deps.catalog_loader=lambda:ToolCatalog([CatalogEntry(n,n=='run_portfolio_research','researcher' if n=='run_portfolio_research' else 'reader') for n in CLASSICAL_TOOLS|{'recommend_portfolio'}],environment='beta')
+    svc.deps.catalog_loader=lambda:ToolCatalog([CatalogEntry(n,n=='run_portfolio_research','researcher' if n=='run_portfolio_research' else 'reader') for n in CLASSICAL_TOOLS|{PPO_TOOL,'get_portfolio_history'}],environment='beta')
     svc.deps.skills=load_skills()[0]
     return svc,tools
 
@@ -51,7 +54,7 @@ def test_classical_recommendation_and_why_retrieve_exact_issued_id(recommendatio
     svc,tools=service(doc(recommendation))
     a=ask(svc,'Give me the traditional portfolio recommendation today')
     b=ask(svc,'Why should I sell Google?')
-    assert tools.calls==[('recommend_classical_portfolio',{'algorithm':'min_variance'}),('explain_classical_recommendation',{'analysis_id':A,'instrument_id':'GOOGL'})]
+    assert tools.calls==[LOOKUP,(MIN_VARIANCE_TOOL,{'instruments':INSTRUMENTS}),('explain_classical_recommendation',{'analysis_id':A,'instrument_id':'GOOGL'})]
     for result in (a,b):
         assert result['status']=='completed',result
         assert result['answer']['claim_check']['passed'],result['answer']['claim_check']
@@ -64,13 +67,13 @@ def test_classical_recommendation_and_why_retrieve_exact_issued_id(recommendatio
 
 def test_both_strategies_are_rendered_and_preserved(recommendation):
     svc,tools=service(doc(recommendation))
-    tools.results['recommend_portfolio']=lambda _:{'recommendation':deepcopy(recommendation)}
+    tools.results[PPO_TOOL]=lambda _:{'recommendation':deepcopy(recommendation)}
     result=ask(svc,'Compare PPO and traditional portfolio planning recommendations today')
-    assert [c[0] for c in tools.calls]==['recommend_portfolio','recommend_classical_portfolio']
+    assert tools.calls==[LOOKUP,(PPO_TOOL,{'instruments':INSTRUMENTS}),(MIN_VARIANCE_TOOL,{'instruments':INSTRUMENTS})]
     assert result['status']=='completed' and result['answer']['claim_check']['passed'],result
     assert result['answer']['recommendation']['strategy']=='ppo'
     assert result['answer']['portfolio_analyses'][0]['recommendation']['strategy']=='min_variance'
-    assert {s['name'] for s in result['answer']['skills_used']}=={'recommend-portfolio','recommend-classical-portfolio'}
+    assert {s['name'] for s in result['answer']['skills_used']}=={'generate-portfolio-recommendation-ppo','generate-portfolio-recommendation-classical'}
 
 
 def test_two_dates_lookup_then_compare_uses_stored_evidence(recommendation):
@@ -155,7 +158,7 @@ def test_performance_deep_dive_fetches_dated_context_after_numeric_report(recomm
 def test_failed_new_recommendation_is_never_explained_as_old_one(recommendation):
     svc,tools=service(doc(recommendation))
     ask(svc,'Traditional portfolio recommendation today')
-    tools.errors['recommend_classical_portfolio']={'code':'PRECONDITION_FAILED','message':'snapshot missing'}
+    tools.errors[MIN_VARIANCE_TOOL]={'code':'PRECONDITION_FAILED','message':'snapshot missing'}
     failed=ask(svc,'Traditional portfolio recommendation today')
     assert failed['status']=='failed' and failed['answer']['recommendation'] is None
     count=len(tools.calls)
@@ -173,17 +176,17 @@ def test_readonly_research_dry_run_needs_no_paid_confirmation(recommendation):
 
 
 def test_gateway_families_route_without_cross_family_fallback():
-    primary=FakeToolClient({'recommend_portfolio':lambda _:{'ppo':True}},extra_tools=['recommend_portfolio','recommend_classical_portfolio'])
-    classical=FakeToolClient({'recommend_classical_portfolio':lambda _:{'classical':True}},extra_tools=['recommend_classical_portfolio'])
+    primary=FakeToolClient({PPO_TOOL:lambda _:{'ppo':True}},extra_tools=[PPO_TOOL,MIN_VARIANCE_TOOL])
+    classical=FakeToolClient({MIN_VARIANCE_TOOL:lambda _:{'classical':True}},extra_tools=[MIN_VARIANCE_TOOL])
     client=PortfolioMcpClient(primary,classical)
-    assert client.call_tool('recommend_portfolio',{}).extra['gateway']=='primary'
-    assert client.call_tool('recommend_classical_portfolio',{}).extra['gateway']=='classical'
-    assert primary.calls==[('recommend_portfolio',{})]
+    assert client.call_tool(PPO_TOOL,{}).extra['gateway']=='primary'
+    assert client.call_tool(MIN_VARIANCE_TOOL,{}).extra['gateway']=='classical'
+    assert primary.calls==[(PPO_TOOL,{})]
     class Down(FakeToolClient):
         def list_tools(self): raise AgentError.dependency('unavailable')
     partial=PortfolioMcpClient(primary,Down())
-    assert not partial.call_tool('recommend_classical_portfolio',{}).ok
-    assert partial.call_tool('recommend_portfolio',{}).ok
+    assert not partial.call_tool(MIN_VARIANCE_TOOL,{}).ok
+    assert partial.call_tool(PPO_TOOL,{}).ok
 
 
 def test_scientific_attribution_figures_are_checked_as_complete_numbers():
@@ -194,9 +197,9 @@ def test_scientific_attribution_figures_are_checked_as_complete_numbers():
 def test_hosted_prompt_uses_packaged_skills_once_without_changing_remote_discovery():
     from finplan_agent.providers.base import ToolSpec
     from finplan_agent.skills import classical_mcp_description, provider_tool_specs
-    remote=classical_mcp_description('recommend_classical_portfolio','Traditional recommendation')
+    remote=classical_mcp_description(MIN_VARIANCE_TOOL,'Traditional recommendation')
     assert 'instructions_checksum' in remote and 'SKILL' not in remote
-    offered=ToolSpec(name='recommend_classical_portfolio',description=remote,input_schema={'type':'object'})
+    offered=ToolSpec(name=MIN_VARIANCE_TOOL,description=remote,input_schema={'type':'object'})
     assert provider_tool_specs([offered])[0].description=='Traditional recommendation'
     assert offered.description==remote
 

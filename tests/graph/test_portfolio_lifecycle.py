@@ -9,14 +9,15 @@ from finplan_contracts.validate import validate
 
 from finplan_agent.skills import load_skills
 from finplan_agent.tools.catalog import CatalogEntry, ToolCatalog
-from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS, PortfolioMcpClient
-from tests.fakes.agent import SESSION, SESSION_B, FakeToolClient, auth, make_service
+from finplan_agent.tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS, MIN_VARIANCE_TOOL, PPO_TOOL, PortfolioMcpClient
+from tests.fakes.agent import SESSION, SESSION_B, FakeToolClient, auth, make_service, saved_history
 from tests.unit.test_saved_portfolio_recommendations import NoProvider
 from tests.unit.test_saved_portfolio_recommendations import recommendation as recommendation
 
 PD = "pd_01JA2B3C4D5E6F7G8H9JKMNPQR"
 OLD = "pd_01JA2B3C4D5E6F7G8H9JKMNPRS"
 ANALYSIS = "ca_" + "d" * 32
+INSTRUMENTS = ["AAPL", "GOOGL", "NFLX", "NVDA", "VOO"]
 
 
 def setup(rec, *, durable=False):
@@ -42,17 +43,17 @@ def setup(rec, *, durable=False):
         return {"decision_id": PD, "portfolio_id": portfolio_id, "status": state["status"],
                 "before_revision": 1, "after_revision": state["revision"], "paper_execution": True}
 
-    results = {"recommend_portfolio": recommendation, "get_portfolio_decision": decision,
+    results = {PPO_TOOL: recommendation, "get_portfolio_decision": decision,
                "resolve_portfolio_decision": resolve,
                "record_agent_activity": lambda _: {"activity_event_id": "stored-turn"},
                "list_portfolio_decisions": lambda _: {"decisions": []},
-               "get_portfolio_history": lambda _: {"history": []},
+               "get_portfolio_history": lambda _: saved_history([t["instrument_id"] for t in rec["target_weights"]]),
                "list_market_snapshots": lambda _: {"snapshots": []}}
-    tools = FakeToolClient(results, extra_tools=list(LIFECYCLE_TOOLS | CLASSICAL_TOOLS | {"recommend_portfolio"}))
+    tools = FakeToolClient(results, extra_tools=list(LIFECYCLE_TOOLS | CLASSICAL_TOOLS | {PPO_TOOL}))
     svc, _ = make_service(tools=tools, provider=NoProvider())
     svc.deps.catalog_loader = lambda: ToolCatalog([
         CatalogEntry(n, n in {"resolve_portfolio_decision", "run_portfolio_research"}, "plan-writer" if n == "resolve_portfolio_decision" else "reader")
-        for n in LIFECYCLE_TOOLS | CLASSICAL_TOOLS | {"recommend_portfolio"}
+        for n in LIFECYCLE_TOOLS | CLASSICAL_TOOLS | {PPO_TOOL}
     ], environment="beta")
     svc.deps.skills, svc.deps.stable_instructions = load_skills()
     svc.deps.durable_activity = durable
@@ -73,9 +74,9 @@ def test_daily_ppo_after_acceptance_selects_and_archives_the_versioned_recommend
     portfolio_id = recommendation["portfolio_state"]["portfolio_id"]
     result = ask(svc, "Give me a PPO investment recommendation for " + portfolio_id)
     assert result["status"] == "completed" and result["usage"]["invocations"] == 0
-    assert tools.calls[0] == ("recommend_portfolio", {"portfolio_id": portfolio_id})
+    assert tools.calls[:2] == [("get_portfolio_history", {"portfolio_id": portfolio_id, "limit": 1}), (PPO_TOOL, {"portfolio_id": portfolio_id, "instruments": INSTRUMENTS})]
     assert result["answer"]["recommendation"]["portfolio_state"]["revision"] == 2
-    expected = next(skill for skill in svc.deps.skills if skill["name"] == "recommend-portfolio")
+    expected = next(skill for skill in svc.deps.skills if skill["name"] == "generate-portfolio-recommendation-ppo")
     assert result["answer"]["skills_used"] == [expected]
     assert expected["version"] and expected["instructions_checksum"].startswith("sha256:")
     assert tools.calls[-1][0] == "record_agent_activity"
@@ -87,8 +88,8 @@ def test_provider_selected_ppo_uses_loaded_instructions_and_archives_the_same_sk
 
     svc, tools, _ = setup(recommendation, durable=True)
     portfolio_id = recommendation["portfolio_state"]["portfolio_id"]
-    expected = next(skill for skill in svc.deps.skills if skill["name"] == "recommend-portfolio")
-    instructions = next(text for text in svc.deps.stable_instructions if text.startswith("# recommend-portfolio\n"))
+    expected = next(skill for skill in svc.deps.skills if skill["name"] == "generate-portfolio-recommendation-ppo")
+    instructions = next(text for text in svc.deps.stable_instructions if text.startswith("# generate-portfolio-recommendation-ppo\n"))
     assert expected["instructions_checksum"] == "sha256:" + hashlib.sha256(instructions.encode()).hexdigest()
 
     class ProviderPlan:
@@ -97,13 +98,13 @@ def test_provider_selected_ppo_uses_loaded_instructions_and_archives_the_same_sk
 
         def generate(self, request, **kwargs):
             assert instructions in request.stable_instructions
-            return GenerateResult(text="", tool_calls=(ToolCall(id="provider-policy", name="recommend_portfolio", arguments={"portfolio_id": portfolio_id}),),
+            return GenerateResult(text="", tool_calls=(ToolCall(id="provider-policy", name=PPO_TOOL, arguments={"portfolio_id": portfolio_id, "instruments": INSTRUMENTS}),),
                                   usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
 
     svc.deps.provider = ProviderPlan()
     result = ask(svc, "Please review my positions")
     assert result["status"] == "completed" and result["usage"]["invocations"] == 1
-    assert tools.calls[0] == ("recommend_portfolio", {"portfolio_id": portfolio_id})
+    assert tools.calls[0] == (PPO_TOOL, {"portfolio_id": portfolio_id, "instruments": INSTRUMENTS})
     assert result["answer"]["skills_used"] == [expected]
     assert tools.calls[-1][1]["payload"]["skills_used"] == [expected]
 
@@ -210,7 +211,7 @@ def test_generic_comparison_preserves_descriptive_changes_without_missing_shaple
 def test_failed_fresh_recommendation_never_resolves_an_older_success(recommendation):
     svc, tools, _ = setup(recommendation)
     ask(svc, "PPO portfolio recommendation today")
-    tools.errors["recommend_portfolio"] = {"code": "PRECONDITION_FAILED", "message": "no approved market data"}
+    tools.errors[PPO_TOOL] = {"code": "PRECONDITION_FAILED", "message": "no approved market data"}
     ask(svc, "PPO portfolio recommendation today")
     count = len(tools.calls)
     result = ask(svc, "Why?")
@@ -310,14 +311,14 @@ def test_shared_lifecycle_tools_can_use_either_independent_gateway():
         assert result.ok and result.extra["gateway"] == ("primary" if primary_offers else "classical")
 
 
-@pytest.mark.parametrize('prompt,expected',[('PPO portfolio recommendation today','recommend_portfolio'),('Traditional portfolio recommendation today','recommend_classical_portfolio')])
+@pytest.mark.parametrize('prompt,expected',[('PPO portfolio recommendation today',PPO_TOOL),('Traditional portfolio recommendation today',MIN_VARIANCE_TOOL)])
 def test_natural_recommendation_preserves_explicit_saved_book_identity(recommendation,prompt,expected):
     svc,tools,_=setup(recommendation)
-    tools.results['recommend_classical_portfolio']=tools.results['recommend_portfolio']
+    tools.results[MIN_VARIANCE_TOOL]=tools.results[PPO_TOOL]
     pid=recommendation['portfolio_state']['portfolio_id']
     result=ask(svc,prompt+' for '+pid)
     assert result['status']=='completed'
-    assert tools.calls[0]==(expected,{'portfolio_id':pid,**({'algorithm':'min_variance'} if expected=='recommend_classical_portfolio' else {})})
+    assert tools.calls[:2]==[('get_portfolio_history',{'portfolio_id':pid,'limit':1}),(expected,{'portfolio_id':pid,'instruments':INSTRUMENTS})]
 
 
 def test_dated_comparison_discovers_only_compatible_stored_dates(recommendation):
@@ -406,7 +407,7 @@ def test_repeated_hosted_activity_reads_keep_bounded_narratives_and_reconstructa
     initial=ask(svc,'PPO portfolio recommendation today')
     original=deepcopy(events[0])
     assert original['payload']['narrative']==initial['answer']['narrative']
-    assert original['payload']['tool_results'][0]['result']['recommendation']==recommendation
+    assert next(r for r in original['payload']['tool_results'] if r['tool']==PPO_TOOL)['result']['recommendation']==recommendation
     for _ in range(25):
         result=ask(svc,'Show the last three agent interactions for '+pid)
         assert result['status']=='completed',result

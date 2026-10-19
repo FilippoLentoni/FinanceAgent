@@ -2,6 +2,9 @@
 
 No transport headers, credentials or hidden model reasoning are captured. Capture
 fails closed before execution when a payload contains credential-shaped content.
+Capture never consumes the per-turn tool-call budget, and a refused or failed
+durable write is recorded on the entry (``status: capture_failed``) without stopping
+the provider call or tool call it describes.
 """
 from __future__ import annotations
 
@@ -51,11 +54,6 @@ class InputCapture:
         self.max_tool_calls = max_tool_calls
         self.tool_calls = 0
 
-    def take_tool_call(self):
-        if self.tool_calls >= self.max_tool_calls:
-            raise AgentError("BUDGET_EXCEEDED", "Captured workflow exhausted the existing tool call cap")
-        self.tool_calls += 1
-
     def before(self, boundary: str, supplied: dict[str, Any]) -> dict[str, Any]:
         check_public(supplied)
         frozen = json.loads(canonical(supplied))
@@ -64,15 +62,17 @@ class InputCapture:
                 "status": "started"}
         self.entries.append(item)
         if self.sink is not None:
-            self.take_tool_call()
-            # Synchronous immutable activity create must finish before inference.
-            # A refused archive prevents execution instead of losing its input.
+            # Synchronous immutable activity create before inference. A refused write is
+            # recorded here and reported in the final payload; it never blocks execution.
             try:
                 item["durable_receipt"] = self.sink(copy.deepcopy(item))
-            except Exception as exc:
-                item.update(status="capture_failed", error_code=getattr(exc, "code", type(exc).__name__))
-                raise
+            except Exception as exc:  # noqa: BLE001
+                item.update(durable_status="capture_failed", error_code=str(getattr(exc, "code", "") or exc)[:120] or type(exc).__name__)
         return item
+
+    @property
+    def failed(self) -> list[dict[str, Any]]:
+        return [e for e in self.entries if e.get("durable_status") == "capture_failed"]
 
     def provider(self, provider: Any) -> Any:
         capture = self
@@ -116,10 +116,8 @@ class InputCapture:
 
             def call_tool(self, name, arguments):
                 if name == "record_agent_activity":
-                    capture.take_tool_call()
                     return tools.call_tool(name, arguments)
                 item = capture.before("tool.call_tool", {"name": name, "arguments": arguments})
-                capture.take_tool_call()
                 try:
                     result = tools.call_tool(name, arguments)
                 except Exception as exc:
