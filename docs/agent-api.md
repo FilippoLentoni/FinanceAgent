@@ -68,7 +68,11 @@ payloads apart from `session_id` and `correlation_id`.
 Reads never ask for confirmation (`production_strategy` with `action: get` included);
 `submit_portfolio_feedback` always does, and free text submits feedback only on an explicit instruction
 ("record my feedback on ca_…: …"). When no model narrative can be produced (provider error or token
-budget), the answer still lists every tool's outcome or contract error deterministically.
+budget), the answer still lists every tool's outcome or contract error deterministically. Results of
+`list_*` reads are rendered deterministically. The claim check also verifies identifiers: every
+`snap_`/`pv_`/`pub_`/`pl_`/`run_`/`ca_`/`pd_`/`pf_`/`act_`/`rel_`… token in a narrative must occur in this
+turn's tool results or the session's earlier tool evidence, otherwise it is replaced by
+`[unsupported identifier removed]` and listed in `claim_check.removed_identifiers`.
 
 ## Errors
 
@@ -115,6 +119,17 @@ anything else is `VALIDATION_FAILED` at `/recommendation/model`); `model` is not
 4. otherwise the turn fails with `VALIDATION_FAILED` (`details.pointer` `/arguments/instruments`) and
    no model tool runs.
 
+**Free-text universe versus the saved book.** When a free-text prompt lists a universe (case 1), the
+agent reads the saved book (`get_portfolio_history`) and the latest approved snapshots
+(`list_market_snapshots`). If the listed set equals the saved book's instruments, the saved-book request
+`{"instruments": [...]}` runs. Otherwise (or without a saved book) it runs an **isolated hypothetical
+scenario**: the latest approved snapshot, `as_of` = that snapshot's completed coverage end, all-cash
+holdings over the listed instruments (`weights` 0, `cash_weight` 1, `portfolio_value` and
+`high_watermark` 100000). The answer says "This is a hypothetical all-cash $100,000 scenario over the
+requested instruments (approved snapshot …, completed session …), not your saved paper book." Follow-ups
+in that session re-use the same scenario. A `tool_request` or `recommendation` payload is never
+rewritten this way.
+
 The answer contains every instrument and cash, current/target quantities, signed proposed share and
 value changes, reference close/date, portfolio revision, model identity and provenance; the complete
 producer result is `answer.recommendation` (classical results are also in `answer.portfolio_analyses`).
@@ -123,6 +138,13 @@ invent news or feature-level causes.
 
 **Follow-ups in the same session** re-read stored evidence, never conversation text:
 
+* "Explain the risk" leads with the stored risk evidence (classical: portfolio variance, CVaR loss,
+  estimated return, turnover and per-instrument variance contributions; PPO: target cash, estimated
+  turnover and constraint handling, stating that the policy output has no modeled variance or CVaR);
+  "Explain the main drivers" leads with the Shapley contributions, objective gain and keep counterfactuals
+  (PPO: the largest proposed moves, without feature attribution). A publication's performance
+  ("How did publication pub_… perform from … to …") is read from `get_performance_evidence` on the
+  latest approved snapshot.
 * "Why did you recommend this?", "Explain the risk", "Explain the main drivers": an issued decision
   (`decision_id`) is re-read with `get_portfolio_decision` + `explain_portfolio_decision`; a classical
   analysis without a decision with `explain_classical_recommendation` on its `analysis_id`; a PPO result

@@ -100,30 +100,105 @@ def _saved_instruments(row: dict[str, Any]) -> list[str]:
     return out
 
 
-def resolve_instruments(calls: list[ToolCall], results: list[dict[str, Any]], turn: int) -> tuple[list[ToolCall], ToolCall | None, AgentError | None]:
-    """(calls with ``instruments`` filled, universe lookup to run first or None, validation error or None).
+SNAPSHOT_CALL_PREFIX = "snapshot-"
+SCENARIO_SUFFIX = "-scenario"
+#: The isolated hypothetical portfolio used when a free-text universe differs from the saved book.
+SCENARIO_PORTFOLIO_VALUE = 100000
+SCENARIO_NOTE = ("This is a hypothetical all-cash $100,000 scenario over the requested instruments "
+                 "(approved snapshot {snapshot}, completed session {as_of}), not your saved paper book.")
 
-    A lookup defers ALL ``calls`` (the caller keeps them and re-resolves after the lookup returned).
+
+def is_snapshot_lookup(row: dict[str, Any]) -> bool:
+    return row.get("tool") == "list_market_snapshots" and str(row.get("id", "")).startswith(SNAPSHOT_CALL_PREFIX)
+
+
+def is_lookup(row_or_id: Any) -> bool:
+    ident = row_or_id if isinstance(row_or_id, str) else str((row_or_id or {}).get("id", ""))
+    return ident.startswith((UNIVERSE_CALL_PREFIX, SNAPSHOT_CALL_PREFIX))
+
+
+def is_scenario(row_or_id: Any) -> bool:
+    ident = row_or_id if isinstance(row_or_id, str) else str((row_or_id or {}).get("id", ""))
+    return ident.endswith(SCENARIO_SUFFIX)
+
+
+def latest_approved_snapshot(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row or not row.get("ok"):
+        return None
+    snaps = [s for s in (row.get("result") or {}).get("snapshots") or [] if isinstance(s, dict) and s.get("status") == "approved"
+             and isinstance((s.get("coverage") or {}).get("end"), str) and s.get("input_snapshot_id")]
+    return max(snaps, key=lambda s: (s["coverage"]["end"], str(s.get("created_at", "")))) if snaps else None
+
+
+def scenario_arguments(args: dict[str, Any], instruments: list[str], snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Isolated all-cash scenario over ``instruments`` (never the saved book)."""
+    out = {k: v for k, v in args.items() if k not in ("portfolio_id", "holdings", "input_snapshot_id", "as_of")}
+    out.update(input_snapshot_id=snapshot["input_snapshot_id"], as_of=snapshot["coverage"]["end"], instruments=list(instruments),
+               holdings={"weights": [{"instrument_id": i, "weight": 0} for i in instruments], "cash_weight": 1,
+                         "portfolio_value": SCENARIO_PORTFOLIO_VALUE, "high_watermark": SCENARIO_PORTFOLIO_VALUE})
+    return out
+
+
+def resolve_instruments(calls: list[ToolCall], results: list[dict[str, Any]], turn: int, *, free_text: bool = False) -> tuple[list[ToolCall], list[ToolCall], AgentError | None]:
+    """(calls with ``instruments`` filled, lookups to run first, validation error or None).
+
+    Lookups defer ALL ``calls`` (the caller keeps them and re-resolves after the lookups returned).
+    A free-text call naming an explicit universe is compared with the saved book's instruments: the
+    same set keeps the saved-book request; another set (or no saved book) runs the isolated all-cash
+    scenario on the latest approved snapshot (call id suffix ``-scenario``).
     """
-    lookup = next((r for r in reversed(results) if is_universe_lookup(r)), None)
+    history = next((r for r in reversed(results) if is_universe_lookup(r)), None)
+    snapshots = next((r for r in reversed(results) if is_snapshot_lookup(r)), None)
     out: list[ToolCall] = []
+    lookups: dict[str, ToolCall] = {}
+
+    def need_history(args: dict[str, Any]) -> None:
+        portfolio = {"portfolio_id": args["portfolio_id"]} if args.get("portfolio_id") else {}
+        lookups.setdefault("history", ToolCall(id=f"{UNIVERSE_CALL_PREFIX}{turn}", name="get_portfolio_history", arguments={**portfolio, "limit": 1}))
+
+    def need_snapshots() -> None:
+        lookups.setdefault("snapshots", ToolCall(id=f"{SNAPSHOT_CALL_PREFIX}{turn}", name="list_market_snapshots", arguments={"limit": 3}))
+
     for call in calls:
-        if call.name not in RECOMMENDATION_TOOLS or call.arguments.get("instruments"):
+        if call.name not in RECOMMENDATION_TOOLS:
             out.append(call)
             continue
         args = dict(call.arguments)
+        explicit = list(args.get("instruments") or [])
+        if explicit:
+            isolated = isinstance(args.get("holdings"), dict) or args.get("input_snapshot_id")
+            if not free_text or isolated:
+                out.append(call)
+                continue
+            if history is None or snapshots is None:
+                if history is None:
+                    need_history(args)
+                if snapshots is None:
+                    need_snapshots()
+                continue
+            saved = _saved_instruments(history) if history.get("ok") else []
+            if saved and set(saved) == set(explicit):
+                out.append(call)
+                continue
+            snapshot = latest_approved_snapshot(snapshots)
+            if snapshot is None:
+                return calls, [], AgentError("PRECONDITION_FAILED", "no approved completed market snapshot is available for a hypothetical scenario over the requested instruments", {"tool": call.name, "instruments": explicit})
+            out.append(ToolCall(id=call.id + SCENARIO_SUFFIX, name=call.name, arguments=scenario_arguments(args, explicit, snapshot)))
+            continue
         instruments = _holdings_instruments(args)
         if not instruments:
-            if lookup is None:
-                portfolio = {"portfolio_id": args["portfolio_id"]} if args.get("portfolio_id") else {}
-                return calls, ToolCall(id=f"{UNIVERSE_CALL_PREFIX}{turn}", name="get_portfolio_history", arguments={**portfolio, "limit": 1}), None
-            instruments = _saved_instruments(lookup) if lookup.get("ok") else []
+            if history is None:
+                need_history(args)
+                continue
+            instruments = _saved_instruments(history) if history.get("ok") else []
         if not instruments:
-            return calls, None, AgentError.validation(
+            return calls, [], AgentError.validation(
                 "instruments are required: name the symbols to optimise over, supply holdings, or keep a saved paper portfolio with positions",
                 pointer="/arguments/instruments", tool=call.name)
         out.append(ToolCall(id=call.id, name=call.name, arguments={**args, "instruments": instruments}))
-    return out, None, None
+    if lookups:
+        return calls, list(lookups.values()), None
+    return out, [], None
 
 
 def model_tool(model: str) -> str | None:

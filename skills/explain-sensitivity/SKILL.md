@@ -17,7 +17,7 @@ Adopting a computed point is a separate, confirmed step:
 
 ## What happens
 
-1. The grid is validated against the configured maximum number of points, then a `sensitivity_sweep` job is dry-run, budget-checked, confirmed and submitted as the caller.
+1. The grid is validated against the configured maximum number of points, then one contract-valid `run_backtest` per value (the swept setting in the experiment configuration) is dry-run, budget-checked, confirmed and submitted as the caller. Each point's stored backtest results are reported verbatim; `risk_target` and per-instrument sweeps cannot be expressed and are refused.
 2. Each point reports the full allocation, its change versus the base for every holding, expected return and risk under the model, turnover, cost estimate and constraint slack.
 3. Each point is `permitted` under the original policy (the base version's constraints) or a `concession` listing every relaxed item with its original and required value. Infeasible and no-effect points are kept.
 4. Adopting a point shows its concessions and the exact plan content in the confirmation request; only then is `create_override_version` called. The stored constraints and risk preferences are never changed.

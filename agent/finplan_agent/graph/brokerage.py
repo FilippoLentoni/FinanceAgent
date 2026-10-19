@@ -22,5 +22,5 @@ def connection_plan(state, client=None):
                 **({'error_code':exc.code} if getattr(exc,'code',None) else {}),
                 'message':'Coinbase brokerage authentication or capability discovery failed (reason: '+str(reason)[:120]+'). Reconnect the independently authorized brokerage client; only the brokerage owner can read its status. No account holdings were inferred.'}
     return {'portfolio_workflow':{'kind':'etf_connection','mode':'read_only'},'draft_text':result['message'],
-            'tool_results':[{'id':'etf-connection-readiness','tool':'get_etf_connection_status','ok':True,'result':result,'summary':{'status':result['status']},'error':None}],
+            'tool_results':[{'id':'etf-connection-readiness','tool':'get_etf_connection_status','ok':True,'gateway':'brokerage','result':result,'summary':{'status':result['status']},'error':None}],
             'pending_calls':[]}

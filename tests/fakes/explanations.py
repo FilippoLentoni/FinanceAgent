@@ -294,6 +294,7 @@ class ExplanationBackend:
     constraints: dict[str, Any] = field(default_factory=lambda: {"max_turnover": 0.2, "max_weight": 0.7})
     calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     run_ids: dict[str, str] = field(default_factory=dict)
+    run_requests: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # ---------------------------------------------------------------- ToolClient protocol
     def list_tools(self) -> list[ToolSpec]:
@@ -358,6 +359,10 @@ class ExplanationBackend:
     def _t_get_plan(self, a: dict[str, Any]) -> Any:
         return {"plan": {"plan_id": a["plan_id"], "revision": 4}, "plan_id": a["plan_id"], "revision": 4}
 
+    def _t_get_performance_evidence(self, a: dict[str, Any]) -> Any:
+        doc = self.evidence["performance_decomposition"]
+        return {"evidence": doc, "evidence_ref": evidence_ref(doc, 1), "synthetic": True}
+
     def _t_compare_plan_versions(self, a: dict[str, Any]) -> Any:
         doc = self.inventory_doc or inventory()
         return {"evidence": doc, "evidence_ref": evidence_ref(doc, 1)}
@@ -369,13 +374,19 @@ class ExplanationBackend:
             return {"run_id": None, "state": None, "dry_run": True, "configuration_id": cfg, "cost_estimate": est}
         run = uid("run", 10 + len(self.run_ids))
         self.run_ids[run] = a["job_type"]
+        self.run_requests[run] = a
         return {"run_id": run, "state": "queued", "dry_run": False, "configuration_id": cfg, "cost_estimate": est}
 
     def _t_get_job_status(self, a: dict[str, Any]) -> Any:
-        return {"run_id": a["run_id"], "state": self.job_state, "purpose": "research"}
+        doc = {"run_id": a["run_id"], "state": self.job_state, "purpose": "research"}
+        if a["run_id"] == uid("run", 90):  # the base plan version's producing run
+            doc.update(state="succeeded", configuration={"domain": "finance", "domain_schema_version": "1.0", "payload": {"strategy": "min_variance", "universe": ["SPY", "AGG"]}})
+        return doc
 
     def _t_get_experiment_result(self, a: dict[str, Any]) -> Any:
         job_type = self.run_ids[a["run_id"]]
+        if job_type == "run_backtest":
+            return backtest_result(a["run_id"], self.run_requests[a["run_id"]]["configuration"]["payload"])
         doc = self.evidence[job_type]
         n = 2 + sorted(self.run_ids).index(a["run_id"])
         solution = "no_effect" if job_type == "sensitivity_sweep" and all(p.get("solution_status") == "no_effect" for p in doc.get("points", [])) else "optimal"
@@ -391,6 +402,16 @@ class ExplanationBackend:
 
     def _t_create_override_version(self, a: dict[str, Any]) -> Any:
         return {"plan_version_id": uid("pv", 50), "parent_plan_version_id": a["parent_plan_version_id"], "status": "pending_validation"}
+
+
+def backtest_result(run_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    """A contract run_result: the swept turnover limit becomes the realized turnover of the toy backtest."""
+    limit = float((cfg.get("constraints") or {}).get("max_turnover", 0.1))
+    payload = {"performance": {"total_return": r(0.04 + limit / 10), "volatility": r(0.12 + limit / 5), "turnover": limit},
+               "accuracy": {}, "compute_cost": {"estimated_usd": 0.02},
+               "proposed_allocation": {"weights": [{"instrument_id": "SPY", "weight": 0.6}, {"instrument_id": "AGG", "weight": 0.4}], "cash_weight": 0.0}}
+    ref = {"artifact_id": f"art_{BASE}{80 + int(limit * 100) % 20:02d}", "owner": "financemodel", "kind": "run_result", "checksum": checksum(payload), "content_type": "application/json"}
+    return {"run_id": run_id, "completion_status": "succeeded", "solution_status": "optimal", "artifacts": [ref], "artifacts_complete": True, "payload": payload, "synthetic": True}
 
 
 def catalog() -> ToolCatalog:

@@ -137,6 +137,10 @@ def _evidence_ref(doc: Mapping[str, Any], *, tool: str) -> dict[str, Any]:
         refs = [a for a in doc.get("artifacts") or [] if isinstance(a, Mapping) and a.get("kind") == "explanation_evidence"]
         ref = refs[0] if len(refs) == 1 else None
     if not _valid_ref(ref):
+        if tool == "get_experiment_result":
+            # A completed run without explanation evidence (e.g. not a sensitivity sweep) is a
+            # permanent property of that run: retrying cannot help.
+            raise AgentError("PRECONDITION_FAILED", "the run carries no trusted explanation_evidence reference; it is not an explanation evidence run", {"tool": tool, "reason": "evidence_reference_missing"})
         raise AgentError.dependency(f"{tool} returned no trusted explanation_evidence reference with a checksum", tool=tool, reason="evidence_reference_missing")
     return dict(ref)  # type: ignore[arg-type]
 
@@ -168,9 +172,27 @@ def evidence_from_job_result(key: str, doc: Any, *, expected_kind: str) -> Evide
     ref = _evidence_ref(doc, tool="get_experiment_result")
     payload = (doc.get("payload") or {}).get("evidence") if isinstance(doc.get("payload"), Mapping) else None
     if not isinstance(payload, Mapping) or payload.get("evidence_kind") != expected_kind:
-        raise AgentError.dependency("the evidence run returned evidence of an unexpected kind", run_id=run_id, expected_kind=expected_kind, reason="evidence_kind_mismatch")
+        raise AgentError("PRECONDITION_FAILED", f"the run {run_id} is not a {expected_kind} evidence run", {"run_id": run_id, "expected_kind": expected_kind, "reason": "evidence_kind_mismatch"})
     item = EvidenceItem(key=key, kind=expected_kind, ref=ref, payload=dict(payload), source_tool="get_experiment_result", run_id=run_id if isinstance(run_id, str) else None)
     item.payload.setdefault("solution_status", doc.get("solution_status"))
+    return item
+
+
+def evidence_from_run_result(key: str, doc: Any, *, kind: str) -> EvidenceItem:
+    """A standard experiment result (contract ``job-result``, run_result payload) used as sweep-point
+    evidence: the run must have succeeded; its result artifact checksum is the trusted reference."""
+    if not isinstance(doc, Mapping):
+        raise AgentError.dependency("get_experiment_result returned no document", tool="get_experiment_result")
+    run_id = doc.get("run_id")
+    if doc.get("completion_status") != "succeeded":
+        raise AgentError("PRECONDITION_FAILED", f"the sweep run {run_id} did not succeed ({doc.get('completion_status')})", {"run_id": run_id, "completion_status": doc.get("completion_status")})
+    refs = [a for a in doc.get("artifacts") or [] if isinstance(a, Mapping) and isinstance(a.get("checksum"), str) and CHECKSUM_RE.match(a["checksum"]) and a.get("artifact_id")]
+    if not refs:
+        raise AgentError("PRECONDITION_FAILED", f"the sweep run {run_id} recorded no checksummed result artifact", {"run_id": run_id})
+    payload = dict(doc.get("payload") or {}) if isinstance(doc.get("payload"), Mapping) else {}
+    item = EvidenceItem(key=key, kind=kind, ref=dict(refs[0]), payload={"evidence_kind": kind, "run_id": run_id, "solution_status": doc.get("solution_status"),
+                                                                      "performance": payload.get("performance") or {}, "proposed_allocation": payload.get("proposed_allocation") or {}},
+                        source_tool="get_experiment_result", run_id=run_id if isinstance(run_id, str) else None)
     return item
 
 

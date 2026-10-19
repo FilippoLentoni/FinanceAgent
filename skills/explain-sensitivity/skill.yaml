@@ -1,6 +1,6 @@
 # Agent skill bundle; add-explanation-workflows task 4.7. No model identifier, price or endpoint here.
 name: explain-sensitivity
-version: 0.1.0
+version: 0.2.0
 purpose: Show how the recommendation responds to risk, turnover and constraint settings, classifying each point as permitted or as needing original-policy concessions (workflow 3).
 explanation_type: sensitivity
 tools:

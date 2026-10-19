@@ -165,6 +165,8 @@ def lifecycle_plan(state, session_id, *, max_tool_calls=6, remaining_plan_rounds
         if request:
             return None
     ids = _PD.findall(text)
+    if not ids and re.search(r"\bpub_[0-7][0-9A-HJKMNP-TV-Z]{25}\b", text):
+        return None  # publication performance is explained from get_performance_evidence (graph.portfolio)
     portfolios = _PF.findall(text)
     portfolio = {"portfolio_id":portfolios[0]} if portfolios else {}
     if _HISTORY.search(text):

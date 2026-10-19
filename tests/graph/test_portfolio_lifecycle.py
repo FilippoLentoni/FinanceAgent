@@ -104,7 +104,9 @@ def test_provider_selected_ppo_uses_loaded_instructions_and_archives_the_same_sk
     svc.deps.provider = ProviderPlan()
     result = ask(svc, "Please review my positions")
     assert result["status"] == "completed" and result["usage"]["invocations"] == 1
-    assert tools.calls[0] == (PPO_TOOL, {"portfolio_id": portfolio_id, "instruments": INSTRUMENTS})
+    # A free-text turn's explicit universe is compared with the saved book first; equal -> saved-book request.
+    assert tools.calls[:3] == [("get_portfolio_history", {"portfolio_id": portfolio_id, "limit": 1}), ("list_market_snapshots", {"limit": 3}),
+                               (PPO_TOOL, {"portfolio_id": portfolio_id, "instruments": INSTRUMENTS})]
     assert result["answer"]["skills_used"] == [expected]
     assert tools.calls[-1][1]["payload"]["skills_used"] == [expected]
 

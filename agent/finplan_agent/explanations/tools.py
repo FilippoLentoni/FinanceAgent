@@ -88,7 +88,7 @@ class GuardedTools:
             # Not in the released tool catalog (e.g. a tool still to be shipped by FinanceLambdasTool):
             # nothing is called, and the caller learns the dependency is missing rather than being
             # told to confirm a call that cannot happen.
-            raise AgentError.dependency(f"{name} is not in the released tool catalog", kind="tool_not_released", tool=name)
+            raise AgentError.dependency(f"the tool {name} is not available in this environment (not in the released tool catalog)", kind="tool_not_offered", reason="tool_not_offered", tool=name)
         if self.requires_confirmation(name, arguments) and arguments.get("idempotency_key") not in self._approved:
             raise AgentError.not_permitted(f"{name} changes state and was not confirmed; explanations never change state on their own", kind="unconfirmed_state_change", tool=name)
         if self.count >= self._max:
@@ -112,7 +112,7 @@ class GuardedTools:
             details.setdefault("tool", name)
             if code == "NOT_FOUND" and "not offered" in str(err.get("message", "")):
                 # The read tool does not exist in this environment yet (EX-OQ-9).
-                raise AgentError.dependency(f"the tool {name} is not available in this environment", tool=name, reason="tool_not_offered")
+                raise AgentError.dependency(f"the tool {name} is not available in this environment", tool=name, kind="tool_not_offered", reason="tool_not_offered")
             raise AgentError(code, str(err.get("message") or f"{name} failed"), details)
         return outcome.result
 
@@ -215,7 +215,7 @@ class EvidenceJobs:
         kinds = {j.evidence_kind for j in jobs}
         if "grouped_shapley" in kinds:
             return "controlled_resolve_only: request the explanation without shapley (k + 2 re-solves instead of 2^k)"
-        if "sensitivity_sweep" in kinds:
+        if "sensitivity_sweep" in kinds or any(k.startswith("sensitivity_point_") for k in kinds):
             return "fewer_sweep_points: request fewer parameter values"
         return "existing_evidence_only: reuse evidence by run_id from an earlier explanation"
 

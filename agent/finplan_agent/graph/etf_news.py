@@ -12,6 +12,11 @@ def etf_news_request(text):
     return bool(has_etf and re.search(r'\b(?:news|information|state|features?|inputs?|models?|ppo|llm|optimization|optimizer|enrich\w*|research|recommend\w*)\b',text,re.I))
 
 
+def _session_has_recommendation(state):
+    from ..tools.portfolio import RECOMMENDATION_TOOLS
+    return any(b.get('tool_result',{}).get('name') in RECOMMENDATION_TOOLS for m in state.get('messages',[]) for b in m.get('content',[]) if isinstance(b,dict))
+
+
 def etf_news_plan(state, session_id):
     user=next((m for m in reversed(state.get('messages',[])) if m.get('role')=='user' and any('text' in b for b in m.get('content',[]))),{})
     text=text_of(user)
@@ -24,6 +29,9 @@ def etf_news_plan(state, session_id):
         return None
     # A recommendation that names a model or an instrument list runs that model tool
     # (generate_portfolio_recommendation_*), unless it asks about news/feature inputs.
+    # A why/explain follow-up about a recommendation in this session explains that recommendation.
+    if explicit is None and re.search(r'\b(?:why|explain\w*|reason\w*|rationale)\b',text,re.I) and _session_has_recommendation(state):
+        return None
     if explicit is None and not re.search(r'\b(?:news|information|features?|inputs?|enrich\w*|research)\b',text,re.I):
         from .model_tools import requested_instruments, requested_model
         if requested_model(text) or len(requested_instruments(text))>=2:
@@ -47,7 +55,6 @@ def etf_news_plan(state, session_id):
     if re.search(r'\bcvar\b',text,re.I):args['algorithm']='cvar'
     elif re.search(r'\bmin(?:imum)?[ -]?variance\b',text,re.I):args['algorithm']='min_variance'
     elif re.search(r'\bmean[ -]?variance\b',text,re.I):args['algorithm']='mean_variance'
-    if 'algorithm' not in args and re.search(r'\brecommend\w*\b',text,re.I):args['algorithm']='mean_variance'
     return {'workflow':workflow,'calls':[ToolCall(id=f'etf-news-{state.get("turn",1)}',name=TOOL,arguments=args)]}
 
 

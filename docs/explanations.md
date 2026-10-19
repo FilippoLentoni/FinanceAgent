@@ -62,6 +62,25 @@ explain_narrate  per-session Bedrock budget check -> ONE capped provider call ov
 | `type` | Required fields | Optional |
 |---|---|---|
 | `plan_performance` | `publication_id` (or `plan_id` / `plan_version_id` resolved to one publication), `window`, `realized_snapshot_id` | `actual_source` (`paper` or `simulated`) |
+
+How each type obtains its evidence in the deployed release:
+
+* `plan_performance` reads the publication, plan version and executions, then the stored deterministic
+  evidence from `get_performance_evidence` (FinanceModel reconciles the publication against the recorded
+  account ledger). No evidence job is launched and no confirmation is asked. A publication without exactly
+  one recorded ledger for the window is `PRECONDITION_FAILED` (`actual_ledger_missing_or_ambiguous`).
+* `recommendation_change` needs the `compare_plan_versions` read tool; until FinanceLambdasTool ships it,
+  the request fails `DEPENDENCY_UNAVAILABLE` with `details.kind` / `details.reason` `tool_not_offered`.
+* `sensitivity` submits one contract-valid `run_backtest` per swept value (`finance/v1/experiment-config`:
+  base `strategy` — from the base version's producing run or `fixed_inputs.strategy` — the plan's
+  `universe`, and the swept setting as `risk_aversion` or `constraints.max_weight` / `min_weight` /
+  `max_turnover`; `risk_target` and per-instrument sweeps are `VALIDATION_FAILED`). Every run is first
+  dry-run (estimates, budget gate), then the session waits for confirmation; nothing runs before it. After
+  the runs finish, each point's stored backtest results are listed verbatim with its run id and
+  `permitted` / `concession` classification. Backtest results carry no `explanation_evidence` artifact,
+  so this answer is not an explanation envelope (`answer.explanation` is null).
+* `adopt_alternative` needs a run that carries `sensitivity_sweep` explanation evidence; any other run
+  is `PRECONDITION_FAILED` (not retryable).
 | `recommendation_change` | `plan_version_id` (new), `compare_to_plan_version_id` (previous) | `groups` (subset of data, configuration, constraints, model), `shapley`, `evaluation_window` |
 | `sensitivity` | `plan_version_id`, `parameter` `{name, values, instrument?}` | `fixed_inputs`, `evaluation_window` |
 | `adopt_alternative` | `plan_version_id`, `sweep_run_id`, `point_index` | |
@@ -392,7 +411,8 @@ Result (validated by `tests/unit/test_explanation_docs.py`):
 
 * **EX-OQ-9:** FinanceLambdasTool read tools `get_publication`, `list_publications`,
   `list_executions` and `compare_plan_versions` (synchronous; `compare_plan_versions` returns
-  `{evidence, evidence_ref}`). A missing tool gives `DEPENDENCY_UNAVAILABLE` (`tool_not_offered`).
+  `{evidence, evidence_ref}`). A missing tool gives `DEPENDENCY_UNAVAILABLE` (`details.kind` and
+  `details.reason` `tool_not_offered`).
 * **GAP-E1 / EX-OQ-1:** FinanceModel CPU job types `performance_decomposition`, `controlled_resolve`,
   `grouped_shapley`, `sensitivity_sweep`, returning `payload.evidence` plus exactly one
   `explanation_evidence` artifact reference, and recording `recorded_request`, `evaluator_version` and

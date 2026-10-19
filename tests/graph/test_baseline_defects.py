@@ -168,3 +168,57 @@ def test_d10_brokerage_reason_is_surfaced():
     evidence = plan["tool_results"][0]["result"]
     assert evidence["reason"] == "owner_authentication" and "owner_authentication" in evidence["message"]
     assert reader.client.calls == [("get_etf_connection_status", {})]
+
+
+def test_d11_free_text_lists_are_rendered_deterministically_with_real_identifiers():
+    versions = {"plan_id": PL, "plan_versions": [{"plan_version_id": PV, "status": "validated"}], "truncated": False}
+    tools = FakeToolClient({"list_plan_versions": lambda a: versions})
+    svc, tools = make_service(tools=tools, provider=PlanningProvider(ToolCall(id="p1", name="list_plan_versions", arguments={"plan_id": PL})))
+    final = svc.handle({"prompt": "List the versions of plan " + PL, "stream": False}, auth(), SESSION)
+    text = final["answer"]["narrative"]
+    assert PV in text and "list_plan_versions: 1 plan_versions in this page." in text and final["answer"]["claim_check"]["passed"]
+
+
+def test_d11_invented_identifiers_in_a_model_narrative_are_removed():
+    class Inventing(PlanningProvider):
+        def generate(self, request, on_token=None):
+            self.calls += 1
+            if request.purpose == "plan" and self.calls == 1:
+                return GenerateResult(text="", tool_calls=(self.call,), usage=Usage(), stop_reason="tool_use", provider_kind="fixture", model_id=None)
+            if request.purpose == "plan":
+                return GenerateResult(text="", tool_calls=(), usage=Usage(), stop_reason="end_turn", provider_kind="fixture", model_id=None)
+            return GenerateResult(text=f"Plan {PL} was published as pub_01N52QABCDEFGHJKMNPQRSTVWX.", tool_calls=(), usage=Usage(), stop_reason="end_turn", provider_kind="fixture", model_id=None)
+
+    svc, tools = make_service(provider=Inventing(ToolCall(id="p1", name="get_plan", arguments={"plan_id": PL})))
+    final = svc.handle({"prompt": "Show plan " + PL, "stream": False}, auth(), SESSION)
+    cc = final["answer"]["claim_check"]
+    assert not cc["passed"] and cc["removed_identifiers"] == ["pub_01N52QABCDEFGHJKMNPQRSTVWX"]
+    assert "pub_01N52Q" not in final["answer"]["narrative"] and PL in final["answer"]["narrative"]
+
+
+def test_tool_request_list_of_classical_analyses_renders_rows_and_brokerage_evidence_names_its_gateway():
+    rows = [{"analysis_id": A, "analysis_kind": "recommendation", "created_at": "2026-10-18T13:45:00Z"}]
+    tools = FakeToolClient({"list_classical_analyses": lambda a: {"analyses": rows, "next_token": None}}, extra_tools=["list_classical_analyses"])
+    svc, tools = make_service(tools=tools, provider=NoProvider())
+    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry("list_classical_analyses", False, "reader")], environment="beta")
+    final = svc.handle({"tool_request": {"name": "list_classical_analyses", "arguments": {"limit": 5}}, "stream": False}, auth(), SESSION)
+    assert A in final["answer"]["narrative"] and "No compatible stored" not in final["answer"]["narrative"]
+    from finplan_agent.graph.brokerage import connection_plan
+    plan = connection_plan({"messages": [{"role": "user", "content": [{"text": "Is the Coinbase brokerage connection ready?"}]}]})
+    assert plan["tool_results"][0]["gateway"] == "brokerage"
+
+
+def test_declined_feedback_is_described_as_feedback():
+    names = ["submit_portfolio_feedback"]
+    tools = FakeToolClient({"submit_portfolio_feedback": lambda a: {"analysis_id": A}}, extra_tools=names)
+    svc, tools = make_service(tools=tools, provider=NoProvider())
+    svc.deps.catalog_loader = lambda: ToolCatalog([CatalogEntry(n, False, "reader") for n in names], environment="beta")
+    svc.handle({"prompt": f"Record my feedback on traditional analysis {A}: too much turnover.", "stream": False}, auth(), SESSION)
+    final = svc.handle({"action": "confirm", "approve": False, "stream": False}, auth(), SESSION)
+    assert "feedback was not submitted" in final["answer"]["narrative"] and "experiment" not in final["answer"]["narrative"] and not tools.calls
+
+
+def test_d13_beta_turn_token_cap_is_raised():
+    from pathlib import Path
+    cfg = json.loads((Path(__file__).resolve().parents[2] / "config" / "beta.json").read_text())["guard_defaults"]
+    assert cfg["max_tokens_turn"] == 120000 and cfg["max_tokens_session"] >= cfg["max_tokens_turn"]

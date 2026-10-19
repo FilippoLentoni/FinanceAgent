@@ -255,25 +255,21 @@ def _prepare_performance(req: dict[str, Any], tools: GuardedTools) -> Prepared:
     if source is None:
         raise AgentError.validation("the publication has paper and simulated executions; state actual_source", pointer="/explanation/actual_source", available=sources)
     exec_ids = sorted(e["execution_id"] for e in execs if e.get("mode") == source)
-    payload = {
-        "evidence_kind": "performance_decomposition",
-        "publication_id": pub_id,
-        "plan_version_id": pv_id,
-        "plan_version_checksum": checksum,
-        "execution_ids": exec_ids,
-        "actual_source": source,
-        "plan_input_snapshot_id": version.get("input_snapshot_id"),
-    }
-    jobs = [_job("performance_decomposition", "performance_decomposition", _submit_base(req["realized_snapshot_id"], req["window"], payload), 0, req["evidence_run_ids"])]
+    # Stored, deterministic evidence (FinanceModel reconciles the publication against the recorded
+    # account ledger synchronously); no evidence job is launched for a performance explanation.
+    from .evidence import evidence_from_tool
+
+    doc = tools.read("get_performance_evidence", {"publication_id": pub_id, "realized_snapshot_id": req["realized_snapshot_id"], "window": req["window"], "actual_source": source})
+    item = evidence_from_tool("ev1", "get_performance_evidence", doc, expected_kind="performance_decomposition")
     ids = {"publication_id": pub_id, "plan_version_id": pv_id, "plan_version_checksum": checksum, "execution_ids": exec_ids, "realized_snapshot_id": req["realized_snapshot_id"], "window": req["window"], "actual_source": source}
     if resolved_from:
         ids["resolved_from"] = resolved_from
-    return Prepared("plan_performance", {"plan_version_id": pv_id}, ids, jobs=jobs, context={"anchor": ids})
+    return Prepared("plan_performance", {"plan_version_id": pv_id}, ids, sync_evidence=[item], context={"anchor": ids})
 
 
 def _analyze_performance(prep: Prepared, items: Mapping[str, EvidenceItem], settings: ExplanationSettings) -> Analysis:
     a = Analysis()
-    ev = items["performance_decomposition"]
+    ev = items.get("performance_decomposition") or next(i for i in prep.sync_evidence if i.kind == "performance_decomposition")
     p, key = ev.payload, ev.key
     anchor = prep.context["anchor"]
     ids = p.get("identifiers") or {}
@@ -585,17 +581,66 @@ def _policy(version: Mapping[str, Any]) -> dict[str, float]:
     return {k: float(cons[k]) for k in POLICY_ITEMS if isinstance(cons.get(k), (int, float)) and not isinstance(cons.get(k), bool)}
 
 
+#: Sweep parameter -> where it lives in the contract experiment configuration (finance/v1/experiment-config).
+_SWEEP_FIELDS = {"risk_aversion": ("risk_aversion", None), "max_weight": ("constraints", "max_weight"), "min_weight": ("constraints", "min_weight"), "turnover_limit": ("constraints", "max_turnover")}
+_FIXED_FIELDS = ("strategy", "lookback_days", "risk_aversion", "rebalance_frequency", "objective")
+SENSITIVITY_JOB_TYPE = "run_backtest"
+
+
+def _base_strategy(tools: GuardedTools, version: Mapping[str, Any], fixed: Mapping[str, Any]) -> str:
+    if isinstance(fixed.get("strategy"), str):
+        return fixed["strategy"]
+    run_id = version.get("run_id")
+    if isinstance(run_id, str):
+        try:
+            doc = tools.read("get_job_status", {"run_id": run_id}) or {}
+        except AgentError:
+            doc = {}
+        cfg = doc.get("configuration") if isinstance(doc.get("configuration"), Mapping) else {}
+        strategy = (cfg.get("payload") or {}).get("strategy") if isinstance(cfg.get("payload"), Mapping) else doc.get("strategy")
+        if isinstance(strategy, str):
+            return strategy
+    raise AgentError.validation("explanation.fixed_inputs.strategy is required: the base plan version records no strategy the sweep can re-run", pointer="/explanation/fixed_inputs/strategy")
+
+
 def _prepare_sensitivity(req: dict[str, Any], tools: GuardedTools) -> Prepared:
+    """One contract-valid ``run_backtest`` per swept value (finance/v1/experiment-config carries the
+    swept setting); dry-run estimates and a confirmation precede any compute."""
+    from finplan_contracts.validate import validate
+
     pv = req["plan_version_id"]
     version = _plan_version(tools, pv)
     window = req.get("evaluation_window") or version.get("evaluation_window")
     if not window:
         raise AgentError.validation("explanation.evaluation_window is required: the base version records none", pointer="/explanation/evaluation_window")
-    policy = _policy(version)
-    payload = {"evidence_kind": "sensitivity_sweep", "base_plan_version_id": pv, "parameter": req["parameter"], "fixed_inputs": req["fixed_inputs"]}
-    jobs = [_job("sensitivity_sweep", "sensitivity_sweep", _submit_base(version["input_snapshot_id"], window, payload), len(req["parameter"]["values"]), req["evidence_run_ids"])]
-    prep = Prepared("sensitivity", {"plan_version_id": pv}, {"plan_version_id": pv, "configuration_id": version.get("configuration_id"), "parameter": req["parameter"]}, jobs=jobs)
-    prep.context.update(policy=policy, policy_source="base_configuration_constraints", parameter=req["parameter"])
+    param = req["parameter"]
+    if param["name"] not in _SWEEP_FIELDS or param.get("instrument"):
+        raise AgentError.validation(f"{param['name']}{' per instrument' if param.get('instrument') else ''} cannot be expressed in the experiment configuration contract; sweep one of {', '.join(_SWEEP_FIELDS)}", pointer="/explanation/parameter/name")
+    content = version.get("content") or {}
+    content = content.get("payload", content) if isinstance(content, Mapping) else {}
+    universe = [w["instrument_id"] for w in ((content.get("allocation") or {}).get("weights") or []) if isinstance(w, Mapping) and w.get("instrument_id")]
+    if not universe:
+        raise AgentError("PRECONDITION_FAILED", "the base plan version has no allocation universe to re-run", {"plan_version_id": pv})
+    fixed = dict(req["fixed_inputs"])
+    base_cfg: dict[str, Any] = {k: fixed[k] for k in _FIXED_FIELDS if k in fixed}
+    base_cfg.update(strategy=_base_strategy(tools, version, fixed), universe=universe)
+    base_constraints = {k: v for k, v in (content.get("constraints") or {}).items() if k in ("long_only", "max_weight", "min_weight", "max_turnover")}
+    jobs = []
+    for i, value in enumerate(param["values"]):
+        cfg = dict(base_cfg)
+        field_name, sub = _SWEEP_FIELDS[param["name"]]
+        if sub is None:
+            cfg[field_name] = value
+        else:
+            cfg["constraints"] = {**base_constraints, sub: value}
+        if "constraints" not in cfg and base_constraints:
+            cfg["constraints"] = base_constraints
+        res = validate(cfg, "finance/v1/experiment-config")
+        if not res.valid:
+            raise AgentError.validation("the sweep point is not a valid experiment configuration: " + "; ".join(x.message for x in res.issues[:3]), pointer="/explanation/parameter/values", point_index=i)
+        jobs.append(_job(f"sensitivity_point_{i}", SENSITIVITY_JOB_TYPE, _submit_base(version["input_snapshot_id"], window, cfg), 1, req["evidence_run_ids"]))
+    prep = Prepared("sensitivity", {"plan_version_id": pv}, {"plan_version_id": pv, "configuration_id": version.get("configuration_id"), "parameter": param}, jobs=jobs)
+    prep.context.update(policy=_policy(version), policy_source="base_configuration_constraints", parameter=param)
     return prep
 
 
@@ -626,9 +671,45 @@ def classify_point(point: Mapping[str, Any], policy: Mapping[str, float], tol: f
     return {"classification": "concession" if concessions else "permitted", "concessions": concessions}
 
 
+def _analyze_sensitivity_runs(prep: Prepared, items: Mapping[str, EvidenceItem], settings: ExplanationSettings) -> Analysis:
+    """Sweep points computed as one run_backtest each: report every point's stored results verbatim."""
+    a = Analysis()
+    param = prep.context["parameter"]
+    name = param["name"]
+    policy = prep.context.get("policy") or {}
+    points = [items.get(f"sensitivity_point_{i}") for i in range(len(param["values"]))]
+    complete = all(p is not None for p in points)
+    a.checks.append(Check("sweep_points_complete", PASSED if complete else FAILED, 0.0, None, points[0].key if points and points[0] else "", "" if complete else "every requested point must be reported"))
+    classified = []
+    for i, (value, ev) in enumerate(zip(param["values"], points, strict=False)):
+        if ev is None:
+            continue
+        p = ev.payload
+        alloc = {w["instrument_id"]: w["weight"] for w in ((p.get("proposed_allocation") or {}).get("weights") or []) if isinstance(w, Mapping)}
+        perf = {k: v for k, v in (p.get("performance") or {}).items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        if alloc:
+            a.checks.append(weights_sum_check(f"point_{i}_weights_sum", alloc, tol=float(settings.default_tolerance), evidence=ev.key, cash_weight=(p.get("proposed_allocation") or {}).get("cash_weight")))
+        cls = classify_point({"allocation": alloc, "metrics": {"turnover": perf.get("turnover")} if "turnover" in perf else {}, "solution_status": p.get("solution_status")}, policy, float(settings.default_tolerance))
+        classified.append({"index": i, "value": value, "run_id": ev.run_id, "solution_status": p.get("solution_status"), **cls})
+        head = f"At {name} {fmt(value)} (run {ev.run_id}, completion_status succeeded, solution_status {p.get('solution_status')})"
+        ev.statements.append(head + (": backtest " + ", ".join(f"{k.replace('_', ' ')} {fmt(v)}" for k, v in sorted(perf.items())) if perf else ": no performance metrics were reported") + f"; classified {cls['classification']}" + ("".join(f" ({x['item']} original {fmt(x['original'])}, required {fmt(x['required'])})" for x in cls["concessions"])) + f" [{ev.key}].")
+        if alloc:
+            ev.statements.append(f"Proposed allocation at {name} {fmt(value)}: " + ", ".join(f"{h} {fmt(w)}" for h, w in sorted(alloc.items())) + f" [{ev.key}].")
+        ev.label("modeled_effect")
+    a.label("modeled_effect")
+    if any(c["classification"] == "concession" for c in classified):
+        a.label("concession")
+    a.findings["points"] = classified
+    a.findings["policy"] = {"items": {POLICY_ITEMS[k]: v for k, v in policy.items()}, "source": prep.context.get("policy_source")}
+    a.findings["method"] = "one run_backtest per swept value over the evaluation window"
+    return a
+
+
 def _analyze_sensitivity(prep: Prepared, items: Mapping[str, EvidenceItem], settings: ExplanationSettings) -> Analysis:
     from .claims import is_monotonic
 
+    if any(k.startswith("sensitivity_point_") for k in items):
+        return _analyze_sensitivity_runs(prep, items, settings)
     a = Analysis()
     ev = items["sensitivity_sweep"]
     p, key = ev.payload, ev.key

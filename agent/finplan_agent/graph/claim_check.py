@@ -9,9 +9,13 @@ are always re-read through tools, never taken from checkpoints) under declared r
   (fractions reported as percentages);
 * thousands separators are ignored; ISO dates must appear verbatim in a tool string value.
 
-Numbers inside identifiers (``pv_01J...``, ``run_...``, hashes) are not figures. Unsupported figures are
-replaced by ``[unsupported figure removed]`` and listed in the check record, so the response never
-carries a provider-made number. LLM judging is never part of this check.
+Numbers inside identifiers (``pv_01J...``, ``run_...``, hashes) are not figures, but every
+identifier-shaped token (``snap_``, ``pv_``, ``pub_``, ``pl_``, ``run_``, ``ca_``, ``pd_``, ``pf_``,
+``act_``, ``rel_``, ... followed by a ULID or hex id) must itself appear in this turn's tool results or
+in the session's earlier tool evidence; an invented one is replaced by
+``[unsupported identifier removed]``. Unsupported figures are replaced by
+``[unsupported figure removed]``; both are listed in the check record, so the response never carries a
+provider-made number or identifier. LLM judging is never part of this check.
 """
 
 from __future__ import annotations
@@ -25,6 +29,8 @@ from typing import Any
 __all__ = ["ClaimCheckResult", "claim_check", "collect_values", "metric_label_check", "strategy_pattern", "REMOVED"]
 
 REMOVED = "[unsupported figure removed]"
+REMOVED_ID = "[unsupported identifier removed]"
+_IDENTIFIER = re.compile(r"(?<![\w-])(?:snap|pv|pub|pl|plan|run|ca|pd|pf|act|rel|art|cfg|mv|exe|ae|pol|ex)_[0-9A-Za-z]{10,}(?![\w-])")
 _DATE = re.compile(r"(?<![\w-])\d{4}-\d{2}-\d{2}(?:[T ][0-9:.]+Z?)?(?![\w-])")
 _NUM = re.compile(r"(?<![\w.$/-])-?\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][+-]?\d+)?%?(?![\w])")
 _LIST_MARKER = re.compile(r"(?m)^\s*\d+[.)](?=\s)")
@@ -37,13 +43,18 @@ class ClaimCheckResult:
     text: str
     checked: int = 0
     unsupported: list[str] = field(default_factory=list)
+    unsupported_ids: list[str] = field(default_factory=list)
+    checked_ids: int = 0
 
     @property
     def passed(self) -> bool:
-        return not self.unsupported
+        return not self.unsupported and not self.unsupported_ids
 
     def record(self) -> dict[str, Any]:
-        return {"passed": self.passed, "checked_figures": self.checked, "removed_figures": list(self.unsupported)}
+        out = {"passed": self.passed, "checked_figures": self.checked, "removed_figures": list(self.unsupported)}
+        if self.checked_ids or self.unsupported_ids:
+            out.update(checked_identifiers=self.checked_ids, removed_identifiers=list(self.unsupported_ids))
+        return out
 
 
 def collect_values(results: Iterable[Any]) -> tuple[list[float], set[str]]:
@@ -97,9 +108,27 @@ def _matches(token: str, values: list[float]) -> bool:
     return False
 
 
-def claim_check(text: str, tool_results: Iterable[Any]) -> ClaimCheckResult:
+def identifier_check(text: str, strings: Iterable[str]) -> tuple[str, int, list[str]]:
+    """(text with invented identifiers removed, identifiers checked, identifiers removed)."""
+    known = [s for s in strings if isinstance(s, str) and "_" in s]
+    checked, removed = 0, []
+
+    def repl(m: re.Match[str]) -> str:
+        nonlocal checked
+        checked += 1
+        token = m.group()
+        if any(token in s for s in known):
+            return token
+        removed.append(token)
+        return REMOVED_ID
+
+    return _IDENTIFIER.sub(repl, text), checked, removed
+
+
+def claim_check(text: str, tool_results: Iterable[Any], *, known_strings: Iterable[str] = ()) -> ClaimCheckResult:
     values, strings = collect_values(tool_results)
-    result = ClaimCheckResult(text=text)
+    text, checked_ids, removed_ids = identifier_check(text, set(strings) | set(known_strings))
+    result = ClaimCheckResult(text=text, checked_ids=checked_ids, unsupported_ids=removed_ids)
     out: list[str] = []
     pos = 0
     spans: list[tuple[int, int, str]] = []

@@ -34,7 +34,7 @@ from .config import ExplanationSettings
 from .evidence import EvidenceItem, evidence_from_job_result
 from .result import assemble
 from .tools import EvidenceJobs, GuardedTools, JobSpec
-from .workflows import Analysis, Prepared, analyze, prepare, validate_request
+from .workflows import DISCLAIMER, Analysis, Prepared, analyze, prepare, validate_request
 
 __all__ = [
     "EXPLANATION_OUTPUT_CONTRACT",
@@ -259,13 +259,25 @@ def explain_collect(state: AgentState, runtime: Runtime[AgentContext]) -> dict[s
     by_kind: dict[str, EvidenceItem] = {}
     try:
         for job in prep.jobs:
-            item = evidence_from_job_result(f"ev{len(items) + 1}", results[job.evidence_kind], expected_kind=job.evidence_kind)
+            if job.evidence_kind.startswith("sensitivity_point_"):
+                from .evidence import evidence_from_run_result
+                item = evidence_from_run_result(f"ev{len(items) + 1}", results[job.evidence_kind], kind=job.evidence_kind)
+            else:
+                item = evidence_from_job_result(f"ev{len(items) + 1}", results[job.evidence_kind], expected_kind=job.evidence_kind)
             items.append(item)
             by_kind[job.evidence_kind] = item
         analysis = analyze(prep, by_kind, settings)
     except AgentError as exc:
         return done(_fail(state, exc))
     failed = [c for c in analysis.checks if c.status == "failed"]
+    if not failed and any(i.kind.startswith("sensitivity_point_") for i in items):
+        # Per-point backtest results carry no contract explanation_evidence artifact (GAP-E1), so no
+        # explanation envelope is issued: report every point's stored results verbatim instead.
+        lines = [st for i in items for st in i.statements]
+        text = ("Sensitivity of plan version " + prep.subject["plan_version_id"] + ": one backtest per swept value. " + DISCLAIMER + "\n\n" + "\n".join("- " + ln for ln in lines)
+                + "\n\nThese are per-point backtest results with their run ids; no explanation_evidence artifact exists for a sweep yet, so no explanation envelope is issued.")
+        work.update(stage="done", run_ids={j.evidence_kind: j.run_id for j in prep.jobs if j.run_id}, findings=analysis.findings)
+        return done({"explanation": work, "narrative": text, "narrative_status": "generated"})
     if not failed:
         work.update(stage="narrate", items=[_item_state(i) for i in items], analysis=_analysis_state(analysis))
     else:

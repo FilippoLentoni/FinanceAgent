@@ -21,8 +21,17 @@ def test_planted_unsupported_figures_are_removed():
 
 
 def test_identifiers_and_hashes_are_not_figures():
-    res = claim_check("Run run_01JABCDEFGHJKMNPQRSTVWXYZ3 checksum sha256:" + "ab" * 32, [])
-    assert res.passed and res.checked == 0
+    res = claim_check("Run run_01JABCDEFGHJKMNPQRSTVWXYZ3 checksum sha256:" + "ab" * 32, [{"run_id": "run_01JABCDEFGHJKMNPQRSTVWXYZ3"}])
+    assert res.passed and res.checked == 0 and res.checked_ids == 1
+
+
+def test_invented_identifiers_are_removed():
+    text = "Plan version pv_01N52QABCDEFGHJKMNPQRSTVWX was published as pub_01JABCDEFGHJKMNPQRSTVWXY01 on snapshot snap_01N52QXYZ0123456789ABCDEFG."
+    res = claim_check(text, [{"publication_id": "pub_01JABCDEFGHJKMNPQRSTVWXY01"}])
+    assert not res.passed and res.unsupported_ids == ["pv_01N52QABCDEFGHJKMNPQRSTVWX", "snap_01N52QXYZ0123456789ABCDEFG"]
+    assert "pub_01JABCDEFGHJKMNPQRSTVWXY01" in res.text and "pv_01N52Q" not in res.text and res.record()["removed_identifiers"]
+    # Identifiers from the session's earlier tool evidence are known too.
+    assert claim_check("See pv_01N52QABCDEFGHJKMNPQRSTVWX.", [], known_strings=["pv_01N52QABCDEFGHJKMNPQRSTVWX"]).passed
 
 
 def test_numbers_only_from_current_turn_results():

@@ -40,6 +40,22 @@ INSTRUMENT_ALIASES = {
 }
 
 
+_RISK_FOCUS = re.compile(r"\b(?:risk\w*|variance|volatil\w*|drawdown|tail|cvar|downside)\b", re.I)
+_DRIVER_FOCUS = re.compile(r"\b(?:drivers?|driv(?:en|ing)|contribut\w*|attribut\w*|shapley|factors?)\b", re.I)
+_ASKS = re.compile(r"\b(?:why|explain\w*|what|how|show|describe|tell)\b", re.I)
+
+
+def explanation_focus(text: str) -> str | None:
+    """``risk`` / ``drivers`` when an explanation question asks about that aspect, else None."""
+    if not _ASKS.search(text or "") or re.search(r"\busing model\b", text or "", re.I):
+        return None
+    if _DRIVER_FOCUS.search(text):
+        return "drivers"
+    if _RISK_FOCUS.search(text):
+        return "risk"
+    return None
+
+
 def saved_portfolio_reference(text: str) -> dict[str, str]:
     """Recognize a stable saved-book identifier without parsing invented holdings."""
     match = _PORTFOLIO_ID.search(text)
@@ -181,12 +197,33 @@ def render_recommendation(rec: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def render_recommendation_explanation(rec: dict[str, Any]) -> str:
+def _ppo_focus(rec: dict[str, Any], focus: str | None) -> str:
+    """What the stored PPO output supports for a risk / drivers question (no invented causes)."""
+    if focus == "risk":
+        diag = rec.get("diagnostics") or {}
+        items = [f"target cash weight {_figure(rec.get('cash_weight'))}"]
+        if rec.get("estimated_turnover") is not None:
+            items.append(f"estimated turnover {_figure(rec['estimated_turnover'])}")
+        if isinstance(diag.get("observed_drawdown"), (int, float)):
+            items.append(f"observed drawdown input {_figure(diag['observed_drawdown'])}")
+        items.append(f"constraint handling {(rec.get('constraint_outcome') or {}).get('action', 'not supplied')}")
+        return ("Risk evidence in the stored policy output: " + "; ".join(items) + ". The PPO policy output carries no modeled variance, CVaR or volatility estimate, "
+                "so no portfolio risk figure is stated; the policy's risk handling is learned from its training reward and constraints, not a computed risk forecast.")
+    if focus == "drivers":
+        moves = sorted((d for d in rec.get("decisions") or [] if isinstance(d.get("delta_weight"), (int, float))), key=lambda d: -abs(float(d["delta_weight"])))[:3]
+        listed = "; ".join(f"{d['instrument_id']} {d['action']} (target weight change {_figure(d['delta_weight'])})" for d in moves)
+        return ("Main drivers supported by the stored evidence: the largest proposed moves are " + (listed or "not available") + ". "
+                "The policy conditions on completed market features, current portfolio weights and drawdown; which feature drove each move is not attributable from the policy output.")
+    return ""
+
+
+def render_recommendation_explanation(rec: dict[str, Any], focus: str | None = None) -> str:
+    lead = _ppo_focus(rec, focus)
     reasons = []
     for d in rec["decisions"]:
         relation = "above" if d["action"] == "buy" else "below" if d["action"] == "sell" else "at"
         reasons.append(f"- {d['instrument_id']}: the policy target is {relation} the current holding; the proposed action is {d['action']}.")
-    return ("Explanation of the prior recommendation, reproduced through fresh policy and market-data MCP reads. "
+    return ((lead + "\n\n" if lead else "") + "Explanation of the prior recommendation, reproduced through fresh policy and market-data MCP reads. "
             "The original completed session and portfolio context were retained; the selected policy and portfolio state matched.\n\n"
             + "\n".join(reasons) + "\n\n"
             + "These are learned, state-conditioned allocation targets, rather than fixed user-specified weights. "

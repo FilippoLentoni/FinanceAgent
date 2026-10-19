@@ -169,7 +169,8 @@ def test_job_result_needs_succeeded_completion_and_a_trusted_reference():
     ):
         with pytest.raises(AgentError) as exc:
             evidence_from_job_result("ev2", bad, expected_kind="sensitivity_sweep")
-        assert exc.value.code == "DEPENDENCY_UNAVAILABLE"
+        # A run without trusted explanation evidence is a permanent property of that run (D8).
+        assert exc.value.code in ("DEPENDENCY_UNAVAILABLE", "PRECONDITION_FAILED")
     with pytest.raises(AgentError):
         evidence_from_job_result("ev2", good, expected_kind="grouped_shapley")
 
@@ -306,5 +307,5 @@ def test_guarded_tools_report_an_unreleased_tool_as_a_missing_dependency():
     g = GuardedTools(b, catalog())
     with pytest.raises(AgentError) as exc:
         g.call("tool_that_was_never_released", {"idempotency_key": "k9"})
-    assert exc.value.code == "DEPENDENCY_UNAVAILABLE" and exc.value.details["kind"] == "tool_not_released"
+    assert exc.value.code == "DEPENDENCY_UNAVAILABLE" and exc.value.details["kind"] == "tool_not_offered" and exc.value.details["reason"] == "tool_not_offered"
     assert b.calls == []

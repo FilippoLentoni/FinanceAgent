@@ -1,7 +1,7 @@
 # Agent skill bundle (add-agent-runtime-and-gateway design: skills/<name>/SKILL.md + skill.yaml).
 # add-explanation-workflows task 2.4. No model identifier, price, endpoint or account value here.
 name: explain-performance
-version: 0.2.0
+version: 0.3.0
 purpose: Explain realized paper or simulated performance against the exact published plan (workflow 1).
 explanation_type: plan_performance
 tools:

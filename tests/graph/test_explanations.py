@@ -30,6 +30,7 @@ from tests.fakes.explanations import (
     sweep_evidence,
     toy_resolve_set,
     toy_shapley,
+    uid,
 )
 from tests.harness import BEDROCK_ATTEMPTS
 
@@ -294,8 +295,9 @@ def test_publication_anchor_and_planted_components():  # FA-WF1-01, 03, 04, 05
     b = ExplanationBackend(evidence={"performance_decomposition": performance_evidence()})
     final = run_perf(b)
     doc = result_of(final)
-    args = real_submits(b)[0]
-    assert args["job_type"] == "performance_decomposition" and args["input_snapshot_id"] == SNAP_REAL and args["evaluation_window"] == WINDOW
+    # Stored evidence: get_performance_evidence, no evidence job and no confirmation.
+    assert real_submits(b) == [] and "submit_experiment" not in b.names() and final["confirmation"] is None
+    assert ("get_performance_evidence", {"publication_id": PUB, "realized_snapshot_id": SNAP_REAL, "window": WINDOW, "actual_source": "paper"}) in b.calls
     assert doc["request_ids"]["publication_id"] == PUB and doc["request_ids"]["plan_version_checksum"] == CHK_PREV
     assert {"anchor_identifiers", "reconciliation_plan_path", "reconciliation_executed_path", "gap_components_sum_to_total", "forecast_position_consistent"} <= check_names(doc)
     assert "execution gap -0.004" in doc["narrative"] and "cost gap -0.0015" in doc["narrative"]
@@ -367,19 +369,36 @@ def run_sweep(backend, req, **kw):
 VALUES = [0.05, 0.1, 0.15, 0.2, 0.3]
 
 
-def test_five_point_turnover_sweep_with_concession():  # FA-WF3-01/02/03
-    ev = sweep_evidence(VALUES, turnovers=[0.04, 0.08, 0.12, 0.16, 0.3])
-    b = ExplanationBackend(evidence={"sensitivity_sweep": ev})
+def test_sensitivity_runs_contract_valid_dry_runs_then_asks_for_confirmation():  # D7
+    from finplan_contracts.validate import validate
+
+    b = ExplanationBackend()
+    svc = explain_service(b)
+    first = ask(svc, sweep_req(VALUES))
+    assert first["status"] == "awaiting_confirmation" and real_submits(b) == []
+    dry = [a for n, a in b.calls if n == "submit_experiment" and a.get("dry_run")]
+    assert len(dry) == len(VALUES)
+    for args, value in zip(dry, VALUES, strict=True):
+        res = validate(args, "tools/submit-experiment-request")
+        assert res.valid, res.issues
+        payload = args["configuration"]["payload"]
+        assert args["job_type"] == "run_backtest" and payload["strategy"] == "min_variance" and payload["universe"] == ["SPY", "AGG"]
+        assert payload["constraints"] == {"max_turnover": value, "max_weight": 0.7}
+    calls = first["confirmation"]["calls"]
+    assert len(calls) == len(VALUES) and all(c["tool"] == "submit_experiment" and not c["arguments"]["dry_run"] for c in calls)
+
+
+def test_five_point_turnover_sweep_with_concession():  # FA-WF3-01/02/03 (after confirmation)
+    b = ExplanationBackend()
     _, final = run_sweep(b, sweep_req(VALUES))
-    subs = real_submits(b)
-    assert len(subs) == 1 and subs[0]["configuration"]["payload"]["parameter"]["values"] == VALUES
-    doc = result_of(final)
-    pts = doc["findings"]["points"]
-    assert [p["classification"] for p in pts] == ["permitted", "permitted", "permitted", "permitted", "concession"]
-    assert pts[4]["concessions"] == [{"item": "turnover_limit", "original": 0.2, "required": 0.3}] and pts[0]["concessions"] == []
-    assert "turnover_limit original 0.2, required 0.3" in doc["narrative"] and "concession" in doc["labels"]
-    assert "point_0_portfolio_wide_change" in check_names(doc)
-    assert "Allocation changes versus the base at turnover_limit 0.05: AGG -0.01, GLD 0.03, SPY -0.02" in doc["narrative"]
+    assert len(real_submits(b)) == len(VALUES) and final["status"] == "completed", final["error"]
+    text = final["answer"]["narrative"]
+    # No contract explanation envelope exists for backtest points: every point's stored results are listed.
+    assert final["answer"]["explanation"] is None
+    for v in VALUES[:4]:
+        assert f"At turnover_limit {v} (run" in text
+    assert "classified concession (turnover_limit original 0.2, required 0.3) [ev5]" in text and "turnover 0.05, volatility 0.13; classified permitted [ev1]" in text
+    assert "no explanation envelope is issued" in text
 
 
 def test_grid_larger_than_maximum_is_refused():  # FA-WF3-01
@@ -388,37 +407,35 @@ def test_grid_larger_than_maximum_is_refused():  # FA-WF3-01
     assert final["error"]["code"] == "VALIDATION_FAILED" and final["error"]["details"]["max_sweep_points"] == 3 and b.calls == []
 
 
-def test_change_reported_only_for_the_capped_asset_fails():  # FA-WF3-02
-    b = ExplanationBackend(evidence={"sensitivity_sweep": sweep_evidence(VALUES, name="max_weight", drop_change_for="SPY")})
-    _, final = run_sweep(b, sweep_req(VALUES, name="max_weight", instrument="SPY"))
-    assert final["error"]["code"] == "VALIDATION_FAILED" and "portfolio_wide_change" in final["error"]["message"]
+def test_parameters_the_experiment_contract_cannot_express_are_refused():
+    b = ExplanationBackend()
+    final = ask(explain_service(b), sweep_req(VALUES, name="max_weight", instrument="SPY"))
+    assert final["error"]["code"] == "VALIDATION_FAILED" and final["error"]["details"]["pointer"] == "/explanation/parameter/name"
+    assert not any(n == "submit_experiment" for n in b.names())
 
 
-def test_flat_region_and_infeasible_points_are_kept():  # FA-WF3-04
-    values = [2.0, 2.5, 3.0, 3.5, 4.0]
-    b = ExplanationBackend(evidence={"sensitivity_sweep": sweep_evidence(values, name="risk_aversion", flat=(0, 1, 2), infeasible=(4,))}, constraints={"max_weight": 0.9})
-    _, final = run_sweep(b, sweep_req(values, name="risk_aversion"))
-    doc = result_of(final)
-    statuses = [p["solution_status"] for p in doc["findings"]["points"]]
-    assert statuses == ["no_effect", "no_effect", "no_effect", "optimal", "infeasible"]
-    assert all(p["completion_status"] == "succeeded" for p in doc["findings"]["points"])
-    assert "insensitive under the model for risk_aversion from 2.0 to 3.0" in doc["narrative"]
-    assert "risk_aversion 4.0: solution_status infeasible" in doc["narrative"]
+def test_strategy_is_required_when_the_base_version_has_none():
+    b = ExplanationBackend()
+    svc = explain_service(b)
+    b._t_get_job_status = lambda a: {"run_id": a["run_id"], "state": "succeeded"}
+    final = ask(svc, sweep_req(VALUES))
+    assert final["error"]["code"] == "VALIDATION_FAILED" and final["error"]["details"]["pointer"] == "/explanation/fixed_inputs/strategy"
+    ok = ask(svc, sweep_req(VALUES) | {"fixed_inputs": {"strategy": "equal_weight"}})
+    assert ok["status"] == "awaiting_confirmation"
 
 
-def test_non_monotonic_sweep_is_reported_as_computed():  # FA-WF3-06
-    b = ExplanationBackend(evidence={"sensitivity_sweep": sweep_evidence(VALUES, risks=[0.12, 0.14, 0.13, 0.15, 0.11])}, constraints={"max_weight": 0.9})
-    _, final = run_sweep(b, sweep_req(VALUES))
-    doc = result_of(final)
-    assert "Computed risk is non-monotonic across the swept values" in doc["narrative"]
+def _sweep_run(b, ev):
+    run = uid("run", 40)
+    b.run_ids[run] = "sensitivity_sweep"
+    b.evidence["sensitivity_sweep"] = ev
+    return run
 
 
 def test_adopting_a_concession_point_needs_confirmation_and_keeps_the_policy():  # FA-WF3-05, FA-EV-08
     ev = sweep_evidence(VALUES, turnovers=[0.04, 0.08, 0.12, 0.16, 0.3])
-    b = ExplanationBackend(evidence={"sensitivity_sweep": ev})
-    svc, _ = run_sweep(b, sweep_req(VALUES))
-    sweep_run = next(r for r, t in b.run_ids.items() if t == "sensitivity_sweep")
-    b.calls.clear()
+    b = ExplanationBackend()
+    svc = explain_service(b)
+    sweep_run = _sweep_run(b, ev)
     first = ask(svc, {"type": "adopt_alternative", "plan_version_id": PV_PREV, "sweep_run_id": sweep_run, "point_index": 4})
     conf = first["confirmation"]
     assert first["status"] == "awaiting_confirmation" and conf["explanation"]["concessions"] == [{"item": "turnover_limit", "original": 0.2, "required": 0.3}]
@@ -433,9 +450,9 @@ def test_adopting_a_concession_point_needs_confirmation_and_keeps_the_policy(): 
 
 def test_declined_adoption_calls_no_plan_tool():
     ev = sweep_evidence(VALUES, turnovers=[0.04, 0.08, 0.12, 0.16, 0.3])
-    b = ExplanationBackend(evidence={"sensitivity_sweep": ev})
-    svc, _ = run_sweep(b, sweep_req(VALUES))
-    sweep_run = next(iter(b.run_ids))
+    b = ExplanationBackend()
+    svc = explain_service(b)
+    sweep_run = _sweep_run(b, ev)
     ask(svc, {"type": "adopt_alternative", "plan_version_id": PV_PREV, "sweep_run_id": sweep_run, "point_index": 4})
     final = confirm(svc, approve=False)
     assert "create_override_version" not in b.names() and "stored policy is unchanged" in final["answer"]["narrative"]
@@ -517,3 +534,13 @@ def test_streamed_explanation_events_and_final_match_non_streamed():  # FA-RT-02
         d.pop("correlation_id")
         d["answer"]["explanation"].pop("generated_at")
     assert json.dumps(streamed, sort_keys=True) == json.dumps(plain, sort_keys=True)
+
+
+def test_adopting_a_run_that_is_not_a_sweep_is_a_non_retryable_precondition():  # D8
+    b = ExplanationBackend()
+    svc = explain_service(b)
+    run = uid("run", 41)
+    b.run_ids[run] = "run_backtest"
+    b.run_requests[run] = {"configuration": {"payload": {"constraints": {"max_turnover": 0.1}}}}
+    final = ask(svc, {"type": "adopt_alternative", "plan_version_id": PV_PREV, "sweep_run_id": run, "point_index": 0})
+    assert final["error"]["code"] == "PRECONDITION_FAILED" and final["error"]["retryable"] is False

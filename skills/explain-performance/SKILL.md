@@ -17,7 +17,7 @@ The user asks how a publication (`pub_...`), or the current publication of a pla
 ## What happens
 
 1. The publication is read, its `plan_version_id` and checksum are checked against the plan version, and its paper or simulated executions are listed.
-2. A `performance_decomposition` evidence job is dry-run, budget-checked against `cpu_research`, shown for confirmation, then submitted as the caller.
+2. The stored `performance_decomposition` evidence is read synchronously with `get_performance_evidence` (no job, no confirmation).
 3. Deterministic checks: both paths reconcile (start + flows + P&L - fees = end), the four gap components (execution, cost, market versus forecast, residual) sum to the total, and the forecast position is consistent. A failure returns `VALIDATION_FAILED` and no narrative.
 4. The narrative cites every figure with `[evN]`.
 
