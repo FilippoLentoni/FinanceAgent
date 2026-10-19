@@ -162,3 +162,22 @@ def test_outcome_carries_its_receipt_reference():
     inner = FakeToolClient({"get_plan": lambda a: {"plan_id": PL}})
     out = ToolCallRecorder(sink, session_id=SESSION, correlation_id="corr-x").wrap(inner).call_tool("get_plan", {"plan_id": PL})
     assert isinstance(out, ToolOutcome) and out.extra["tool_call_receipt"]["activity_event_id"] == "ae_0001"
+
+
+def test_hashes_use_rfc8785_so_a_jcs_reserialized_store_still_verifies():
+    from finplan_contracts.canonical import canonicalize
+
+    events, record = store()
+    sink = FakeToolClient({"record_agent_activity": record}, extra_tools=["record_agent_activity"])
+    result_doc = {"weights": [{"instrument_id": "AAPL", "weight": 0.0}, {"instrument_id": "VOO", "weight": 1.0}],
+                  "portfolio_value": 250.0, "tiny": 1e-07, "path": "/not/a/storage/path", "text": "café"}
+    inner = FakeToolClient({"query_market_data": lambda a: result_doc}, extra_tools=["query_market_data"])
+    ToolCallRecorder(sink, session_id=SESSION, correlation_id="corr-jcs").wrap(inner).call_tool("query_market_data", {"value": 250.0})
+    payload = events[0]["payload"]
+    # The platform stores the JCS form: 0.0 -> 0, 250.0 -> 250. Simulate that round trip.
+    stored = json.loads(canonicalize(payload))
+    assert stored["result"]["portfolio_value"] == 250 and "250.0" not in canonicalize(payload).decode()
+    decoded = decode_stored(stored["result"])
+    assert "sha256:" + hashlib.sha256(canonicalize(decoded)).hexdigest() == payload["result_sha256"]
+    assert "sha256:" + hashlib.sha256(canonicalize(decode_stored(stored["arguments"]))).hexdigest() == payload["arguments_sha256"]
+    assert decoded["path"] == "/not/a/storage/path" and stored["result"]["path"]["representation"] == "encoded_string"

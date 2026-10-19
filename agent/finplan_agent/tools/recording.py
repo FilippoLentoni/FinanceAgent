@@ -14,9 +14,9 @@ Event payload (``payload_format`` ``finplan.tool_call.v1``)::
      "arguments_sha256", "result_sha256", "error_sha256", "exact", "redactions",
      "representation", "release_id", "parts"}
 
-``*_sha256`` are ``sha256:<hex>`` of the canonical JSON (sorted keys, ``,``/``:`` separators, UTF-8)
-of the value EXACTLY as the agent sent / received it (the parsed MCP result), computed before any
-transformation. Values are stored as received, except:
+``*_sha256`` are ``sha256:<hex>`` of the RFC 8785 (JCS) canonical JSON of the value EXACTLY as the
+agent sent / received it (the parsed MCP result), computed before any transformation; JCS is also
+what the platform stores, so numerically identical values (``0.0`` / ``0``) hash identically. Values are stored as received, except:
 
 * strings the activity contract would refuse or the archive tool would rewrite (storage URIs, ARNs,
   path-like or ``http://`` values, ``amazonaws.com`` URLs) become
@@ -33,8 +33,8 @@ Decoding the two representations reproduces the original value byte-for-byte in 
 Content larger than :data:`MAX_EVENT_CONTENT_BYTES` (platform event cap assumed 4 MiB) is stored in
 additional ``tool_call_part`` events: the head event keeps all metadata with ``arguments`` /
 ``result`` / ``error`` set to ``null`` and ``parts`` = ``{"count", "content_sha256", "encoding"}``;
-part ``i`` carries ``content.value`` = base64url of bytes ``[i*chunk, (i+1)*chunk)`` of the canonical
-JSON ``{"arguments", "error", "result"}`` of the stored (encoded) values.
+part ``i`` carries ``content.value`` = base64url of bytes ``[i*chunk, (i+1)*chunk)`` of the RFC 8785
+canonical JSON ``{"arguments", "error", "result"}`` of the stored (encoded) values.
 
 Idempotency keys: ``tc-<sha256(session|correlation|sequence)[:60]>``; part ``i`` uses
 ``p<sha256(<head key>|i)[:63]>``.
@@ -81,7 +81,18 @@ _MARKERS = frozenset({"encoded_string", "encoded_json"})
 
 
 def canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
+    """RFC 8785 (JCS) canonical UTF-8 bytes, the form FinancialPlanning stores (``0.0`` -> ``0``).
+
+    A reader can decode a stored value, re-serialize it with any RFC 8785 implementation and obtain
+    the recorded hash. Values that are not plain JSON (e.g. tuples, dates) are first converted the
+    way they were sent (``json`` with ``str`` for unknown types).
+    """
+    from finplan_contracts.canonical import canonicalize
+
+    try:
+        return canonicalize(value)
+    except Exception:  # noqa: BLE001 - non-JSON leaf types: normalize, then canonicalize
+        return canonicalize(json.loads(json.dumps(value, default=str)))
 
 
 def sha256_of(value: Any) -> str:

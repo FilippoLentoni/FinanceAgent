@@ -147,12 +147,14 @@ for the machine `ci_test` client and input-capture requests) and idempotency key
 `tc-<sha256(session_id|correlation_id|sequence)[:60]>`. The payload (`payload_format`
 `finplan.tool_call.v1`) holds `tool`, `call_id`, `sequence`, `gateway`, `ok`, the exact `arguments`,
 the full `result` and `error` as received (uncompacted), `started_at`, `finished_at`, `duration_ms`,
-`size_bytes` and `arguments_sha256` / `result_sha256` / `error_sha256` (SHA-256 of canonical JSON:
-sorted keys, `,`/`:` separators, UTF-8, computed before any encoding). Strings the activity contract
+`size_bytes` and `arguments_sha256` / `result_sha256` / `error_sha256` (SHA-256 of the RFC 8785 / JCS
+canonical JSON, computed before any encoding; JCS is the form the platform stores, so decoding the stored
+value and re-canonicalizing it with any RFC 8785 implementation reproduces the hash, e.g. `250.0` and
+`250` hash identically). Strings the activity contract
 refuses (storage URIs, ARNs, path-like or `http://` values) are stored reversibly as
 `{"representation": "encoded_string", "encoding": "base64url_utf8", "value"}`; credentials are replaced
 by `<redacted>` markers listed in `redactions` (then `exact: false`). Content above 3 MiB is stored in
-`tool_call_part` events (base64url chunks of the canonical content, `parts.content_sha256`).
+`tool_call_part` events (base64url chunks of the RFC 8785 canonical content, `parts.content_sha256`).
 Recording never consumes the per-turn tool-call budget. A failed recording does not fail the turn:
 the call's receipt in `answer.tool_call_receipts` has `recording_status: "failed"` and
 `answer.tool_call_recording.status` is `incomplete` (on a failed turn without an `answer`, both fields
