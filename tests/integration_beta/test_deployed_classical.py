@@ -41,9 +41,16 @@ def test_independent_gateway_discovery_and_packaged_skill_parity(classical):
 
 def test_classical_recommendation_is_persisted_and_reproduced(classical):
     _, client = classical
-    issued = client.call_tool('generate_portfolio_recommendation_min_variance', {'instruments': ['AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'VOO']})
+    # A saved-book request must name exactly the saved paper profile's universe (the tool refuses others).
+    history = client.call_tool('get_portfolio_history', {'limit': 1})
+    assert history.ok, history.error
+    latest = max(history.result['history'], key=lambda h: h['revision'])
+    universe = [p['instrument_id'] for p in latest['paper_state']['positions']]
+    issued = client.call_tool('generate_portfolio_recommendation_min_variance', {'instruments': universe})
     assert issued.ok, issued.error
-    assert {w['instrument_id'] for w in issued.result['recommendation']['target_weights']} <= {'AAPL', 'AMZN', 'GOOGL', 'META', 'MSFT', 'NVDA', 'TSLA', 'VOO'}
+    assert {w['instrument_id'] for w in issued.result['recommendation']['target_weights']} <= set(universe)
+    outside = client.call_tool('generate_portfolio_recommendation_min_variance', {'instruments': universe + ['ZZZZ']})
+    assert not outside.ok and outside.error['code'] == 'VALIDATION_FAILED'
     aid = issued.result['analysis_id']
     retrieved = client.call_tool('get_classical_analysis', {'analysis_id':aid})
     assert retrieved.ok and retrieved.result == issued.result
