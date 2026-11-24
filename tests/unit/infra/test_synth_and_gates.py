@@ -346,15 +346,20 @@ def test_classical_catalog_and_policy_are_separate_from_the_existing_ppo_gateway
     assert not {"recommend_portfolio", "recommend_classical_portfolio"} & (actual["Gateway"] | actual["ClassicalGateway"])
 
 
-def test_classical_bootstrap_grants_extend_beta_only(templates):
+def test_classical_bootstrap_grants_match_beta_gamma_and_preserve_prod(templates):
     roles = {r["Properties"]["RoleName"]: r["Properties"] for r in resources(templates["tooling"], "AWS::IAM::Role").values()}
     for env in ENVS:
         role = roles[n.gateway_role_name(env)]
         trust = role["AssumeRolePolicyDocument"]["Statement"][0]["Condition"]
-        assert ("classical-gateway" in json.dumps(trust)) == (env == "beta")
-        assert ("classical_tools" in json.dumps(role["Policies"])) == (env == "beta")
-        if env != "beta":
-            # No shared-bootstrap permission changes in Gamma/prod.
+        assert ("classical-gateway" in json.dumps(trust)) == (env in ("beta", "gamma"))
+        assert ("classical_tools" in json.dumps(role["Policies"])) == (env in ("beta", "gamma"))
+        assert trust["StringEquals"] == {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
+        if env in ("beta", "gamma"):
+            sources = trust["ArnLike"]["aws:SourceArn"]
+            assert len(sources) == 2
+            assert {value["Fn::Join"][1][-1] for value in sources} == {f":gateway/finplan-{env}-financeagent-gateway-*", f":gateway/finplan-{env}-financeagent-classical-gateway-*"}
+        if env == "prod":
+            # Production remains outside the approved Beta/Gamma rollout.
             assert trust["StringEquals"] == {"aws:SourceAccount": {"Ref": "AWS::AccountId"}}
             assert trust["ArnLike"]["aws:SourceArn"]["Fn::Join"][1][-1] == f":gateway/finplan-{env}-financeagent-gateway-*"
 
