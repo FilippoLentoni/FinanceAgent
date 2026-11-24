@@ -49,7 +49,9 @@ def test_authorizer_metadata_points_to_this_environments_pool():
 def test_beta_runs_the_configured_hosted_provider():
     env = deployed()
     if env.env == "beta":
-        assert env.param(env.own("config", "explanation-provider")) == "bedrock"
+        from finplan_agent.config.settings import load_repo_config
+
+        assert env.param(env.own("config", "explanation-provider")) == load_repo_config(env.env)["explanation"]["provider"]
 
 
 def test_unauthenticated_gateway_call_is_rejected():

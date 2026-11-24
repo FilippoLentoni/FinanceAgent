@@ -230,6 +230,8 @@ class AgentService:
         brokerage = self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None
         if recorder is not None and brokerage is not None and hasattr(getattr(brokerage, "client", None), "call_tool"):
             brokerage.client = recorder.wrap(brokerage.client, gateway="brokerage")
+        if brokerage is not None and hasattr(getattr(brokerage, "client", None), "call_tool"):
+            brokerage.client = wrap_tools(brokerage.client)
         return AgentContext(
             environment=self.deps.settings.environment,
             release_id=self.deps.settings.release_id,

@@ -269,7 +269,7 @@ def test_runtime_contract_wiring(templates):
     rt = next(iter(resources(t, "AWS::BedrockAgentCore::Runtime").values()))["Properties"]
     assert rt["NetworkConfiguration"] == {"NetworkMode": "PUBLIC"} and rt["ProtocolConfiguration"] == "HTTP"
     assert rt["RequestHeaderConfiguration"]["RequestHeaderAllowlist"] == ["Authorization"]
-    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL", "FINPLAN_BROKERAGE_GATEWAY_URL", "FINPLAN_JUDGE_ENABLED", "FINPLAN_JUDGE_QUEUE_URL", "FINPLAN_RUNTIME_ARN", "FINPLAN_LANGFUSE_SECRET_ARN", "FINPLAN_JUDGE_OUTBOX_BUCKET"}
+    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL", "FINPLAN_BROKERAGE_GATEWAY_URL", "FINPLAN_JUDGE_ENABLED", "FINPLAN_JUDGE_QUEUE_URL", "FINPLAN_RUNTIME_ARN", "FINPLAN_LANGFUSE_SECRET_ARN", "FINPLAN_JUDGE_OUTBOX_BUCKET", "FINPLAN_OPENAI_SECRET_ARN"}
     assert rt["AgentRuntimeName"] == "finplan_beta_financeagent"
     pat = t["Parameters"]["ImageUri"]["AllowedPattern"]
     good = FAKE_ACCOUNT + ".dkr.ecr.us-east-2.amazonaws.com/finplan-shared-financeagent-runtime-images@sha256:" + "a" * 64
@@ -386,18 +386,19 @@ def test_pipeline_wiring(templates):
     t = templates["tooling"]
     p = next(iter(resources(t, "AWS::CodePipeline::Pipeline").values()))["Properties"]
     assert [s["Name"] for s in p["Stages"]] == ["Source", "Build", "Beta", "Gamma", "Approval", "Prod"]
-    beta = next(s for s in p["Stages"] if s["Name"] == "Beta")
-    names = [a["Name"] for a in sorted(beta["Actions"], key=lambda a: a["RunOrder"])]
-    assert names == ["Resolve", "DeployIdentity", "DeployAgent", "PublishRelease", "IntegrationBetaTests"]
-    resolve = next(a for a in beta["Actions"] if a["Name"] == "Resolve")
-    assert resolve["Namespace"] == "ResolveBeta"
-    deploy_agent = next(a for a in beta["Actions"] if a["Name"] == "DeployAgent")
-    overrides = json.loads(deploy_agent["Configuration"]["ParameterOverrides"])
-    assert overrides == {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"}
-    assert len(deploy_agent["Configuration"]["ParameterOverrides"].encode()) <= 1024
-    resolved_artifact = resolve["OutputArtifacts"][0]["Name"]
-    assert deploy_agent["Configuration"]["TemplateConfiguration"] == f"{resolved_artifact}::agent-parameters.json"
-    assert {a["Name"] for a in deploy_agent["InputArtifacts"]} == {"BuildOutput", resolved_artifact}
+    for cap, suite in (("Beta", "IntegrationBetaTests"), ("Gamma", "GammaTests"), ("Prod", "SmokeTests")):
+        beta = next(s for s in p["Stages"] if s["Name"] == cap)
+        names = [a["Name"] for a in sorted(beta["Actions"], key=lambda a: a["RunOrder"])]
+        assert names == ["Resolve", "DeployIdentity", "DeployAgent", "PublishRelease", suite]
+        resolve = next(a for a in beta["Actions"] if a["Name"] == "Resolve")
+        assert resolve["Namespace"] == f"Resolve{cap}"
+        deploy_agent = next(a for a in beta["Actions"] if a["Name"] == "DeployAgent")
+        overrides = json.loads(deploy_agent["Configuration"]["ParameterOverrides"])
+        assert overrides == {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"}
+        assert len(deploy_agent["Configuration"]["ParameterOverrides"].encode()) <= 1024
+        resolved_artifact = resolve["OutputArtifacts"][0]["Name"]
+        assert deploy_agent["Configuration"]["TemplateConfiguration"] == f"{resolved_artifact}::agent-parameters.json"
+        assert {a["Name"] for a in deploy_agent["InputArtifacts"]} == {"BuildOutput", resolved_artifact}
     build_project = next(r for r in resources(t, "AWS::CodeBuild::Project").values() if r["Properties"]["Name"] == "finplan-shared-financeagent-pipeline-build-project")
     env = build_project["Properties"]["Environment"]
     assert env["Type"] == "ARM_CONTAINER" and env["PrivilegedMode"] is True
@@ -417,20 +418,21 @@ def test_metadata_artifact_exception_rejects_executable_substitution_and_other_c
         pipeline = next(iter(resources(t, "AWS::CodePipeline::Pipeline").values()))["Properties"]
         return next(s["Actions"] for s in pipeline["Stages"] if s["Name"] == stage)
 
-    for invalid in ("template", "image", "consumer", "producer"):
-        bad = deepcopy(template)
-        beta = actions_for(bad)
-        deploy = next(a for a in beta if a["Name"] == "DeployAgent")
-        if invalid == "template":
-            deploy["Configuration"]["TemplatePath"] = "ResolvedBetaConfiguration::replacement.template.json"
-        elif invalid == "image":
-            deploy["Configuration"]["ParameterOverrides"] = json.dumps({"ImageUri": "arbitrary-later-image", "ReleaseId": "#{BuildVariables.RELEASE_ID}"})
-        elif invalid == "consumer":
-            actions_for(bad, "Gamma")[0]["InputArtifacts"].append({"Name": "ResolvedBetaConfiguration"})
-        else:
-            next(a for a in beta if a["Name"] == "Resolve")["InputArtifacts"] = [{"Name": "SourceOutput"}]
-        rejected, errors = validated_resolve_metadata_template(bad)
-        assert rejected == bad and errors, invalid
+    for cap in ("Beta", "Gamma", "Prod"):
+        for invalid in ("template", "image", "consumer", "producer"):
+            bad = deepcopy(template)
+            beta = actions_for(bad, cap)
+            deploy = next(a for a in beta if a["Name"] == "DeployAgent")
+            if invalid == "template":
+                deploy["Configuration"]["TemplatePath"] = f"Resolved{cap}Configuration::replacement.template.json"
+            elif invalid == "image":
+                deploy["Configuration"]["ParameterOverrides"] = json.dumps({"ImageUri": "arbitrary-later-image", "ReleaseId": "#{BuildVariables.RELEASE_ID}"})
+            elif invalid == "consumer":
+                actions_for(bad, "Gamma" if cap != "Gamma" else "Beta")[0]["InputArtifacts"].append({"Name": f"Resolved{cap}Configuration"})
+            else:
+                next(a for a in beta if a["Name"] == "Resolve")["InputArtifacts"] = [{"Name": "SourceOutput"}]
+            rejected, errors = validated_resolve_metadata_template(bad)
+            assert rejected == bad and errors, invalid
 
 
 def test_no_budget_and_30_day_logs_everywhere(assembly):
@@ -462,3 +464,15 @@ def test_brokerage_gateway_is_beta_only_scoped_and_readonly(templates):
     assert len(payload)==1 and payload[0]['Name']=='get_etf_connection_status'
     assert beta['Resources']['Runtime']['Properties']['EnvironmentVariables']['FINPLAN_BROKERAGE_GATEWAY_URL']=={'Fn::GetAtt':['BrokerageGateway','GatewayUrl']}
     assert beta['Resources']['BrokerageGateway']['Properties']['ProtocolConfiguration']=={'Mcp':{'SupportedVersions':['2025-11-25']}}
+
+
+def test_stage_metadata_write_grants_are_prefix_scoped(templates):
+    t = templates["tooling"]
+    for cap in ("Beta", "Gamma", "Prod"):
+        policies = [r["Properties"]["PolicyDocument"]["Statement"] for lid, r in resources(t, "AWS::IAM::Policy").items() if lid.startswith(f"StageRole{cap}")]
+        assert policies
+        writes = [statement for policy in policies for statement in policy if "s3:PutObject" in statement.get("Action", [])]
+        assert len(writes) == 2  # existing release ledger plus only this stage's metadata
+        encoded = [json.dumps(statement) for statement in writes]
+        assert any(f"/{f'Resolved{cap}Configuration'[:10]}/*" in doc for doc in encoded)
+        assert not any("s3:DeleteObject" in json.dumps(policy) or "s3:PutObjectRetention" in json.dumps(policy) for policy in policies)

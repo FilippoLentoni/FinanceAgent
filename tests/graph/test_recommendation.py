@@ -83,8 +83,8 @@ def test_skill_inventory_and_image_build_include_versioned_instructions():
 def test_beta_mcp_deadline_covers_tool_and_backend_deadlines():
     cfg = json.loads((ROOT/'config/beta.json').read_text())
     assert cfg['gateway']['request_timeout_seconds'] == 330
-    assert cfg['explanation']['provider'] == 'bedrock'
-    assert cfg['guard_defaults']['max_cost_session_usd'] <= .5
+    assert cfg['explanation']['provider'] == 'openai'
+    assert cfg['guard_defaults']['max_cost_session_usd'] == 3.0
 
 
 def test_hosted_beta_token_cap_fits_the_real_catalog_and_skills():

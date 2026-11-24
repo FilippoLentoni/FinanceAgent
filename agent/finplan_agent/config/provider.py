@@ -3,7 +3,7 @@
 Sources (per environment, all owned by FinanceAgent and written by its pipeline/bootstrap):
 
 * ``/finplan/<env>/financeagent/config/explanation-provider``: the provider kind, exactly ``bedrock``
-  or ``fixture`` (the registered contract value shape is a plain provider key);
+  or ``fixture`` or ``openai`` (the registered contract value shape is a plain provider key);
 * ``/finplan/<env>/financeagent/config/explanation-model-id``: the Bedrock model or inference-profile
   ID (only read when the kind is ``bedrock``; never in code, tests outside configuration fixtures or
   skills);
@@ -21,7 +21,7 @@ Sources (per environment, all owned by FinanceAgent and written by its pipeline/
 Validation (any failure raises :class:`ProviderConfigError`, so the process refuses to start and the
 Runtime health check fails):
 
-* kind not in {bedrock, fixture} (``openai`` included: the OpenAI adapter does not exist);
+* kind not in {bedrock, fixture, openai}; OpenAI was explicitly authorized for beta/gamma.
 * kind not allowed in the environment (CI uses fixtures; hosted beta may use guarded Bedrock);
 * model ID missing for ``bedrock``, an ARN, a ``global.`` inference profile, any ``qwen`` identifier
   or any FinanceModel / SageMaker reference (Qwen is a FinanceModel strategy benchmark only);
@@ -53,7 +53,7 @@ __all__ = [
     "load_provider_config",
 ]
 
-PROVIDER_KINDS = ("bedrock", "fixture")
+PROVIDER_KINDS = ("bedrock", "fixture", "openai")
 RATE_SOURCES = ("configured", "aws_price_list")
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}\Z")
 #: Denied explanation-model patterns (spec explanation-provider "Qwen is not an explanation provider",
@@ -112,12 +112,14 @@ class ProviderConfig:
 
     @property
     def caching_effective(self) -> bool:
-        return self.kind == "bedrock" and self.prompt_caching == "enabled" and self.rates is not None and self.rates.has_cache_rates
+        return self.kind in ("bedrock", "openai") and self.prompt_caching == "enabled" and self.rates is not None and self.rates.has_cache_rates
 
     def describe(self) -> dict[str, Any]:
         """Non-secret summary reported by ``describe`` (no prices beyond the rate source and date)."""
         out: dict[str, Any] = {"kind": self.kind, "max_tokens_invocation": self.max_tokens_invocation, "prompt_caching": "enabled" if self.caching_effective else "disabled"}
-        if self.kind == "bedrock":
+        if self.kind == "openai":
+            out["prompt_cache_options"] = {"mode": "implicit" if self.caching_effective else "explicit", "ttl": "30m"}
+        if self.kind in ("bedrock", "openai"):
             out["model_id"] = self.model_id
             if self.rates is not None:
                 out["rates_source"] = self.rates.source
@@ -187,11 +189,11 @@ def build_provider_config(environment: str, kind: Any, model_id: Any, guards: Ma
     if environment not in ENVIRONMENTS:
         raise ProviderConfigError(f"unknown environment {environment!r}", "/environment")
     if kind not in PROVIDER_KINDS:
-        raise ProviderConfigError(f"explanation provider kind {kind!r} is not allowed; allowed kinds are exactly 'bedrock' and 'fixture'", "/kind")
+        raise ProviderConfigError(f"explanation provider kind {kind!r} is not allowed; allowed kinds are bedrock, fixture and openai", "/kind")
     if allowed_kinds is not None and kind not in allowed_kinds:
         raise ProviderConfigError(f"provider kind {kind!r} is not allowed in {environment} (allowed: {', '.join(allowed_kinds)})", "/kind")
     doc: dict[str, Any] = {**(guard_defaults or {}), **(guards or {})}
-    unknown = sorted(set(doc) - {"max_tokens_invocation", "max_tokens_turn", "max_tokens_session", "max_tool_calls_turn", "max_cost_session_usd", "temperature", "prompt_caching", "rates", "$comment"})
+    unknown = sorted(set(doc) - {"max_tokens_invocation", "max_tokens_turn", "max_tokens_session", "max_tool_calls_turn", "max_cost_session_usd", "temperature", "prompt_caching", "rates", "reasoning_effort", "$comment"})
     if unknown:
         raise ProviderConfigError(f"unknown explanation-guards field(s): {', '.join(unknown)}", f"/{unknown[0]}")
     inv, turn, sess = _int(doc, "max_tokens_invocation"), _int(doc, "max_tokens_turn"), _int(doc, "max_tokens_session")
@@ -207,12 +209,19 @@ def build_provider_config(environment: str, kind: Any, model_id: Any, guards: Ma
     temperature = doc.get("temperature")
     if temperature is not None and (isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not 0 <= temperature <= 1):
         raise ProviderConfigError("temperature must be null or between 0 and 1", "/temperature")
+    reasoning = doc.get("reasoning_effort")
+    if reasoning is not None and reasoning not in ("low", "medium", "high", "xhigh"):
+        raise ProviderConfigError("reasoning_effort must be low, medium, high or xhigh", "/reasoning_effort")
     rates: Rates | None = None
     mid: str | None = None
-    if kind == "bedrock":
+    if kind in ("bedrock", "openai"):
         problems = model_id_problems(model_id)
         if problems:
             raise ProviderConfigError("; ".join(problems), "/model_id")
+        if kind == "bedrock" and model_id.startswith("gpt-"):
+            raise ProviderConfigError("GPT API model IDs require the openai provider", "/model_id")
+        if kind == "openai" and (not model_id.startswith("gpt-") or "/" in model_id or ":" in model_id):
+            raise ProviderConfigError("openai requires a GPT API model ID", "/model_id")
         mid = model_id
         rates = _rates(doc.get("rates"))
     elif doc.get("rates") is not None:
@@ -229,6 +238,7 @@ def build_provider_config(environment: str, kind: Any, model_id: Any, guards: Ma
         prompt_caching=caching,
         temperature=float(temperature) if temperature is not None else None,
         rates=rates,
+        extra={"reasoning_effort": reasoning} if reasoning is not None else {},
     )
 
 
@@ -250,7 +260,7 @@ def load_provider_config(environment: str, ssm: Any) -> ProviderConfig:
         raise ProviderConfigError(f"{names.explanation_provider} is not set", "/kind")
     kind = kind.strip()
     if kind.startswith("{"):
-        raise ProviderConfigError("explanation-provider holds the provider key only ('bedrock' or 'fixture'); caps and rates belong in explanation-guards", "/kind")
+        raise ProviderConfigError("explanation-provider holds the provider key only ('bedrock', 'fixture' or 'openai'); caps and rates belong in explanation-guards", "/kind")
     guards_raw = values.get(names.explanation_guards)
     try:
         guards = json.loads(guards_raw) if guards_raw else {}
@@ -258,5 +268,5 @@ def load_provider_config(environment: str, ssm: Any) -> ProviderConfig:
         raise ProviderConfigError("explanation-guards is not valid JSON", "/") from exc
     if not isinstance(guards, dict):
         raise ProviderConfigError("explanation-guards must be a JSON object", "/")
-    model_id = values.get(names.explanation_model_id) if kind == "bedrock" else None
+    model_id = values.get(names.explanation_model_id) if kind in ("bedrock", "openai") else None
     return build_provider_config(environment, kind, model_id, guards, guard_defaults=repo.get("guard_defaults"), allowed_kinds=tuple(repo.get("provider_kind_allowed", PROVIDER_KINDS)))

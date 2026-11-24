@@ -17,10 +17,10 @@ CodePipeline **V2** with CodeBuild, stages in the contract order:
    ``Resolve`` (stage role): promotion check (gamma/prod refuse a 0.x pin), the FinanceLambdasTool
    compatibility gate and target resolution from THIS environment's release manifest, tool catalog
    and ``lambda/<tool>-arn`` references, and the Bedrock grant resolution (``GetInferenceProfile``,
-   read-only) - exported as variables (namespace ``Resolve<Env>``), never as an artifact;
+   read-only) - exported as variables and a stage-local JSON parameter artifact;
    ``DeployIdentity`` then ``DeployAgent`` (scoped deploy role + CloudFormation execution role; the
    agent stack gets ``ImageUri``/``ReleaseId`` from the Build variables and the targets/Bedrock ARNs
-   from the Resolve variables); ``PublishRelease`` (SSM references, explanation configuration,
+   from the Resolve JSON configuration); ``PublishRelease`` (SSM references, explanation configuration,
    budget-enforced role names, release manifest with the policy digest and target set);
    the deployed suite (``IntegrationBetaTests`` / ``GammaTests`` / ``SmokeTests``) sending REAL
    payloads to the deployed Runtime and Gateway as the stage role (lesson L5).
@@ -44,7 +44,7 @@ from aws_cdk import aws_ssm as ssm
 from finplan_contracts import ssm as contract_ssm
 
 from . import naming as n
-from .agent import AgentStack, bedrock_param, target_param, target_variable
+from .agent import AgentStack, target_variable
 from .common import tag_role
 from .policies import build_role_statements, deploy_execution_statements, stage_role_statements
 from .tooling import ToolingStack, add_log_group, get_tooling_stack
@@ -277,7 +277,7 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
 
     agent: AgentStack = ctx.stacks["agent"]
     identity = ctx.stacks["identity"]
-    use_resolved_configuration = env in (res.tooling.shared.get("classical_gateway_environments") or [])
+    use_resolved_configuration = True
     project_name = n.shared_name("pipeline-build-project", f"{env}-stage")
     project = codebuild.PipelineProject(
         st,
@@ -295,6 +295,23 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
     tag_role(project, "pipeline-build-project")
     res.projects[env] = project
 
+    # Import only the action reference, retaining the owned project resource.
+    # This avoids CDK's bucket-wide write/delete grants for output artifacts.
+    action_project = codebuild.Project.from_project_name(st, f"StageActionProject{cap}", project.project_name)
+    prefix = n.PIPELINE_NAME[:20]
+    metadata_prefix = f"Resolved{cap}Configuration"[:10]
+    stage_role.add_to_principal_policy(iam.PolicyStatement(
+        actions=["s3:GetObject", "s3:GetObjectVersion"],
+        resources=[f"{res.store.bucket_arn}/{prefix}/BuildOutpu/*"],
+    ))
+    stage_role.add_to_principal_policy(iam.PolicyStatement(
+        actions=["s3:GetBucketAcl", "s3:GetBucketLocation"], resources=[res.store.bucket_arn],
+    ))
+    stage_role.add_to_principal_policy(iam.PolicyStatement(
+        actions=["s3:PutObject"],
+        resources=[f"{res.store.bucket_arn}/{prefix}/{metadata_prefix}/*"],
+    ))
+
     stage = ctx.stage
     execution_id = codebuild.BuildEnvironmentVariable(value="#{codepipeline.PipelineExecutionId}")
     ns = resolve_namespace(env)
@@ -303,7 +320,7 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
     def cb(name: str, action: str, order: int, kind: actions.CodeBuildActionType, namespace: str | None = None, outputs: list[codepipeline.Artifact] | None = None) -> actions.CodeBuildAction:
         return actions.CodeBuildAction(
             action_name=name,
-            project=project,
+            project=action_project,
             input=build_output,
             type=kind,
             run_order=order,
@@ -316,12 +333,6 @@ def _add_env_stage(res: PipelineResources, env: str, ctx: Any, build_output: cod
     # resolved alias/Bedrock set is carried in TemplateConfiguration, with only
     # immutable Build-stage identity overrides kept in the action itself.
     overrides = {"ImageUri": f"#{{{BUILD_NAMESPACE}.IMAGE_URI}}", "ReleaseId": f"#{{{BUILD_NAMESPACE}.RELEASE_ID}}"}
-    if not use_resolved_configuration:
-        # Preserve higher-environment action roles and wiring until separately
-        # opted into the classical deployment; no output artifact/write grant.
-        overrides[bedrock_param()] = f"#{{{ns}.{BEDROCK_VARIABLE}}}"
-        for tool in agent.primary_tools:
-            overrides[target_param(tool)] = f"#{{{ns}.{target_variable(tool)}}}"
 
     def deploy(stack: cdk.Stack, order: int, params: dict[str, str] | None = None, configuration: codepipeline.ArtifactPath | None = None) -> actions.CloudFormationCreateUpdateStackAction:
         return actions.CloudFormationCreateUpdateStackAction(

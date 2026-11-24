@@ -96,10 +96,10 @@ class BudgetGuard:
     def worst_case(self, input_tokens: int, max_tokens: int | None = None) -> Worst:
         out = int(max_tokens if max_tokens is not None else self.config.max_tokens_invocation)
         rates = self.config.rates
-        if self.config.kind != "bedrock" or rates is None:
+        if self.config.kind not in ("bedrock", "openai") or rates is None:
             return Worst(input_tokens, out, 0.0)
         in_rate = rates.input_per_1k_usd
-        if self.config.caching_effective and rates.cache_write_per_1k_usd is not None:
+        if (self.config.caching_effective or self.config.kind == "openai") and rates.cache_write_per_1k_usd is not None:
             in_rate = max(in_rate, rates.cache_write_per_1k_usd)
         return Worst(input_tokens, out, input_tokens / 1000 * in_rate + out / 1000 * rates.output_per_1k_usd)
 
@@ -119,7 +119,7 @@ class BudgetGuard:
         if session_tokens + tokens > cfg.max_tokens_session:
             raise AgentError.budget(f"the per-session token limit ({cfg.max_tokens_session}) would be exceeded", limit="max_tokens_session", value=cfg.max_tokens_session, used=session_tokens, estimate_tokens=tokens)
         record: dict[str, Any] = {"estimated_usd_upper_bound": round(worst.usd, 8)}
-        if cfg.kind != "bedrock":
+        if cfg.kind not in ("bedrock", "openai"):
             return record
         retrieved_at = cfg.rates.retrieved_at if cfg.rates else None
         session_remaining = cfg.max_cost_session_usd - session_spent_usd

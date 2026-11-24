@@ -222,3 +222,25 @@ def test_confirmation_output_preserves_approval_request_without_executing_tool()
     assert tools.calls == []
     assert sink.documents[0]["output"]["confirmation"] == final["confirmation"]
     assert not any(e["kind"] == "TOOL" for e in sink.documents[0]["events"])
+
+
+def test_brokerage_boundary_is_captured_with_and_without_durable_recording():
+    from types import SimpleNamespace
+
+    from finplan_agent.runtime.audit import _CURRENT, Turn
+    from finplan_agent.session.identity import caller_from_headers
+
+    for durable in (False, True):
+        service, tools = make_service()
+        service.deps.record_tool_calls = durable
+        service.deps.brokerage_client_factory = lambda caller, tools=tools: SimpleNamespace(client=tools)
+        turn = Turn({}, "beta", None, "test-runtime")
+        token = _CURRENT.set(turn)
+        try:
+            context = service._context(caller_from_headers(auth(), "beta"), SESSION)
+            result = context.brokerage.client.call_tool("describe_capabilities", {})
+        finally:
+            _CURRENT.reset(token)
+        assert result.ok is True
+        assert [e["name"] for e in turn.events] == ["describe_capabilities"]
+        assert turn.events[0]["output"]["ok"] is True

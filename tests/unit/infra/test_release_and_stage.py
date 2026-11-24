@@ -64,7 +64,11 @@ def _seed(ssm, env, tools, *, majors=(1,), arn_env=None, account=ACCOUNT):
 @pytest.fixture
 def ssm():
     with mock_aws():
-        yield boto3.client("ssm", region_name=REGION)
+        client = boto3.client("ssm", region_name=REGION)
+        fixture = json.loads((Path(__file__).resolve().parents[2] / "fixtures/config/provider-configs.json").read_text())
+        for environment in ("beta", "gamma"):
+            client.put_parameter(Name=f"/finplan/{environment}/financeagent/config/openai-explanation-guards", Value=json.dumps({"rates":fixture["guards"]["bedrock_valid"]["rates"]}), Type="String")
+        yield client
 
 
 # ------------------------------------------------------------------ identity / digest
@@ -265,7 +269,7 @@ def test_resolution_variables_are_exported_safely(tmp_path, ssm):
     _seed(ssm, "beta", ["describe_capabilities"])
     res = rel.resolve("beta", ssm=ssm, bedrock=FakeBedrock(), account=ACCOUNT, region=REGION)
     v = res.variables()
-    assert v["BEDROCK_INVOKE_ARNS"] != "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
+    assert v["BEDROCK_INVOKE_ARNS"] == "none" and v["TARGET_DESCRIBE_CAPABILITIES"].endswith(":current")
     assert res.registered == ["describe_capabilities"]
     out = tmp_path / "resolved.env"
     rel.write_variables(out, v)
@@ -365,7 +369,7 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
     m = rel.publish_release(info, "beta", ssm=ssm, cfn=FakeCfn("beta"), targets=targets, s3=s3, store_bucket="store")
     get = lambda name: ssm.get_parameter(Name=name)["Parameter"]["Value"]  # noqa: E731
     assert get("/finplan/beta/financeagent/release/current-release-id") == info.release_id
-    assert get("/finplan/beta/financeagent/config/explanation-provider") == "bedrock"
+    assert get("/finplan/beta/financeagent/config/explanation-provider") == "openai"
     assert get("/finplan/beta/financeagent/agent/gateway-principal-ref") == "finplan-beta-financeagent-gateway-service-role"
     assert get("/finplan/beta/financeagent/secret-ref/ci-test-client") == "finplan/beta/financeagent/ci-test-client"
     meta = json.loads(get("/finplan/beta/financeagent/agent/authorizer-metadata-ref"))
@@ -385,7 +389,9 @@ def test_publish_writes_references_config_and_a_valid_manifest(ssm):
 
 
 def test_operator_rates_are_preserved_never_invented(ssm):
-    ssm.put_parameter(Name="/finplan/gamma/financeagent/config/explanation-guards", Value=json.dumps({"rates": {"source": "configured", "retrieved_at": "2026-10-08"}}), Type="String")
+    fixture = json.loads((Path(__file__).resolve().parents[2] / "fixtures/config/provider-configs.json").read_text())
+    rates = fixture["guards"]["bedrock_valid"]["rates"]
+    ssm.put_parameter(Name="/finplan/gamma/financeagent/config/openai-explanation-guards", Value=json.dumps({"rates":rates}), Type="String", Overwrite=True)
     rel.publish_release(_info(), "gamma", ssm=ssm, cfn=FakeCfn("gamma"), targets={"describe_capabilities": "none"})
     guards = json.loads(ssm.get_parameter(Name="/finplan/gamma/financeagent/config/explanation-guards")["Parameter"]["Value"])
     assert guards["rates"]["source"] == "configured" and guards["max_tokens_invocation"] == __import__("json").loads(Path(__file__).resolve().parents[3].joinpath("config", "gamma.json").read_text())["guard_defaults"]["max_tokens_invocation"]
@@ -480,3 +486,11 @@ def test_per_model_tools_resolve_from_financelambdastool_short_function_names(ss
     assert targets["generate_portfolio_recommendation_min_variance"].endswith(":function:finplan-beta-financelambdastool-gen-portfolio-rec-min-variance:current")
     assert targets["generate_portfolio_recommendation_ppo"].endswith("gen-portfolio-rec-ppo:current") and not notes
     assert "recommend_portfolio" not in targets and "recommend_classical_portfolio" not in targets
+
+
+def test_openai_publish_refuses_missing_staged_rates(ssm):
+    ssm.delete_parameter(Name="/finplan/beta/financeagent/config/openai-explanation-guards")
+    with pytest.raises(rel.ManifestError, match="must be staged"):
+        rel.publish_release(_info(), "beta", ssm=ssm, cfn=FakeCfn("beta"), targets={"describe_capabilities":"none"})
+    with pytest.raises(ssm.exceptions.ParameterNotFound):
+        ssm.get_parameter(Name="/finplan/beta/financeagent/config/explanation-provider")

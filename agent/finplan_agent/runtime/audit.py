@@ -186,7 +186,7 @@ def wrap_provider(provider: Any) -> Any:
                 "GENERATION" if provider.kind != "fixture" else "SPAN",
                 start,
                 {"purpose": request.purpose, "messages": request.messages},
-                {"text": result.text, "tool_calls": [{"name": c.name, "arguments": c.arguments} for c in result.tool_calls], "stop_reason": result.stop_reason, "provider_kind": provider.kind},
+                {"text": result.text, "tool_calls": [{"name": c.name, "arguments": c.arguments} for c in result.tool_calls], "stop_reason": result.stop_reason, "provider_kind": provider.kind, "requested_model": provider.model_id, "resolved_model": result.extra.get("resolved_model"), "response_id": result.extra.get("response_id")},
                 model=result.model_id,
                 usage={"input": result.usage.input_tokens, "output": result.usage.output_tokens, "cache_read": result.usage.cache_read_tokens, "cache_write": result.usage.cache_write_tokens},
                 cost=result.estimated_cost_usd,
