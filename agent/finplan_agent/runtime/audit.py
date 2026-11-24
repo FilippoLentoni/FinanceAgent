@@ -20,7 +20,7 @@ import urllib.request
 from collections.abc import Iterator, Mapping
 from contextvars import ContextVar
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 log = logging.getLogger("finplan_agent.audit")
 _CURRENT: ContextVar[Turn | None] = ContextVar("finplan_audit_turn", default=None)
@@ -28,6 +28,7 @@ _PRIVATE = re.compile(r"authorization|bearer|password|secret|token|api.?key|cred
 _BEARER = re.compile(r"(?i)\bBearer\s+\S+")
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 _KEY = re.compile(r"\b(?:sk-(?:proj-|lf-)?[A-Za-z0-9_-]{10,}|AKIA[A-Z0-9]{16}|ASIA[A-Z0-9]{16})\b")
+_URL = re.compile(r'https?://[^\s"<>]+', re.I)
 MAX_SPANS = 80
 
 
@@ -36,7 +37,21 @@ def clean(value: Any, depth: int = 0) -> Any:
     if depth > 6:
         return "[depth limit]"
     if isinstance(value, str):
-        text = _KEY.sub("[redacted]", _JWT.sub("[redacted]", _BEARER.sub("[redacted]", value)))
+        from ..graph.activity import sanitize
+
+        def redact_url(match: Any) -> str:
+            url = match.group(0)
+            try:
+                parsed = urlsplit(url)
+                query_keys = {k.lower() for k, _ in parse_qsl(parsed.query)}
+                if parsed.username or parsed.password or any(_PRIVATE.search(k) or k in {"sig", "signature", "key-pair-id", "awsaccesskeyid"} for k in query_keys):
+                    return "[redacted-private-url]"
+            except ValueError:
+                return "[redacted-private-url]"
+            return url
+
+        text = sanitize(_URL.sub(redact_url, value))
+        text = _KEY.sub("[redacted]", _JWT.sub("[redacted]", _BEARER.sub("[redacted]", text)))
         return text if len(text) <= 4096 else text[:4080] + "[truncated]"
     if isinstance(value, float) and not math.isfinite(value):
         return "[non-finite value]"
@@ -64,6 +79,7 @@ class Turn:
         self.events: list[dict[str, Any]] = []
         self.lock = threading.Lock()
         self.finished = False
+        self.capture_failed = False
         self.skills_available: Any = []
 
     def record(self, name: str, kind: str, start: int, inputs: Any, outputs: Any, *, error: str | None = None, model: str | None = None, usage: Any = None, cost: float | None = None) -> None:
@@ -85,10 +101,13 @@ class Turn:
                 "skills_available": self.skills_available,
                 "skill_evidence_semantics": "declared instructions and routed skill labels, not script execution",
                 "claim_check": answer.get("claim_check", {}),
-                "evidence_truncated": len(self.events) >= MAX_SPANS,
+                "evidence_truncated": len(self.events) >= MAX_SPANS or self.capture_failed,
+                "evidence_capture_failed": self.capture_failed,
+                "expected_observation_count": len(self.events) + 1,
                 "capture_policy": "bounded-credential-redaction-v1",
             }
         )
+        metadata["source_runtime_arn"] = self.runtime_arn  # trusted deployment identity, not a user payload
         document = {
             "schema_version": 1,
             "trace_id": self.trace_id,
@@ -100,7 +119,20 @@ class Turn:
             "release": self.release,
             "session_id": final.get("session_id"),
             "input": self.input,
-            "output": clean({"status": final.get("status"), "narrative": answer.get("narrative"), "evidence": answer.get("evidence", []), "skills_used": answer.get("skills_used", []), "error_code": (final.get("error") or {}).get("code")}),
+            "output": clean(
+                {
+                    "status": final.get("status"),
+                    "narrative": answer.get("narrative"),
+                    "evidence": answer.get("evidence", []),
+                    "skills_used": answer.get("skills_used", []),
+                    "confirmation": final.get("confirmation"),
+                    "in_progress": final.get("in_progress"),
+                    "declined": final.get("declined"),
+                    "tool_call_receipts": answer.get("tool_call_receipts", []),
+                    "error": final.get("error"),
+                    "error_code": (final.get("error") or {}).get("code"),
+                }
+            ),
             "metadata": metadata,
             "events": list(self.events),
         }
@@ -122,6 +154,14 @@ class Turn:
         return document
 
 
+def _record(turn: Turn, *args: Any, **kwargs: Any) -> None:
+    try:
+        turn.record(*args, **kwargs)
+    except Exception:
+        turn.capture_failed = True
+        log.warning("optional boundary audit capture failed")
+
+
 def wrap_provider(provider: Any) -> Any:
     if _CURRENT.get() is None:
         return provider
@@ -138,9 +178,10 @@ def wrap_provider(provider: Any) -> Any:
             try:
                 result = provider.generate(request) if on_token is None else provider.generate(request, on_token=on_token)
             except BaseException as exc:
-                turn.record("provider-" + request.purpose, "GENERATION", start, {"purpose": request.purpose}, None, error=type(exc).__name__, model=provider.model_id)
+                _record(turn, "provider-" + request.purpose, "GENERATION", start, {"purpose": request.purpose}, None, error=type(exc).__name__, model=provider.model_id)
                 raise
-            turn.record(
+            _record(
+                turn,
                 "provider-" + request.purpose,
                 "GENERATION" if provider.kind != "fixture" else "SPAN",
                 start,
@@ -171,9 +212,9 @@ def wrap_tools(tools: Any) -> Any:
             try:
                 result = tools.call_tool(name, arguments)
             except BaseException as exc:
-                turn.record(name, "TOOL", start, arguments, None, error=type(exc).__name__)
+                _record(turn, name, "TOOL", start, arguments, None, error=type(exc).__name__)
                 raise
-            turn.record(name, "TOOL", start, arguments, {"ok": result.ok, "result": result.result, "error_code": (result.error or {}).get("code")}, error=None if result.ok else (result.error or {}).get("code", "tool_failure"))
+            _record(turn, name, "TOOL", start, arguments, {"ok": result.ok, "result": result.result, "error_code": (result.error or {}).get("code")}, error=None if result.ok else (result.error or {}).get("code", "tool_failure"))
             return result
 
     return Tools()

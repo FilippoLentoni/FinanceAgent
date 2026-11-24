@@ -159,3 +159,66 @@ def test_document_failure_cannot_change_answer(monkeypatch, caplog):
     final = AuditedService(service, sink).handle(question(), auth(), SESSION)
     assert final["status"] == "completed" and sink.messages == []
     assert "seeded-document-error" not in caplog.text
+
+
+def test_private_download_grants_are_absent_across_root_and_boundary_payloads():
+    from finplan_agent.runtime.audit import Turn
+
+    host = "https://cdn.example.com/file?"
+    grant = host + "Signature=" + "seededgrant" + "&Expires=123&Key-Pair-Id=key"
+    userinfo = "https://user:" + "seededpassword" + "@example.com/file"
+    awsgrant = "https://bucket." + "s3.us-east-2.amazonaws.com/a?X-Amz-Signature=" + "seededawsgrant"
+    runtime = "arn:aws:bedrock-agentcore:us-east-2:" + ("0" * 12) + ":runtime/main-123"
+    turn = Turn({"prompt": grant}, "beta", None, runtime)
+    turn.record("provider", "GENERATION", turn.start, {"text": userinfo}, {"text": grant})
+    turn.record("tool", "TOOL", turn.start, {"download_url": awsgrant}, {"nested": {"url": grant}})
+    document = turn.document({"session_id": SESSION, "status": "completed", "answer": {"narrative": userinfo}})
+    encoded = json.dumps(document)
+    for secret in ("seededgrant", "seededpassword", "seededawsgrant"):
+        assert secret not in encoded
+    assert document["metadata"]["source_runtime_arn"] == runtime
+    assert document["metadata"]["expected_observation_count"] == len(otlp(document)["resourceSpans"][0]["scopeSpans"][0]["spans"])
+
+
+def test_boundary_recorder_failure_preserves_success_and_original_error(monkeypatch):
+    from finplan_agent.runtime.audit import _CURRENT, Turn, wrap_tools
+
+    service, _ = make_service()
+    sink = Sink()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("seeded-capture-error")
+
+    monkeypatch.setattr(Turn, "record", broken)
+    final = AuditedService(service, sink).handle(question(), auth(), SESSION)
+    assert final["status"] == "completed"
+    assert sink.documents[0]["metadata"]["evidence_capture_failed"] is True
+
+    class BrokenTool:
+        def call_tool(self, name, arguments):
+            raise original
+
+    original = ValueError("original tool error")
+    token = _CURRENT.set(Turn({}, "beta", None, "test-runtime"))
+    try:
+        tool = wrap_tools(BrokenTool())
+        try:
+            tool.call_tool("check", {})
+        except ValueError as caught:
+            assert caught is original
+        else:
+            raise AssertionError("original error was swallowed")
+    finally:
+        _CURRENT.reset(token)
+
+
+def test_confirmation_output_preserves_approval_request_without_executing_tool():
+    from tests.fakes.agent import PL
+
+    service, tools = make_service()
+    sink = Sink()
+    final = AuditedService(service, sink).handle({"prompt": "Publish it", "tool_request": {"name": "publish_plan_version", "arguments": {"plan_id": PL, "plan_version_id": PV, "expected_revision": 3}}, "stream": False}, auth(), SESSION)
+    assert final["status"] == "awaiting_confirmation"
+    assert tools.calls == []
+    assert sink.documents[0]["output"]["confirmation"] == final["confirmation"]
+    assert not any(e["kind"] == "TOOL" for e in sink.documents[0]["events"])
