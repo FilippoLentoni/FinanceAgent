@@ -23,6 +23,8 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
+from ..core.errors import AgentError
+
 __all__ = [
     "ExplanationProvider",
     "GenerateRequest",
@@ -109,6 +111,15 @@ class GenerateResult:
             "estimated_cost_usd": round(self.estimated_cost_usd, 8),
             "budget_category": budget_category,
         }
+
+
+class PaidResponseError(AgentError):
+    """A rejected paid response with validated usage, never model output or credentials."""
+
+    def __init__(self, error: AgentError, accounting: GenerateResult):
+        super().__init__(error.code, error.message, {**error.details, "usage_known": True}, retryable=error.retryable)
+        self.accounting = accounting
+        self.accounting_updates: dict[str, Any] = {}
 
 
 @runtime_checkable

@@ -138,8 +138,8 @@ def _env_configs(root: Path) -> dict[str, dict]:
 def provider_kind_findings(root: Path = ROOT) -> list[Finding]:
     out = []
     beta = _env_configs(root).get("beta", {})
-    if set(beta.get("provider_kind_allowed") or []) != {"fixture", "bedrock"}:
-        out.append(Finding("provider-kind", "config/beta.json", "beta must allow fixture tests and guarded hosted Bedrock use"))
+    if set(beta.get("provider_kind_allowed") or []) != {"fixture", "bedrock", "openai"}:
+        out.append(Finding("provider-kind", "config/beta.json", "beta must allow fixture tests and guarded hosted Bedrock/OpenAI use"))
     return out
 
 

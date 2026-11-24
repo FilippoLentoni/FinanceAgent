@@ -70,8 +70,8 @@ def config_problems(root: Path = ROOT) -> list[str]:
         cfg = json.loads((root / "config" / f"{env}.json").read_text(encoding="utf-8"))
         expl = cfg.get("explanation") or {}
         kind = expl.get("provider")
-        if kind not in ("fixture", "bedrock"):
-            out.append(f"config/{env}.json: explanation.provider must be fixture or bedrock")
+        if kind not in ("fixture", "bedrock", "openai"):
+            out.append(f"config/{env}.json: explanation.provider must be fixture, bedrock or openai")
         if kind not in (cfg.get("provider_kind_allowed") or []):
             out.append(f"config/{env}.json: explanation.provider {kind!r} is not in provider_kind_allowed")
         out += [f"config/{env}.json: explanation.model_id: {p}" for p in model_id_problems(expl.get("model_id"))]

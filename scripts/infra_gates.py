@@ -153,57 +153,56 @@ def gate_pipeline_structure(ctx: GateContext) -> list[str]:
     t = _load(tooling[0])
     projected, problems = validated_resolve_metadata_template(t)
     if projected != t and not problems:
-        ctx.note("pipeline-structure", "CONTRACT GAP FA-GAP-RESOLVE-METADATA: validated beta Resolve JSON parameters only; executable templates/image remain the immutable BuildOutput")
+        ctx.note("pipeline-structure", "CONTRACT GAP FA-GAP-RESOLVE-METADATA: validated same-stage Resolve JSON parameters only; executable templates/image remain the immutable BuildOutput")
     return problems + [str(f) for f in check_pipeline_template(projected)] + check_deploy_roles(t)
 
 
 def validated_resolve_metadata_template(template: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
-    """Recognize only the beta JSON parameter artifact, then apply the generic gate.
+    """Recognize only same-stage JSON parameter artifacts, then apply the generic gate.
 
     finplan-contracts 1.4.0 treats every post-build artifact as executable input.
     This narrow metadata exception avoids CodePipeline's 1KB ParameterOverrides
     quota without allowing another code/image/template source or a later rebuild.
     """
-    artifact = "ResolvedBetaConfiguration"
     projected = copy.deepcopy(template)
-    for pipeline in _resources(projected, "AWS::CodePipeline::Pipeline").values():
-        stages = pipeline.get("Properties", {}).get("Stages") or []
-        producers, consumers = [], []
-        for stage in stages:
-            for action in stage.get("Actions") or []:
-                if any(a.get("Name") == artifact for a in action.get("OutputArtifacts") or []):
-                    producers.append((stage, action))
-                if any(a.get("Name") == artifact for a in action.get("InputArtifacts") or []):
-                    consumers.append((stage, action))
-        if not producers and not consumers:
-            continue
-        def fail(reason: str) -> tuple[dict[str, Any], list[str]]:
-            return template, [f"FA-GAP-RESOLVE-METADATA rejected: {reason}"]
-        if len(producers) != 1 or len(consumers) != 1:
-            return fail("exactly one beta Resolve producer and DeployAgent consumer are required")
-        producer_stage, producer = producers[0]
-        consumer_stage, consumer = consumers[0]
-        ptype, ctype = producer.get("ActionTypeId", {}), consumer.get("ActionTypeId", {})
-        if producer_stage.get("Name") != "Beta" or producer.get("Name") != "Resolve" or ptype.get("Provider") != "CodeBuild" or ptype.get("Category") != "Build":
-            return fail("metadata must be produced by beta Resolve CodeBuild")
-        if producer.get("InputArtifacts") != [{"Name": "BuildOutput"}] or producer.get("OutputArtifacts") != [{"Name": artifact}]:
-            return fail("Resolve must consume only immutable BuildOutput and emit only its JSON configuration")
-        if consumer_stage.get("Name") != "Beta" or consumer.get("Name") != "DeployAgent" or ctype.get("Provider") != "CloudFormation" or ctype.get("Category") != "Deploy":
-            return fail("metadata may be consumed only by beta DeployAgent CloudFormation")
-        if {a.get("Name") for a in consumer.get("InputArtifacts") or []} != {"BuildOutput", artifact}:
-            return fail("DeployAgent must consume BuildOutput plus the declared metadata artifact only")
-        cfg = consumer.get("Configuration") or {}
-        if cfg.get("TemplateConfiguration") != f"{artifact}::agent-parameters.json" or not str(cfg.get("TemplatePath", "")).startswith("BuildOutput::cdk.out/assembly-Beta/BetaAgent"):
-            return fail("only agent-parameters.json is metadata; the template must remain in immutable BuildOutput")
-        try:
-            overrides = json.loads(cfg.get("ParameterOverrides", "{}"))
-        except (TypeError, json.JSONDecodeError):
-            return fail("identity overrides must be valid JSON")
-        if overrides != {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"} or len(cfg["ParameterOverrides"].encode()) > 1024:
-            return fail("only immutable Build-stage image/release identity overrides are permitted")
-        if int(producer.get("RunOrder", 1)) >= int(consumer.get("RunOrder", 1)):
-            return fail("Resolve must complete before DeployAgent")
-        consumer["InputArtifacts"] = [a for a in consumer["InputArtifacts"] if a.get("Name") != artifact]
+    for cap in ("Beta", "Gamma", "Prod"):
+        artifact = f"Resolved{cap}Configuration"
+        for pipeline in _resources(projected, "AWS::CodePipeline::Pipeline").values():
+            stages = pipeline.get("Properties", {}).get("Stages") or []
+            producers, consumers = [], []
+            for stage in stages:
+                for action in stage.get("Actions") or []:
+                    if any(a.get("Name") == artifact for a in action.get("OutputArtifacts") or []):
+                        producers.append((stage, action))
+                    if any(a.get("Name") == artifact for a in action.get("InputArtifacts") or []):
+                        consumers.append((stage, action))
+            def fail(reason: str) -> tuple[dict[str, Any], list[str]]:
+                return template, [f"FA-GAP-RESOLVE-METADATA rejected: {reason}"]
+            if len(producers) != 1 or len(consumers) != 1:
+                return fail("exactly one same-stage Resolve producer and DeployAgent consumer are required")
+            producer_stage, producer = producers[0]
+            consumer_stage, consumer = consumers[0]
+            ptype, ctype = producer.get("ActionTypeId", {}), consumer.get("ActionTypeId", {})
+            if producer_stage.get("Name") != cap or producer.get("Name") != "Resolve" or ptype.get("Provider") != "CodeBuild" or ptype.get("Category") != "Build":
+                return fail("metadata must be produced by same-stage Resolve CodeBuild")
+            if producer.get("InputArtifacts") != [{"Name": "BuildOutput"}] or producer.get("OutputArtifacts") != [{"Name": artifact}]:
+                return fail("Resolve must consume only immutable BuildOutput and emit only its JSON configuration")
+            if consumer_stage.get("Name") != cap or consumer.get("Name") != "DeployAgent" or ctype.get("Provider") != "CloudFormation" or ctype.get("Category") != "Deploy":
+                return fail("metadata may be consumed only by same-stage DeployAgent CloudFormation")
+            if {a.get("Name") for a in consumer.get("InputArtifacts") or []} != {"BuildOutput", artifact}:
+                return fail("DeployAgent must consume BuildOutput plus the declared metadata artifact only")
+            cfg = consumer.get("Configuration") or {}
+            if cfg.get("TemplateConfiguration") != f"{artifact}::agent-parameters.json" or not str(cfg.get("TemplatePath", "")).startswith(f"BuildOutput::cdk.out/assembly-{cap}/{cap}Agent"):
+                return fail("only agent-parameters.json is metadata; the template must remain in immutable BuildOutput")
+            try:
+                overrides = json.loads(cfg.get("ParameterOverrides", "{}"))
+            except (TypeError, json.JSONDecodeError):
+                return fail("identity overrides must be valid JSON")
+            if overrides != {"ImageUri": "#{BuildVariables.IMAGE_URI}", "ReleaseId": "#{BuildVariables.RELEASE_ID}"} or len(cfg["ParameterOverrides"].encode()) > 1024:
+                return fail("only immutable Build-stage image/release identity overrides are permitted")
+            if int(producer.get("RunOrder", 1)) >= int(consumer.get("RunOrder", 1)):
+                return fail("Resolve must complete before DeployAgent")
+            consumer["InputArtifacts"] = [a for a in consumer["InputArtifacts"] if a.get("Name") != artifact]
     return projected, []
 
 

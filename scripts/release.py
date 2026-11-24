@@ -337,6 +337,13 @@ def bedrock_grant(cfg: Mapping[str, Any], bedrock: Any, *, region: str) -> list[
     kind = expl.get("provider", "fixture")
     if kind == "fixture":
         return []
+    if kind == "openai":
+        if kind not in (cfg.get("provider_kind_allowed") or []):
+            raise ManifestError(f"provider {kind!r} is not allowed in {cfg.get('environment')}")
+        model = str(expl.get("model_id") or "")
+        if not model.startswith("gpt-") or ":" in model or "/" in model:
+            raise ManifestError("openai requires a GPT API model ID")
+        return []  # OpenAI API credentials, never an unrelated Bedrock model grant.
     if kind != "bedrock":
         raise ManifestError(f"explanation provider {kind!r} is not allowed (bedrock or fixture)")
     if kind not in (cfg.get("provider_kind_allowed") or []):
@@ -520,7 +527,17 @@ def publish_release(
     if missing:
         raise ManifestError(f"the {env} deploy did not produce the outputs {missing}")
     cfg = load_env_config(env, root)
-    plan = planned_parameters(env, info, outputs, cfg, targets=targets, existing_guards=_get(ssm, _name(env, "config", "explanation-guards")))
+    # Stage new provider rates separately so the currently serving provider is
+    # never repriced with another model's rates before this release is published.
+    guards_key = "openai-explanation-guards" if (cfg.get("explanation") or {}).get("provider") == "openai" else "explanation-guards"
+    existing_guards = _get(ssm, _name(env, "config", guards_key))
+    if guards_key == "openai-explanation-guards" and not existing_guards:
+        raise ManifestError("OpenAI rates/guards must be staged for this environment before publishing")
+    if guards_key == "openai-explanation-guards":
+        from finplan_agent.config.provider import build_provider_config
+
+        build_provider_config(env, "openai", cfg["explanation"]["model_id"], json.loads(explanation_guards(cfg, existing_guards)), allowed_kinds=cfg.get("provider_kind_allowed"))
+    plan = planned_parameters(env, info, outputs, cfg, targets=targets, existing_guards=existing_guards)
     for _key, (name, value) in sorted(plan.items()):
         _put(ssm, env, name, value)
     pointer = _name(env, "release", "current-release-id")

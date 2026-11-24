@@ -11,11 +11,15 @@ from .fixture import FixtureProvider
 __all__ = ["ExplanationProvider", "FixtureProvider", "GenerateRequest", "GenerateResult", "ToolCall", "ToolSpec", "Usage", "make_provider"]
 
 
-def make_provider(config: ProviderConfig, *, bedrock_client: Any = None) -> ExplanationProvider:
+def make_provider(config: ProviderConfig, *, bedrock_client: Any = None, openai_secret_reader: Any = None, openai_transport: Any = None, openai_env: Any = None) -> ExplanationProvider:
     """The provider for a validated configuration. ``bedrock_client`` defaults to a regional
     ``bedrock-runtime`` client on the default credential chain (the Runtime role; no secret)."""
     if config.kind == "fixture":
         return FixtureProvider()
+    if config.kind == "openai":
+        from .openai_responses import OpenAIResponsesProvider
+
+        return OpenAIResponsesProvider(config, secret_reader=openai_secret_reader, transport=openai_transport, env=openai_env)
     if config.kind == "bedrock":
         from .bedrock import BedrockProvider
 

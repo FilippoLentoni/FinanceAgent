@@ -9,14 +9,15 @@ exact match of an entry below (row, resource type, logical role) and the CDK hel
 policies) of such a resource. Anything else - another type, another role, another repository's row -
 fails the build as before. Remove an entry as soon as the pinned contracts list the type.
 
-FA-GAP-RESOLVE-METADATA (pipeline structure, not an ownership exception): the beta
+FA-GAP-RESOLVE-METADATA (pipeline structure, not an ownership exception): each stage
 Resolve action carries generated JSON CloudFormation parameters in a separate
 artifact because CodePipeline limits ParameterOverrides to 1KB. The validator in
-scripts/infra_gates.py admits only the named beta producer/consumer and JSON path,
+scripts/infra_gates.py admits only the named same-stage producer/consumer and JSON path,
 keeps executable templates in BuildOutput and image/release identity in immutable
 Build variables, and runs the unchanged generic contract checker after removing
 only that validated metadata input. Stage generation accepts only declared CFN
-parameter keys. Gamma/prod roles and artifact wiring are unchanged.
+parameter keys. Each resolver can write only its own metadata artifact prefix;
+production retains its existing manual approval gate.
 """
 
 from __future__ import annotations

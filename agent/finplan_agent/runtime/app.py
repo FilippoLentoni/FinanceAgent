@@ -38,11 +38,14 @@ def create_app(service: Any = None) -> Any:
     from .service import AgentService
 
     svc = service if service is not None else AgentService.from_environment()
+    from .audit import AuditedService, Publisher
+
+    audited = AuditedService(svc, Publisher())
     app = BedrockAgentCoreApp()
 
     @app.entrypoint
     def invoke(payload: Any, context: RequestContext) -> Any:
-        return svc.handle(payload, context.request_headers or {}, context.session_id)
+        return audited.handle(payload, context.request_headers or {}, context.session_id)
 
     app.state.agent_service = svc
     return app

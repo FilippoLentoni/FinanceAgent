@@ -27,7 +27,7 @@ def test_valid_bedrock_config_and_describe():
     assert d["model_id"] == MID["prod_profile"] and d["rates_retrieved_at"] == "2026-10-08" and "input_per_1k_usd" not in json.dumps(d)
 
 
-@pytest.mark.parametrize("kind", ["openai", "qwen", "", None, "Bedrock", "sagemaker"])
+@pytest.mark.parametrize("kind", ["unknown-provider", "qwen", "", None, "Bedrock", "sagemaker"])
 def test_unknown_provider_kinds_rejected(kind):
     with pytest.raises(ProviderConfigError) as e:
         build_provider_config("gamma", kind, MID["prod_profile"], GUARDS)

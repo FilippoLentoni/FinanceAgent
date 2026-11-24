@@ -81,7 +81,7 @@ def test_configuration_gate(tmp_path):
     beta["explanation"]["rates"] = {"input_per_1k_usd": 1}
     (root / "config" / "beta.json").write_text(json.dumps(beta))
     probs = " ".join(bst.config_problems(root))
-    assert "must be fixture or bedrock" in probs and "no rates" in probs
+    assert "must be fixture, bedrock or openai" in probs and "no rates" in probs
 
 
 # ------------------------------------------------------------------ bootstrap

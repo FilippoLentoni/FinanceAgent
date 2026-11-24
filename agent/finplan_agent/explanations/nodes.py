@@ -337,6 +337,9 @@ def explain_narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[s
         result, updates = _invoke_provider(state, ctx, request, stream_tokens=False)
         text = result.text
     except AgentError as exc:
+        from ..graph.nodes import _failure_usage
+
+        updates.update(_failure_usage(exc))
         status = "budget_exceeded" if exc.code == "BUDGET_EXCEEDED" else "unavailable"
         d = exc.details
         if status == "budget_exceeded":
@@ -344,6 +347,8 @@ def explain_narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[s
             message = f"Narration was not run: the remaining {d.get('budget_category', 'bedrock_explanations')} budget ({remaining} USD) cannot cover the estimate ({d.get('estimated_usd_upper_bound')} USD). The evidence is complete."
         else:
             message = f"Narration was not run: the explanation provider is unavailable ({exc.code}). The evidence is complete."
+        if exc.details.get("usage_known"):
+            message = "Narration did not complete; the provider-reported usage was charged to the session budget. The evidence is complete."
         updates["error"] = state.get("error") or exc.to_envelope(_cid(state))
     claim = None
     citations: list[str] = []

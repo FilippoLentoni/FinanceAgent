@@ -140,6 +140,7 @@ class AgentService:
         from ..skills import load_skills
         skills, skill_instructions = load_skills()
         import os
+
         from ..brokerage.gateway import BrokerageGatewayReader
         brokerage_url=os.environ.get("FINPLAN_BROKERAGE_GATEWAY_URL")
         deps = Deps(
@@ -220,6 +221,7 @@ class AgentService:
                 log.warning("usage metric emission failed")
 
         from ..tools.recording import ToolCallRecorder
+        from .audit import wrap_provider, wrap_tools
 
         raw_tools = self.deps.tool_client_factory(caller)
         # Every tool call of this request is followed by a durable tool_call activity event written
@@ -228,13 +230,15 @@ class AgentService:
         brokerage = self.deps.brokerage_client_factory(caller) if self.deps.brokerage_client_factory else None
         if recorder is not None and brokerage is not None and hasattr(getattr(brokerage, "client", None), "call_tool"):
             brokerage.client = recorder.wrap(brokerage.client, gateway="brokerage")
+        if brokerage is not None and hasattr(getattr(brokerage, "client", None), "call_tool"):
+            brokerage.client = wrap_tools(brokerage.client)
         return AgentContext(
             environment=self.deps.settings.environment,
             release_id=self.deps.settings.release_id,
-            provider=self.deps.provider,
+            provider=wrap_provider(self.deps.provider),
             provider_config=self.deps.provider_config,
             guard=self.guard,
-            tools=recorder.wrap(raw_tools, gateway="primary") if recorder is not None else raw_tools,
+            tools=wrap_tools(recorder.wrap(raw_tools, gateway="primary") if recorder is not None else raw_tools),
             tool_recorder=recorder,
             catalog=self.catalog(),
             session_id=session_id,
@@ -348,6 +352,7 @@ class AgentService:
             context = self._context(caller, session_id, cid, synthetic=capture is not None or "ci_test" in caller.roles)
             if capture is not None:
                 import hashlib
+
                 from ..modeling.capture import canonical
                 raw_tools = context.tool_recorder.sink if context.tool_recorder is not None else context.tools
 

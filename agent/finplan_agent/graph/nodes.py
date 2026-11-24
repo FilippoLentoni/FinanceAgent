@@ -25,7 +25,7 @@ from langgraph.types import interrupt
 from .. import GRAPH_VERSION
 from ..core.errors import AgentError
 from ..core.ids import idempotency_key
-from ..providers.base import GenerateRequest, GenerateResult, ToolCall, ToolSpec, Usage, text_of
+from ..providers.base import GenerateRequest, GenerateResult, PaidResponseError, ToolCall, ToolSpec, Usage, text_of
 from ..providers.fixture import FixtureProvider
 from ..skills import provider_tool_specs
 from ..tools.portfolio import CLASSICAL_TOOLS, LIFECYCLE_TOOLS, PPO_TOOL, RECOMMENDATION_TOOLS
@@ -107,7 +107,19 @@ def _invoke_provider(state: AgentState, ctx: AgentContext, request: GenerateRequ
             correlation_id=state.get("correlation_id", ""),
         )
     on_token = (lambda t: _emit({"type": "token", "text": t})) if stream_tokens else None
-    result = ctx.provider.generate(request, on_token=on_token)
+    try:
+        result = ctx.provider.generate(request, on_token=on_token)
+    except PaidResponseError as exc:
+        exc.accounting_updates = _account_provider(state, ctx, exc.accounting)
+        raise
+    return result, _account_provider(state, ctx, result)
+
+
+def _failure_usage(error: AgentError) -> dict[str, Any]:
+    return error.accounting_updates if isinstance(error, PaidResponseError) else {}
+
+
+def _account_provider(state: AgentState, ctx: AgentContext, result: GenerateResult) -> dict[str, Any]:
     rec = result.usage_record()
     if ctx.on_spend is not None and result.estimated_cost_usd:
         ctx.on_spend(result.estimated_cost_usd)
@@ -118,7 +130,7 @@ def _invoke_provider(state: AgentState, ctx: AgentContext, request: GenerateRequ
         "session_spent_usd": round(float(state.get("session_spent_usd", 0.0)) + result.estimated_cost_usd, 8),
         "turn_usage": _usage_add(state.get("turn_usage") or {}, rec),
     }
-    return result, updates
+    return updates
 
 
 # ============================================================================ nodes
@@ -233,6 +245,7 @@ def plan(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]:
         except AgentError as exc:
             if exc.code != "BUDGET_EXCEEDED" and exc.code != "DEPENDENCY_UNAVAILABLE" and exc.code != "RATE_LIMITED":
                 raise
+            updates.update(_failure_usage(exc))
             # Degrade to the deterministic planner: tool-only answer, no model call.
             # A draft from an earlier model round of this turn is not evidence; drop it with the model.
             updates.update(error=_err(exc, state), degraded="tool_only", draft_text="")
@@ -460,7 +473,8 @@ def _narrate_selection(state: AgentState, ctx: AgentContext, selection: dict[str
         try:
             result, updates = _invoke_provider(state, ctx, request, stream_tokens=False)
             draft = result.text
-        except AgentError:
+        except AgentError as exc:
+            updates.update(_failure_usage(exc))
             draft = ""
     from .experiment_evidence import comparison_cells
     commentary, _dropped = qualitative_commentary(draft, comparison_cells(selection))
@@ -529,13 +543,14 @@ def narrate(state: AgentState, runtime: Runtime[AgentContext]) -> dict[str, Any]
     try:
         result, updates = _invoke_provider(state, ctx, request, stream_tokens=True)
     except AgentError as exc:
+        updates = _failure_usage(exc)
         status = "budget_exceeded" if exc.code == "BUDGET_EXCEEDED" else "unavailable"
         fallback = _deterministic_evidence_text(state)
         if fallback:
             # Tool evidence (including tool errors) is always reported, even without a model narrative.
             _emit({"type": "token", "text": fallback})
-            return {"narrative": fallback, "narrative_status": status, "error": state.get("error") or _err(exc, state)}
-        return {"narrative": "", "narrative_status": status, "error": state.get("error") or _err(exc, state)}
+            return {**updates, "narrative": fallback, "narrative_status": status, "error": state.get("error") or _err(exc, state)}
+        return {**updates, "narrative": "", "narrative_status": status, "error": state.get("error") or _err(exc, state)}
     if not (result.text or "").strip():
         fallback = _deterministic_evidence_text(state)
         if fallback:

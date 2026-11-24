@@ -3,6 +3,7 @@ FA-PRV-01 fixture in beta). Run by the stage runner with ``FINPLAN_TARGET_ENV``;
 
 from __future__ import annotations
 
+from finplan_agent.config.settings import load_repo_config
 from finplan_agent.core.ids import new_session_id
 from tests.deployed import deployed, requires_deployed
 
@@ -14,8 +15,10 @@ def test_describe_reports_langgraph_release_and_provider():
     status, doc = env.invoke_agent({"action": "describe"}, new_session_id())
     assert status == 200 and doc["framework"] == "langgraph" and doc["environment"] == env.env
     assert doc["release_id"].startswith("rel_") and doc["contract_version"].startswith("1.")
-    if env.env == "beta":
-        assert doc["provider"]["kind"] == "bedrock"
+    expected = load_repo_config(env.env)["explanation"]
+    assert doc["provider"]["kind"] == expected["provider"]
+    if expected["provider"] != "fixture":
+        assert doc["provider"]["model_id"] == expected["model_id"]
     assert doc["streaming"]["websocket"] is False
 
 
