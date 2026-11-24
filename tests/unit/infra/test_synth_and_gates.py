@@ -269,7 +269,7 @@ def test_runtime_contract_wiring(templates):
     rt = next(iter(resources(t, "AWS::BedrockAgentCore::Runtime").values()))["Properties"]
     assert rt["NetworkConfiguration"] == {"NetworkMode": "PUBLIC"} and rt["ProtocolConfiguration"] == "HTTP"
     assert rt["RequestHeaderConfiguration"]["RequestHeaderAllowlist"] == ["Authorization"]
-    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL", "FINPLAN_BROKERAGE_GATEWAY_URL"}
+    assert set(rt["EnvironmentVariables"]) == {"FINPLAN_ENV", "FINPLAN_RELEASE_ID", "FINPLAN_MEMORY_ID", "FINPLAN_GATEWAY_URL", "FINPLAN_CLASSICAL_GATEWAY_URL", "FINPLAN_BROKERAGE_GATEWAY_URL", "FINPLAN_JUDGE_ENABLED", "FINPLAN_JUDGE_QUEUE_URL", "FINPLAN_RUNTIME_ARN", "FINPLAN_LANGFUSE_SECRET_ARN", "FINPLAN_JUDGE_OUTBOX_BUCKET"}
     assert rt["AgentRuntimeName"] == "finplan_beta_financeagent"
     pat = t["Parameters"]["ImageUri"]["AllowedPattern"]
     good = FAKE_ACCOUNT + ".dkr.ecr.us-east-2.amazonaws.com/finplan-shared-financeagent-runtime-images@sha256:" + "a" * 64

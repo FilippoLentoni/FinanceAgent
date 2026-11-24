@@ -264,6 +264,10 @@ class AgentStack(EnvStack):
         )
         bedrock_policy.cfn_options.condition = has_bedrock
 
+        from .completion_audit import completion_audit_environment
+
+        audit_environment = completion_audit_environment(self, env, cfg, self.runtime_role)
+
         # ------------------------------------------------------------- runtime
         life = agentcore.CfnRuntime.LifecycleConfigurationProperty(idle_runtime_session_timeout=int(session.get("idle_runtime_session_timeout_seconds", 900)), max_lifetime=int(session.get("max_lifetime_seconds", 28800)))
         self.runtime = agentcore.CfnRuntime(
@@ -281,6 +285,7 @@ class AgentStack(EnvStack):
             request_header_configuration=agentcore.CfnRuntime.RequestHeaderConfigurationProperty(request_header_allowlist=["Authorization"]),
             lifecycle_configuration=life,
             environment_variables={
+                **audit_environment,
                 "FINPLAN_ENV": env,
                 "FINPLAN_RELEASE_ID": self.release_id.value_as_string,
                 "FINPLAN_MEMORY_ID": self.memory.attr_memory_id,
